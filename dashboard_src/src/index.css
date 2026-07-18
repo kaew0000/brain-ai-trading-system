@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html { font-size: 14px; }
+  body { @apply bg-surface text-text-primary font-mono; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; overscroll-behavior: none; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { @apply bg-surface-1; }
+  ::-webkit-scrollbar-thumb { @apply bg-border-bright rounded; }
+}
+@layer components {
+  .panel { @apply bg-surface-1 border border-border rounded-lg overflow-hidden; }
+  .panel-header { @apply flex items-center justify-between px-3 py-2 bg-surface-2 border-b border-border; }
+  .panel-title { @apply text-xs font-mono font-bold tracking-widest text-text-secondary uppercase; }
+  .stat-value { @apply text-2xl font-mono font-bold tabular-nums; }
+  .stat-label { @apply text-xs text-text-muted uppercase tracking-wider; }
+  .badge { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium; }
+  .badge-green { @apply badge bg-accent-green/20 text-accent-green border border-accent-green/30; }
+  .badge-red   { @apply badge bg-accent-red/20   text-accent-red   border border-accent-red/30; }
+  .badge-gold  { @apply badge bg-accent-gold/20  text-accent-gold  border border-accent-gold/30; }
+  .badge-blue  { @apply badge bg-accent-blue/20  text-accent-blue  border border-accent-blue/30; }
+  .badge-gray  { @apply badge bg-surface-3       text-text-muted   border border-border; }
+  .dot { @apply w-2 h-2 rounded-full; }
+  .dot-green { @apply dot bg-accent-green shadow-[0_0_6px_rgba(16,185,129,0.8)]; }
+  .dot-red   { @apply dot bg-accent-red   shadow-[0_0_6px_rgba(239,68,68,0.8)]; }
+  .dot-gold  { @apply dot bg-accent-gold  shadow-[0_0_6px_rgba(251,191,36,0.8)]; }
+  .dot-gray  { @apply dot bg-text-muted; }
+  .nav-item { @apply flex items-center gap-2.5 px-3 py-2 rounded text-xs font-mono text-text-secondary transition-all cursor-pointer; }
+  .nav-item:hover { @apply bg-surface-2 text-text-primary; }
+  .nav-item.active { @apply bg-surface-2 text-accent-blue border-l-2 border-accent-blue pl-2.5; }
+  .terminal-line { @apply text-xs font-mono leading-5; }
+}
+@layer utilities {
+  /* FIX BUG-BLINK-06: smooth confidence bar without flash */
+  .conf-bar-transition { transition: width 0.5s ease-out; }
+  /* FIX BUG-BLINK-08: ป้องกัน sub-pixel repaint บน stat-value */
+  .stat-value { contain: content; }
+}

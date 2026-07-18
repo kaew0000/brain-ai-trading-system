@@ -1,0 +1,35 @@
+[Unit]
+Description=Brain Bot V13 — AI Trading Command Center
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=notify (was: simple) — main.py now calls sd_notify("READY=1") once
+# startup finishes and sd_notify("WATCHDOG=1") periodically via
+# system_health/watchdog.py:WatchdogSupervisor (started only after the
+# first synchronous job pass, so a cold start is never mistaken for a
+# hang). WatchdogSec= is systemd's own independent layer underneath that
+# supervisor: if the process is genuinely stuck badly enough that even the
+# supervisor's own thread can't get scheduled, systemd kills and restarts
+# it. Set well above the supervisor's 5s poll interval (see
+# WatchdogSupervisor poll_interval_s) so normal jitter never trips it.
+Type=notify
+WatchdogSec=30
+User=botuser
+WorkingDirectory=/opt/brain_bot_btcusdt
+EnvironmentFile=/opt/brain_bot_btcusdt/.env
+Environment=EXECUTION_MODE=paper
+ExecStart=/opt/brain_bot_btcusdt/venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/brain_bot/stdout.log
+StandardError=append:/var/log/brain_bot/stderr.log
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/brain_bot_btcusdt /var/log/brain_bot
+
+[Install]
+WantedBy=multi-user.target

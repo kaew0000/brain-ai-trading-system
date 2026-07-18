@@ -1,0 +1,74 @@
+"""
+ranking/ranking_models.py — V16 Phase 2 Part 2: Opportunity Ranking Engine
+
+Data models only — no scoring logic here (see score_breakdown.py /
+confidence_fusion.py), no Binance/network access, no persistence.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from typing import Dict, Optional
+
+
+class ScoreStatus(str, Enum):
+    """
+    Whether a factor score reflects a real computation from available
+    data, or a placeholder because the required input isn't available
+    from the scanner cache. UNAVAILABLE is a first-class, visible state —
+    never silently defaulted to a number that looks like a real score.
+    """
+    COMPUTED     = "computed"
+    UNAVAILABLE  = "unavailable"
+
+
+@dataclass
+class FactorScore:
+    """One scored factor (e.g. 'trend', 'funding') for one symbol."""
+    name:        str
+    score:       float          # 0-100, higher = more favorable
+    status:      ScoreStatus
+    explanation: str
+    raw_value:   Optional[float] = None   # the underlying metric, if any (e.g. atr_pct)
+    weight:      float = 0.0              # weight actually applied during fusion
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d["status"] = self.status.value
+        return d
+
+
+@dataclass
+class ScoreBreakdown:
+    """All factor scores for one symbol, keyed by factor name."""
+    symbol:  str
+    factors: Dict[str, FactorScore] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "symbol": self.symbol,
+            "factors": {k: v.to_dict() for k, v in self.factors.items()},
+        }
+
+
+@dataclass
+class RankedOpportunity:
+    """One row of the final Top-N ranked output."""
+    rank:          int
+    symbol:        str
+    composite_score: float        # 0-100
+    breakdown:     ScoreBreakdown
+    explanation:   str            # human-readable one-liner summarizing why it ranked here
+    ranked_at:     float          # unix epoch
+    data_age_s:    float          # how stale the underlying scanner snapshot was, seconds
+
+    def to_dict(self) -> dict:
+        return {
+            "rank":             self.rank,
+            "symbol":           self.symbol,
+            "composite_score":  self.composite_score,
+            "breakdown":        self.breakdown.to_dict(),
+            "explanation":      self.explanation,
+            "ranked_at":        self.ranked_at,
+            "data_age_s":       self.data_age_s,
+        }

@@ -1,0 +1,17 @@
+All Rights Reserved (placeholder — please replace)
+
+Copyright (c) 2026 [your name/organization]
+
+This repository was not given an explicit license by its author, and it
+contains a live trading system with financial and API-key handling
+logic, so a permissive open-source license was NOT assumed by default.
+
+All rights are reserved unless and until you choose otherwise. No
+permission is granted to copy, modify, merge, publish, distribute,
+sublicense, or sell copies of this software.
+
+--------------------------------------------------------------------
+If you intend to open-source this project, replace this file with the
+license text of your choice (MIT, Apache-2.0, GPL-3.0, etc.) before
+pushing to a public GitHub repository — happy to generate the exact
+text for whichever license you pick.

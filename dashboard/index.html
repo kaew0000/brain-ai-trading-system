@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Brain Bot V13 — AI Trading Command Center</title>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.5.0/Recharts.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#070714;overflow-x:hidden;font-family:monospace}
+  ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:#0c0c22}::-webkit-scrollbar-thumb{background:#2a2a5a}
+  #root{min-height:100vh}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  #crt::after{content:"";position:fixed;top:0;left:0;width:100%;height:100%;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.04) 2px,rgba(0,0,0,.04) 4px);
+    pointer-events:none;z-index:9999}
+</style>
+</head>
+<body id="crt">
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// Defensive guard: if a CDN script failed to load (network hiccup, ad-blocker,
+// offline cache, etc.) Recharts may be undefined even with the correct script
+// tags in place. Destructuring from undefined would throw immediately and
+// blank the entire dashboard. Fall back to no-op stub components instead —
+// charts simply won't render, but the rest of the UI (Office, Command Center,
+// agent panels, tables) keeps working.
+const _RechartsReady = typeof Recharts !== "undefined";
+if (!_RechartsReady) {
+  console.error(
+    "[BrainBotV13] Recharts failed to load — charts will be disabled. " +
+    "Check your network connection or ad-blocker; the equity-curve chart " +
+    "needs cdnjs.cloudflare.com/ajax/libs/recharts to be reachable."
+  );
+}
+const _NoChart = () => null;
+const {
+  AreaChart = _NoChart,
+  Area = _NoChart,
+  ResponsiveContainer = ({children}) => children || null,
+  Tooltip = _NoChart,
+  YAxis = _NoChart,
+} = _RechartsReady ? Recharts : {};
+
+/* ── Palette ── */
+const C = {
+  bg:"#070714",floor:"#0c0c22",panel:"#10102a",border:"#1e1e44",border2:"#2a2a5a",
+  ceo:"#ffd700",smc:"#00ff88",futures:"#00bfff",risk:"#ff6b35",trader:"#c084fc",journal:"#f59e0b",
+  win:"#00ff88",loss:"#ff4444",wait:"#888899",text:"#d0d0f0",dim:"#505070",
+};
+const AGENTS = {
+  ceo:    {label:"CEO BRAIN",    role:"Decision Engine",      color:C.ceo},
+  smc:    {label:"SMC ANALYST",  role:"Smart Money Concepts", color:C.smc},
+  futures:{label:"FUTURES DESK", role:"OI & Funding",         color:C.futures},
+  risk:   {label:"RISK MGR",     role:"Risk Control",         color:C.risk},
+  trader: {label:"TRADER",       role:"Execution",            color:C.trader},
+  journal:{label:"JOURNAL",      role:"Performance",          color:C.journal},
+};
+const AGENT_MAP = {
+  "CONFIDENCE_ENGINE":"ceo","BRAIN_BOT":"ceo","CEO_AGENT":"ceo",
+  "SMC_ANALYST":"smc",
+  "FUTURES_ANALYST":"futures","VOLUME_ANALYST":"futures",
+  "RISK_MANAGER":"risk","RISK_MANAGER_AGENT":"risk",
+  "TRADER":"trader","TRADER_AGENT":"trader",
+  "JOURNAL_ANALYST":"journal",
+};
+const MODE_META = {
+  paper:  {color:"#ffaa00",label:"📄 PAPER",  bg:"#1a1000"},
+  testnet:{color:"#00bfff",label:"🧪 TESTNET",bg:"#001020"},
+  live:   {color:"#ff4444",label:"🔴 LIVE",   bg:"#1a0000"},
+};
+const QUICK_Q = {
+  ceo:    ["Why LONG?","Why SHORT?","Why WAIT?","Confidence breakdown?"],
+  smc:    ["Where is FVG?","BOS detected?","Where is liquidity?","MTF aligned?"],
+  futures:["Funding rate?","OI trend?","Liquidation risk?","L/S ratio?"],
+  risk:   ["Can I trade?","Daily loss?","Consecutive losses?","Risk per trade?"],
+  trader: ["Entry price?","Stop loss?","Take profit?","Current PnL?"],
+  journal:["Win rate?","Profit factor?","Today PnL?","Max drawdown?"],
+};
+
+/* ── Helpers ── */
+const pad  = n => String(n).padStart(2,"0");
+const tsNow= () => { const n=new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`; };
+const fmtN = (v,d=2) => (typeof v==="number"&&!isNaN(v))?v.toFixed(d):"—";
+const fmtPct=(v) => (typeof v==="number"&&!isNaN(v))?`${(v*100).toFixed(4)}%`:"—";
+
+/* ── Pixel NPC ── */
+function PixelChar({color,size=32,active=false,walking=false}){
+  const [blink,setBlink]=useState(true);
+  useEffect(()=>{const t=setInterval(()=>{setBlink(false);setTimeout(()=>setBlink(true),120)},2800+Math.random()*1200);return()=>clearInterval(t)},[]);
+  const sk="#e8c49a",dk="#050510",ox=walking?(Math.random()>.5?1:-1):0;
+  return(
+    <svg viewBox="0 0 8 14" width={size} height={size*1.75} style={{imageRendering:"pixelated",display:"block",transform:`translateX(${ox}px)`,transition:"transform .15s",filter:active?`drop-shadow(0 0 5px ${color})`:"none"}}>
+      <rect x="2" y="0" width="4" height="1" fill={color}/>
+      <rect x="1" y="1" width="6" height="5" fill={sk}/>
+      {blink?<><rect x="2" y="3" width="1" height="1" fill={dk}/><rect x="5" y="3" width="1" height="1" fill={dk}/></>
+            :<><rect x="2" y="3" width="1" height="1" fill={sk}/><rect x="5" y="3" width="1" height="1" fill={sk}/></>}
+      <rect x="3" y="5" width="2" height="1" fill={dk} opacity=".5"/>
+      <rect x="3" y="6" width="2" height="1" fill={color} opacity=".9"/>
+      <rect x="1" y="7" width="6" height="4" fill={color} opacity=".8"/>
+      <rect x="0" y="7" width="1" height="3" fill={color} opacity=".6"/>
+      <rect x="7" y="7" width="1" height="3" fill={color} opacity=".6"/>
+      <rect x="0" y="10" width="1" height="1" fill={sk}/><rect x="7" y="10" width="1" height="1" fill={sk}/>
+      <rect x="2" y="11" width="2" height="3" fill={color} opacity=".55"/>
+      <rect x="5" y="11" width="2" height="3" fill={color} opacity=".55"/>
+      <rect x="1" y="13" width="3" height="1" fill={dk} opacity=".8"/>
+      <rect x="4" y="13" width="3" height="1" fill={dk} opacity=".8"/>
+    </svg>
+  );
+}
+
+/* ── Speech bubble ── */
+function Bubble({text,color,show}){
+  return(
+    <div style={{position:"absolute",bottom:"100%",left:"50%",transform:`translateX(-50%) translateY(${show?0:6}px)`,marginBottom:6,transition:"opacity .3s,transform .3s",opacity:show?1:0,pointerEvents:"none",zIndex:20}}>
+      <div style={{background:C.panel,border:`2px solid ${color}`,padding:"3px 8px",fontSize:9,color,whiteSpace:"nowrap",maxWidth:200,letterSpacing:.5,lineHeight:1.5,boxShadow:`0 0 8px ${color}44`}}>{text}</div>
+      <div style={{display:"flex",justifyContent:"center"}}><div style={{width:0,height:0,borderLeft:"5px solid transparent",borderRight:"5px solid transparent",borderTop:`6px solid ${color}`}}/></div>
+    </div>
+  );
+}
+
+/* ── Pill ── */
+function Pill({text,color,glow}){
+  return <span style={{fontSize:9,fontWeight:"bold",color,border:`1px solid ${color}`,padding:"1px 5px",letterSpacing:1,boxShadow:glow?`0 0 6px ${color}`:"none",display:"inline-block"}}>{text}</span>;
+}
+
+/* ── Sig dot ── */
+function Sig({label,active,color}){
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
+      <div style={{width:8,height:8,background:active?color:C.border2,border:`1px solid ${active?color:C.border}`,boxShadow:active?`0 0 4px ${color}`:"none",transition:"all .3s"}}/>
+      <span style={{fontSize:9,color:active?color:C.dim,letterSpacing:.5}}>{label}</span>
+    </div>
+  );
+}
+
+/* ── Score bar ── */
+function ScoreBar({value,max,color}){
+  return(
+    <div style={{display:"flex",gap:2,alignItems:"center",marginTop:2}}>
+      {Array.from({length:max},(_,i)=>(
+        <div key={i} style={{width:10,height:10,background:i<value?color:C.border2,border:`1px solid ${i<value?color:C.border}`,transition:"background .4s",boxShadow:i<value?`0 0 4px ${color}44`:"none"}}/>
+      ))}
+      <span style={{fontSize:9,color:C.dim,marginLeft:4}}>{value}/{max}</span>
+    </div>
+  );
+}
+
+/* ── Mode badge ── */
+function ModeBadge({connected,mode,driftMs}){
+  const m=MODE_META[mode]||MODE_META.paper;
+  const driftBad=Math.abs(driftMs||0)>800;
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:5}}>
+        <div style={{width:7,height:7,borderRadius:"50%",background:connected?"#00ff88":"#ff4444",animation:connected?"pulse 2s infinite":"none",boxShadow:connected?"0 0 6px #00ff88":"0 0 6px #ff4444"}}/>
+        <span style={{fontSize:8,color:connected?"#00ff88":"#ff4444",letterSpacing:1}}>{connected?"LIVE":"OFFLINE"}</span>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:5,background:m.bg,border:`1px solid ${m.color}`,padding:"2px 8px",boxShadow:`0 0 8px ${m.color}44`}}>
+        <div style={{width:7,height:7,background:m.color,animation:"pulse 2s infinite",boxShadow:`0 0 6px ${m.color}`}}/>
+        <span style={{fontSize:9,color:m.color,letterSpacing:1,fontWeight:"bold"}}>{m.label}</span>
+      </div>
+      {driftBad&&<span style={{fontSize:8,color:C.risk,border:`1px solid ${C.risk}`,padding:"1px 5px",animation:"pulse 1.5s infinite"}}>⚠ CLOCK {driftMs>0?"+":""}{driftMs}ms</span>}
+    </div>
+  );
+}
+
+/* ══ CHAT PANEL ══════════════════════════════════════════════════════════════ */
+function ChatPanel({agentKey,onClose}){
+  const {color,label} = AGENTS[agentKey];
+  const [msgs, setMsgs] = useState([
+    {role:"agent",text:`${label} online. Ask me anything about the market.`}
+  ]);
+  const [input, setInput] = useState("");
+  const [loading,setLoading] = useState(false);
+  const endRef = useRef(null);
+
+  useEffect(()=>{ endRef.current?.scrollIntoView({behavior:"smooth"}) },[msgs]);
+
+  const send = async (question) => {
+    const q = (question || input).trim();
+    if(!q) return;
+    setInput("");
+    setMsgs(p=>[...p,{role:"user",text:q}]);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({agent:agentKey,question:q}),
+      });
+      const data = await res.json();
+      const answer = data?.data?.answer || "No response from agent.";
+      const sig    = data?.data?.signal || "";
+      setMsgs(p=>[...p,{role:"agent",text:answer,signal:sig}]);
+    } catch(e) {
+      setMsgs(p=>[...p,{role:"agent",text:"Connection error — is the bot running?",error:true}]);
+    } finally { setLoading(false); }
+  };
+
+  return(
+    <div style={{position:"fixed",bottom:20,right:20,width:380,background:C.panel,border:`2px solid ${color}`,boxShadow:`0 0 24px ${color}44`,zIndex:1000,display:"flex",flexDirection:"column",maxHeight:520,animation:"slideUp .25s ease"}}>
+      {/* Header */}
+      <div style={{background:C.border,borderBottom:`1px solid ${color}44`,padding:"6px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <PixelChar color={color} size={20} active/>
+          <span style={{fontSize:10,color,letterSpacing:1,fontWeight:"bold"}}>{label}</span>
+          <span style={{fontSize:8,color:C.dim}}>— LIVE CHAT</span>
+        </div>
+        <button onClick={onClose} style={{background:"none",border:`1px solid ${C.border2}`,color:C.dim,cursor:"pointer",padding:"2px 8px",fontSize:10}}>✕</button>
+      </div>
+
+      {/* Quick questions */}
+      <div style={{padding:"6px 10px",display:"flex",flexWrap:"wrap",gap:4,borderBottom:`1px solid ${C.border}`}}>
+        {(QUICK_Q[agentKey]||[]).map(q=>(
+          <button key={q} onClick={()=>send(q)} style={{background:C.floor,border:`1px solid ${color}44`,color,fontSize:8,padding:"2px 6px",cursor:"pointer",letterSpacing:.3,transition:"all .15s"}}
+            onMouseEnter={e=>e.target.style.background=color+"22"} onMouseLeave={e=>e.target.style.background=C.floor}>{q}</button>
+        ))}
+      </div>
+
+      {/* Messages */}
+      <div style={{flex:1,overflowY:"auto",padding:"10px 12px",display:"flex",flexDirection:"column",gap:8}}>
+        {msgs.map((m,i)=>(
+          <div key={i} style={{display:"flex",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start",animation:"fadeIn .2s ease"}}>
+            <div style={{
+              maxWidth:"85%",padding:"6px 10px",fontSize:10,lineHeight:1.5,letterSpacing:.3,
+              background:m.role==="user"?color+"22":m.error?C.loss+"22":C.floor,
+              border:`1px solid ${m.role==="user"?color:m.error?C.loss:C.border2}`,
+              color:m.error?C.loss:C.text,
+            }}>{m.text}</div>
+            {m.signal&&m.signal!=="NEUTRAL"&&(
+              <div style={{marginTop:2}}><Pill text={m.signal} color={m.signal==="LONG"?C.win:C.loss}/></div>
+            )}
+          </div>
+        ))}
+        {loading&&<div style={{fontSize:10,color:C.dim,animation:"pulse 1s infinite"}}>▌ {label} is thinking…</div>}
+        <div ref={endRef}/>
+      </div>
+
+      {/* Input */}
+      <div style={{borderTop:`1px solid ${C.border}`,padding:"8px 10px",display:"flex",gap:6}}>
+        <input
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&send()}
+          placeholder="Ask the agent…"
+          style={{flex:1,background:C.floor,border:`1px solid ${C.border2}`,color:C.text,padding:"4px 8px",fontSize:10,outline:"none",letterSpacing:.3}}
+        />
+        <button onClick={()=>send()} disabled={loading||!input.trim()}
+          style={{background:color+"22",border:`1px solid ${color}`,color,fontSize:10,padding:"4px 10px",cursor:"pointer",letterSpacing:.5}}>
+          ASK
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══ DETAIL PANEL ════════════════════════════════════════════════════════════ */
+function DetailPanel({agent,agentReport,state,onClose,onChat}){
+  const {color,label,role}=AGENTS[agent];
+  const factors = agentReport?.factors || [];
+  const raw     = agentReport?.raw || {};
+
+  return(
+    <div style={{background:C.panel,border:`2px solid ${color}`,padding:14,boxShadow:`0 0 20px ${color}33`,animation:"fadeIn .2s ease"}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+        <div>
+          <span style={{fontSize:12,color,fontWeight:"bold",letterSpacing:2}}>{label}</span>
+          <span style={{fontSize:9,color:C.dim,marginLeft:8}}>{role}</span>
+          {agentReport&&<span style={{fontSize:9,color,marginLeft:10,border:`1px solid ${color}`,padding:"0 4px"}}>{agentReport.signal} {agentReport.confidence?.toFixed(0)}%</span>}
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={onChat} style={{background:color+"22",border:`1px solid ${color}`,color,fontFamily:"monospace",cursor:"pointer",padding:"2px 10px",fontSize:10}}>💬 CHAT</button>
+          <button onClick={onClose} style={{background:"none",border:`1px solid ${C.border2}`,color:C.dim,fontFamily:"monospace",cursor:"pointer",padding:"2px 8px",fontSize:10}}>✕</button>
+        </div>
+      </div>
+
+      {/* Agent summary */}
+      {agentReport?.summary&&(
+        <div style={{background:C.floor,border:`1px solid ${color}44`,padding:"6px 10px",fontSize:9,color:C.text,marginBottom:10,letterSpacing:.3}}>{agentReport.summary}</div>
+      )}
+
+      {/* Factors grid */}
+      {factors.length>0&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6}}>
+          {factors.map((f,i)=>{
+            const vc=f.verdict==="SUPPORTS"?C.win:f.verdict==="OPPOSES"?C.loss:C.dim;
+            return(
+              <div key={i} style={{background:C.floor,border:`1px solid ${C.border}`,padding:"6px 10px"}}>
+                <div style={{fontSize:8,color:C.dim,marginBottom:2,letterSpacing:.5}}>{f.name}</div>
+                <div style={{fontSize:12,fontWeight:"bold",color,marginBottom:2}}>{f.value}</div>
+                <div style={{fontSize:8,color:vc,marginBottom:2}}>{f.verdict}</div>
+                <div style={{fontSize:8,color:C.dim,letterSpacing:.3}}>{f.detail}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══ DEPT CARD ═══════════════════════════════════════════════════════════════ */
+function DeptCard({agentKey,bubble,onClick,active,children}){
+  const {color,label,role}=AGENTS[agentKey];
+  const [walk,setWalk]=useState(false);
+  useEffect(()=>{const t=setInterval(()=>{setWalk(true);setTimeout(()=>setWalk(false),280)},4000+Math.random()*2000);return()=>clearInterval(t)},[]);
+  return(
+    <div onClick={onClick} style={{background:C.panel,border:`2px solid ${active?color:C.border}`,cursor:"pointer",position:"relative",transition:"border-color .2s",boxShadow:active?`0 0 16px ${color}44,inset 0 0 20px ${color}08`:"none"}}>
+      <div style={{background:C.border,borderBottom:`1px solid ${color}44`,padding:"3px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:9,color,letterSpacing:1,fontWeight:"bold"}}>{label}</span>
+        <span style={{fontSize:7,color:C.dim}}>{active?"▼ INSPECT":"💬 CLICK"}</span>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"8px 8px 0",position:"relative"}}>
+        <Bubble text={bubble} color={color} show={!!bubble}/>
+        <PixelChar color={color} size={32} active={!!bubble} walking={walk}/>
+        <div style={{marginTop:4,width:"100%"}}>
+          <div style={{height:7,background:color,opacity:.2,border:`1px solid ${color}`,marginBottom:1}}/>
+          <div style={{height:12,background:C.border,border:`1px solid ${color}44`,display:"flex",alignItems:"center",paddingLeft:6,gap:3}}>
+            <div style={{width:18,height:9,background:color,opacity:.15,border:`1px solid ${color}66`}}/>
+            <div style={{width:11,height:7,background:color,opacity:.1, border:`1px solid ${color}44`}}/>
+          </div>
+        </div>
+      </div>
+      <div style={{padding:"6px 10px 10px"}}>
+        <div style={{fontSize:8,color:C.dim,letterSpacing:.5,marginBottom:4}}>{role}</div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ══ MAIN APP ════════════════════════════════════════════════════════════════ */
+function App(){
+  const [connected,  setConnected]  = useState(false);
+  const [mode,       setMode]       = useState("paper");
+  const [driftMs,    setDriftMs]    = useState(0);
+  const [selected,   setSelected]   = useState(null);   // inspected agent
+  const [chatAgent,  setChatAgent]  = useState(null);   // chat open for agent
+  const [agentData,  setAgentData]  = useState({});     // latest agent reports from /api/agents
+  const [bubbles,    setBubbles]    = useState({ceo:"",smc:"",futures:"",risk:"",trader:"",journal:""});
+  const [events,     setEvents]     = useState([{ts:"--:--:--",agent:"SYSTEM",text:"Connecting…",color:C.dim}]);
+  const [state, setState] = useState({
+    btc:67234.56, change:0.42,
+    action:"WAIT", score:4, confidence:44, regime:"TREND",
+    bos:false, choch:false, fvg:false, ob:false, mtf:false,
+    funding:0.0001, oi:0.015, ls:1.24, takerSide:"BALANCED",
+    drawdown:0.0, canTrade:true, consec:0, dailyPnl:0.0,
+    position:null,
+    breakdown:{smc:0,volume:0,oi:0,funding:0,regime:0},
+    equity:Array.from({length:20},(_,i)=>({t:i,v:10000+i*3+Math.random()*6})),
+    perf:{total:0,wr:0,pf:0,expectancy:0},
+  });
+
+  const wsRef  = useRef(null);
+  const liveWS = useRef(false);
+
+  /* ── WebSocket ── */
+  const connectWS = useCallback(()=>{
+    if(wsRef.current) wsRef.current.close();
+    const proto = location.protocol==="https:"?"wss":"ws";
+    const ws    = new WebSocket(`${proto}://${location.host}/ws/events`);
+    ws.onopen  = ()=>{ setConnected(true); addEvent("SYSTEM","CONNECTED","WebSocket live",C.smc); };
+    ws.onmessage=(e)=>{
+      try{
+        const msg=JSON.parse(e.data);
+        liveWS.current=true;
+        if(msg.type==="init"&&Array.isArray(msg.events)) msg.events.slice().reverse().forEach(ingestEvent);
+        else if(msg.type==="event"&&msg.data) ingestEvent(msg.data);
+      }catch(_){}
+    };
+    ws.onclose = ()=>{ setConnected(false); setTimeout(connectWS,3000); };
+    ws.onerror = ()=>{ ws.close(); };
+    wsRef.current=ws;
+  },[]);
+
+  /* ── REST polling ── */
+  const pollREST = useCallback(async()=>{
+    try{
+      // health
+      const h=await fetch("/api/health").then(r=>r.json());
+      if(h?.data?.mode)          setMode(h.data.mode);
+      if(h?.data?.time_drift_ms!=null) setDriftMs(h.data.time_drift_ms);
+    }catch(_){}
+
+    try{
+      // decision
+      const d=await fetch("/api/decision").then(r=>r.json());
+      const dec=d?.data?.decision||d?.data?.signal;
+      if(dec){
+        const bd=dec.breakdown||dec.confidence_breakdown||{};
+        setState(prev=>({...prev,
+          action:    dec.action||"WAIT",
+          score:     dec.raw_score??dec.score??prev.score,
+          confidence:Math.round(dec.confidence||0),
+          regime:    dec.regime||prev.regime,
+          mtf:       !!dec.mtf_aligned,
+          breakdown: {smc:bd.smc||0,volume:bd.volume||0,oi:bd.oi||0,funding:bd.funding||0,regime:bd.regime||0},
+        }));
+      }
+    }catch(_){}
+
+    try{
+      // agent layer — drives NPC speech from real data
+      const a=await fetch("/api/agents").then(r=>r.json());
+      if(a?.data?.agents){
+        setAgentData(a.data.agents);
+        // Push agent summaries to NPC speech bubbles
+        const ags=a.data.agents;
+        for(const [key,apiKey] of [["smc","smc"],["futures","futures"],["regime","regime"],["risk","risk"],["trader","trader"],["journal","journal"]]){
+          const rep=ags[apiKey];
+          if(rep?.summary){
+            pushBubble(key, rep.summary.slice(0,60));
+          }
+        }
+        // CEO
+        const ceo=a.data.ceo_decision;
+        if(ceo?.action&&ceo.action!=="WAIT"){
+          pushBubble("ceo",`${ceo.action} | ${Math.round(ceo.confidence||0)}%`);
+          setState(prev=>({...prev,action:ceo.action,confidence:Math.round(ceo.confidence||0)}));
+        }
+      }
+    }catch(_){}
+
+    try{
+      // futures — OI / funding
+      const f=await fetch("/api/futures").then(r=>r.json());
+      const snap=f?.data?.snapshot;
+      if(snap) setState(prev=>({...prev,funding:snap.funding_rate||prev.funding,oi:snap.oi_delta||prev.oi,ls:snap.ls_ratio||prev.ls}));
+    }catch(_){}
+
+    try{
+      // paper metrics
+      const p=await fetch("/api/paper").then(r=>r.json());
+      const m=p?.data?.metrics?.account||{};
+      const pos=p?.data?.open_positions?.[0];
+      if(p?.data?.enabled!==false){
+        setState(prev=>({...prev,
+          dailyPnl: m.day_pnl||0,
+          drawdown: Math.abs(m.day_pnl_pct||0)*100,
+          canTrade: !m.trading_halted,
+          position: pos?{dir:pos.direction,entry:pos.entry_price,qty:pos.quantity,pnl:pos.unrealised_pnl,sl:pos.stop_loss,tp:pos.take_profit}:prev.position,
+        }));
+      }
+    }catch(_){}
+
+    try{
+      // forward test
+      const ft=await fetch("/api/forward_test").then(r=>r.json());
+      const r=ft?.data?.report;
+      if(r) setState(prev=>({...prev,perf:{total:r.total_trades,wr:r.win_rate,pf:r.profit_factor,expectancy:r.expectancy}}));
+    }catch(_){}
+
+    try{
+      // SMC signals for NPC
+      const s=await fetch("/api/signals").then(r=>r.json());
+      const rf=s?.data?.raw_features||{};
+      const m15=rf.smc_m15||{};
+      setState(prev=>({...prev,
+        bos:!!m15.bos, choch:!!m15.choch, fvg:!!m15.fvg, ob:!!m15.ob,
+        mtf:!!rf.mtf_aligned,
+      }));
+    }catch(_){}
+  },[]);
+
+  /* ── Ingest WS event ── */
+  function ingestEvent(ev){
+    if(!ev) return;
+    const ak=AGENT_MAP[ev.agent]||"ceo";
+    const color=AGENTS[ak]?.color||C.dim;
+    if(ev.message) pushBubble(ak, ev.message.slice(0,60));
+    addEvent(ak.toUpperCase(), ev.event||"MSG", ev.message||"", color);
+  }
+
+  function pushBubble(ak,text){
+    if(!text) return;
+    setBubbles(p=>({...p,[ak]:text}));
+    setTimeout(()=>setBubbles(p=>({...p,[ak]:""})), 4000);
+  }
+  function addEvent(agent,event,text,color){
+    setEvents(p=>[{ts:tsNow(),agent,text:`${event}: ${text}`,color},...p.slice(0,99)]);
+  }
+
+  /* ── Price tick ── */
+  useEffect(()=>{
+    const iv=setInterval(()=>{
+      setState(prev=>{
+        const d=(Math.random()-.48)*14;
+        const btc=Math.max(50000,prev.btc+d);
+        const pnl=prev.position?((btc-prev.position.entry)*prev.position.qty*(prev.position.dir==="LONG"?1:-1)):0;
+        const eq=[...prev.equity.slice(-19),{t:prev.equity.length,v:Math.max(9000,prev.equity[prev.equity.length-1].v+(Math.random()-.42)*3)}];
+        return{...prev,btc,change:parseFloat(d.toFixed(2)),position:prev.position?{...prev.position,pnl}:null,equity:eq};
+      });
+    },1000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  /* ── Bootstrap ── */
+  useEffect(()=>{
+    connectWS();
+    pollREST();
+    const pid=setInterval(pollREST,5000);
+    return()=>{ if(wsRef.current) wsRef.current.close(); clearInterval(pid); };
+  },[]);
+
+  /* ── Derived ── */
+  const ac=state.action==="LONG"?C.win:state.action==="SHORT"?C.loss:C.wait;
+  const toggle=id=>{ setSelected(p=>p===id?null:id); setChatAgent(null); };
+
+  return(
+    <div style={{background:C.bg,minHeight:"100vh",padding:14,color:C.text,maxWidth:1400,margin:"0 auto"}}>
+
+      {/* ── Top bar ── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${C.border2}`,paddingBottom:10,marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:12,letterSpacing:3,color:C.ceo,fontWeight:"bold"}}>◈ BRAIN BOT V13</span>
+          <span style={{fontSize:8,color:C.dim,letterSpacing:2}}>AI TRADING COMMAND CENTER</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:20}}>
+          <span style={{fontSize:14,fontWeight:"bold",color:state.change>=0?C.win:C.loss}}>
+            BTC ${state.btc.toFixed(2)}<span style={{fontSize:9,marginLeft:6}}>{state.change>=0?"▲":"▼"} ${Math.abs(state.change).toFixed(2)}</span>
+          </span>
+          <ModeBadge connected={connected} mode={mode} driftMs={driftMs}/>
+        </div>
+      </div>
+
+      {/* ── Score strip ── */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,marginBottom:12,border:`1px solid ${C.border}`}}>
+        {[["SMC",state.breakdown.smc||0,30,C.smc],["VOLUME",state.breakdown.volume||0,20,C.futures],["OI",state.breakdown.oi||0,20,C.futures],["FUNDING",state.breakdown.funding||0,10,C.risk],["REGIME",state.breakdown.regime||0,20,C.ceo]].map(([l,v,m,col])=>(
+          <div key={l} style={{background:C.floor,padding:"4px 8px",borderRight:`1px solid ${C.border}`}}>
+            <div style={{fontSize:7,color:C.dim,letterSpacing:.5,marginBottom:4}}>{l} {v}/{m}</div>
+            <div style={{height:6,background:C.border2,position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",left:0,top:0,height:"100%",width:`${(v/m)*100}%`,background:col,boxShadow:`0 0 6px ${col}`,transition:"width .6s ease"}}/>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Agent grid ── */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8,marginBottom:8}}>
+
+        <DeptCard agentKey="ceo" bubble={bubbles.ceo} onClick={()=>toggle("ceo")} active={selected==="ceo"}>
+          <div style={{marginBottom:6}}><Pill text={state.action||"WAIT"} color={ac} glow/></div>
+          <ScoreBar value={state.score} max={9} color={C.ceo}/>
+          <div style={{marginTop:4,fontSize:9,color:C.dim}}>conf: <span style={{color:C.ceo}}>{fmtN(state.confidence,0)}%</span></div>
+          <div style={{fontSize:9,color:C.dim}}>regime: <span style={{color:C.ceo}}>{state.regime}</span></div>
+        </DeptCard>
+
+        <DeptCard agentKey="smc" bubble={bubbles.smc} onClick={()=>toggle("smc")} active={selected==="smc"}>
+          <Sig label="BOS"   active={state.bos}   color={C.smc}/>
+          <Sig label="CHoCH" active={state.choch} color={C.smc}/>
+          <Sig label="FVG"   active={state.fvg}   color={C.smc}/>
+          <Sig label="OB"    active={state.ob}    color={C.smc}/>
+          <Sig label="MTF"   active={state.mtf}   color={C.smc}/>
+        </DeptCard>
+
+        <DeptCard agentKey="futures" bubble={bubbles.futures} onClick={()=>toggle("futures")} active={selected==="futures"}>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>funding <span style={{color:Math.abs(state.funding||0)>.0005?C.loss:C.win}}>{fmtPct(state.funding)}</span></div>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>OI Δ <span style={{color:(state.oi||0)>0?C.win:C.loss}}>{(state.oi||0)>0?"+":""}{fmtN((state.oi||0)*100,2)}%</span></div>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>L/S <span style={{color:C.futures}}>{fmtN(state.ls,2)}</span></div>
+          <Pill text={Math.abs(state.funding||0)>.0005?"BLOCKED":"CLEAR"} color={Math.abs(state.funding||0)>.0005?C.loss:C.win}/>
+        </DeptCard>
+
+        <DeptCard agentKey="risk" bubble={bubbles.risk} onClick={()=>toggle("risk")} active={selected==="risk"}>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>drawdown <span style={{color:(state.drawdown||0)>4?C.loss:C.risk}}>{fmtN(state.drawdown,2)}%</span></div>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>consec <span style={{color:C.risk}}>{state.consec||0}</span></div>
+          <div style={{fontSize:9,color:C.dim,marginBottom:5}}>pnl <span style={{color:(state.dailyPnl||0)>=0?C.win:C.loss}}>{(state.dailyPnl||0)>=0?"+":""}{fmtN(state.dailyPnl,2)} U</span></div>
+          <Pill text={state.canTrade?"✓ APPROVED":"✗ BLOCKED"} color={state.canTrade?C.win:C.loss} glow={state.canTrade}/>
+        </DeptCard>
+
+        <DeptCard agentKey="trader" bubble={bubbles.trader} onClick={()=>toggle("trader")} active={selected==="trader"}>
+          {state.position?<>
+            <Pill text={state.position.dir} color={state.position.dir==="LONG"?C.win:C.loss} glow/>
+            <div style={{marginTop:5,fontSize:9,color:C.dim}}>qty <span style={{color:C.trader}}>{fmtN(state.position.qty,4)} BTC</span></div>
+            <div style={{fontSize:9,color:C.dim}}>entry <span style={{color:C.trader}}>${fmtN(state.position.entry,2)}</span></div>
+            <div style={{fontSize:9,marginTop:2,color:(state.position.pnl||0)>=0?C.win:C.loss}}>{(state.position.pnl||0)>=0?"+":""}{fmtN(state.position.pnl,2)} U</div>
+          </>:<div style={{fontSize:9,color:C.dim,marginTop:8,textAlign:"center"}}>NO POSITION</div>}
+        </DeptCard>
+
+        <DeptCard agentKey="journal" bubble={bubbles.journal} onClick={()=>toggle("journal")} active={selected==="journal"}>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>trades <span style={{color:C.journal}}>{state.perf.total||0}</span></div>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>WR <span style={{color:(state.perf.wr||0)>50?C.win:C.loss}}>{fmtN(state.perf.wr,1)}%</span></div>
+          <div style={{fontSize:9,color:C.dim,marginBottom:3}}>PF <span style={{color:(state.perf.pf||0)>1?C.win:C.loss}}>{fmtN(state.perf.pf,2)}</span></div>
+          <div style={{fontSize:9,color:C.dim}}>E[x] <span style={{color:(state.perf.expectancy||0)>=0?C.win:C.loss}}>{fmtN(state.perf.expectancy,2)}</span></div>
+        </DeptCard>
+
+      </div>
+
+      {/* ── Detail panel (inspect) ── */}
+      {selected&&(
+        <div style={{marginBottom:8,animation:"fadeIn .2s ease"}}>
+          <DetailPanel
+            agent={selected}
+            agentReport={agentData[selected]}
+            state={state}
+            onClose={()=>setSelected(null)}
+            onChat={()=>{ setChatAgent(selected); setSelected(null); }}
+          />
+        </div>
+      )}
+
+      {/* ── Bottom: equity + events ── */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:8}}>
+        <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:10}}>
+          <div style={{fontSize:9,color:C.dim,letterSpacing:1,marginBottom:8}}>EQUITY CURVE</div>
+          <ResponsiveContainer width="100%" height={90}>
+            <AreaChart data={state.equity}>
+              <defs><linearGradient id="eq" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.smc} stopOpacity={0.3}/><stop offset="95%" stopColor={C.smc} stopOpacity={0}/></linearGradient></defs>
+              <YAxis domain={["auto","auto"]} hide/>
+              <Tooltip contentStyle={{background:C.floor,border:`1px solid ${C.border2}`,fontSize:9,fontFamily:"monospace"}} labelStyle={{display:"none"}} formatter={v=>[`$${v.toFixed(2)}`]}/>
+              <Area type="monotone" dataKey="v" stroke={C.smc} fill="url(#eq)" dot={false} strokeWidth={1.5}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:10,overflow:"hidden"}}>
+          <div style={{fontSize:9,color:C.dim,letterSpacing:1,marginBottom:6}}>AGENT EVENTS <span style={{color:C.dim,fontSize:8}}>(click desk → 💬 to chat)</span></div>
+          <div style={{overflow:"auto",maxHeight:110}}>
+            {events.map((ev,i)=>(
+              <div key={i} style={{display:"flex",gap:6,alignItems:"baseline",marginBottom:3,opacity:Math.max(.2,1-i*.035),animation:i===0?"fadeIn .3s ease":undefined}}>
+                <span style={{fontSize:8,color:C.dim,minWidth:52,flexShrink:0}}>{ev.ts}</span>
+                <span style={{fontSize:8,color:ev.color,minWidth:64,fontWeight:"bold",flexShrink:0}}>{ev.agent}</span>
+                <span style={{fontSize:9,color:C.text,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{ev.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Footer ── */}
+      <div style={{marginTop:10,display:"flex",justifyContent:"space-between",fontSize:8,color:C.dim,borderTop:`1px solid ${C.border}`,paddingTop:6}}>
+        <span>BTCUSDT · V13 · 5× · click desk → INSPECT · 💬 CHAT</span>
+        <span>{connected?`◉ LIVE — ${location.host}`:"◌ OFFLINE — start Brain Bot V13"}</span>
+      </div>
+
+      {/* ── Chat panel ── */}
+      {chatAgent&&<ChatPanel agentKey={chatAgent} onClose={()=>setChatAgent(null)}/>}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
