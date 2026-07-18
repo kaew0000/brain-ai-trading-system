@@ -111,6 +111,7 @@ class OpportunityRanker:
                     explanation=explanation,
                     ranked_at=now,
                     data_age_s=max(0.0, now - snap.scanned_at),
+                    coverage=coverage,
                 )
             )
 
