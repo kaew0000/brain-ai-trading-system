@@ -1,6 +1,7 @@
 """research/feature_store.py — Phase 3B: CRUD against feature_rows table"""
 from __future__ import annotations
-import json, sqlite3
+import json
+import sqlite3
 from datetime import datetime, timezone
 from typing import List, Optional
 from database.db import ManagedConn, get_db_path

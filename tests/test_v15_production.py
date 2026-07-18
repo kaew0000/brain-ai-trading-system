@@ -15,11 +15,9 @@ All tests use in-memory SQLite (:memory:) or mocks — no real network calls.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 import time
-from datetime import datetime, timezone
 from typing import List
 from unittest.mock import MagicMock, patch
 
@@ -47,7 +45,8 @@ class TestDatabaseLayer:
     def test_wal_mode_enabled(self):
         """BUG-V15-DB-01: WAL journal mode must be set on new file connections."""
         from database.db import _new_file_conn
-        import tempfile, os
+        import tempfile
+        import os
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             path = f.name
         try:
@@ -61,7 +60,8 @@ class TestDatabaseLayer:
     def test_busy_timeout_set(self):
         """BUG-V15-DB-03: busy_timeout must be configured to avoid instant lock failures."""
         from database.db import _new_file_conn
-        import tempfile, os
+        import tempfile
+        import os
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             path = f.name
         try:
@@ -75,7 +75,8 @@ class TestDatabaseLayer:
     def test_managed_conn_write_serialization(self):
         """BUG-V15-DB-02: Concurrent writes must be serialised without corruption."""
         from database.db import ManagedConn, _get_write_lock
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
@@ -127,7 +128,8 @@ class TestDatabaseLayer:
     def test_schema_not_applied_twice(self):
         """BUG-V15-DB-04: Schema must only be applied once per path."""
         from database.db import ManagedConn, _initialized_paths
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             path = f.name
@@ -511,7 +513,8 @@ class TestLongRunBehavior:
     def test_db_write_lock_no_deadlock_under_load(self):
         """30 concurrent threads writing to the same DB must all complete."""
         from database.db import ManagedConn, _initialized_paths
-        import tempfile, os
+        import tempfile
+        import os
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
@@ -545,7 +548,7 @@ class TestLongRunBehavior:
 
     def test_circuit_breaker_recovers_after_outage(self):
         """Simulate API outage → breaker opens → API recovers → breaker closes."""
-        from system_health.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+        from system_health.circuit_breaker import CircuitBreaker
 
         cb = CircuitBreaker(
             "outage_recovery_test",
@@ -756,7 +759,6 @@ class TestRecoveryEngine:
 
     def test_attempt_log_bounded(self):
         from system_health.recovery_engine import RecoveryEngine
-        import time as _t
         engine = RecoveryEngine()
         # Inject more than 200 log entries directly
         for i in range(250):

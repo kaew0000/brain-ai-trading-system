@@ -8,9 +8,9 @@ Thread-safe; all state lives in memory — no DB dependency.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from config.settings import settings
 from utils.logger import get_logger

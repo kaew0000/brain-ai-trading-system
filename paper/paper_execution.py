@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import math
 import threading
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from config.settings import settings

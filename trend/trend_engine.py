@@ -42,7 +42,7 @@ GET /api/regime  (market_context_builder includes TrendResult)
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Optional
 
 import numpy as np

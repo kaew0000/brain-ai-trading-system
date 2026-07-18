@@ -1,7 +1,5 @@
 """Unit tests for Data Layer (no live API calls)."""
 import pytest
-import pandas as pd
-import numpy as np
 
 pytestmark = pytest.mark.unit
 

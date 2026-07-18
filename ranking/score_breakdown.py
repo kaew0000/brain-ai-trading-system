@@ -24,7 +24,7 @@ see score_trend's docstring.
 from __future__ import annotations
 
 import bisect
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from config.settings import settings
 from ranking.ranking_models import FactorScore, ScoreBreakdown, ScoreStatus

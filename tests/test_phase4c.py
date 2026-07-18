@@ -11,11 +11,7 @@ api/app.py                  — all REST endpoints + WebSocket (httpx async clie
 
 from __future__ import annotations
 
-import asyncio
-import json
-import math
-from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -728,7 +724,6 @@ class TestWebSockets:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        from fastapi.testclient import TestClient
         from api.app import app, set_state
         from events.event_bus import reset_event_bus
         reset_event_bus(journal=None, persist=False)

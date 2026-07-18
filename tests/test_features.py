@@ -95,7 +95,7 @@ class TestVolumeEngine:
         assert sig.volume_ratio >= 0
 
     def test_to_dict_keys(self, ohlcv_200):
-        from features.volume_engine import VolumeEngine, VolumeSignals
+        from features.volume_engine import VolumeEngine
         sig = VolumeEngine().analyze(ohlcv_200)
         d   = sig.to_dict()
         for key in ("volume_spike", "obv_direction", "divergence",

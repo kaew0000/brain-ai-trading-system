@@ -1,7 +1,6 @@
 """ml/predictor.py — Phase 3C: run-time inference (never places orders)"""
 from __future__ import annotations
 import numpy as np
-from typing import Optional
 from utils.logger import get_logger
 logger = get_logger(__name__)
 

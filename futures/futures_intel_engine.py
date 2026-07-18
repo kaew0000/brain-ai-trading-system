@@ -46,7 +46,6 @@ API surface: GET /api/funding  (includes funding + oi + l/s + taker subkeys)
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional
 
 from utils.logger import get_logger
 

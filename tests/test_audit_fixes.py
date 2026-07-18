@@ -850,7 +850,6 @@ class TestAgentLayerRunsWhilePositionOpen:
         from decision.causal_explainer import CausalExplainer
         from journal.journal_v2 import TradeJournalV2
         from risk.risk_engine import RiskEngine
-        from execution.trade_manager import TradeManager
 
         jrn_v2 = TradeJournalV2(db_path=":memory:")
         agent_layer = build_agent_layer(risk_engine=RiskEngine(jrn_v2), journal=jrn_v2)

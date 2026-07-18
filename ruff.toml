@@ -1,0 +1,14 @@
+line-length = 120
+
+[lint]
+ignore = [
+    "E701",
+    "E702",
+    "E402",
+    "F841",
+]
+
+exclude = [
+    "dashboard",
+    "dashboard_src",
+]

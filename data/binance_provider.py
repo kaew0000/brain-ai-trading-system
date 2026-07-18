@@ -32,7 +32,6 @@ from __future__ import annotations
 import time
 import types
 import pandas as pd
-import numpy as np
 from typing import Optional
 
 from binance.um_futures import UMFutures

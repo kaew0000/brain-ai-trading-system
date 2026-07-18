@@ -51,7 +51,6 @@ from events.event_bus import (
     EventBus, reset_event_bus,
     brain_pub, conf_pub, risk_pub, regime_pub,
 )
-from execution.trade_manager import TradeManager
 from execution.execution_factory import build_execution_engine
 from analytics.trade_journal import TradeJournal, TradeRecord
 from journal.journal_v2 import TradeJournalV2

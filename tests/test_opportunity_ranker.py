@@ -173,7 +173,6 @@ class TestConfidenceFusion:
         assert "BTCUSDT" in explanation
 
     def test_uses_settings_weights_by_default(self):
-        from config.settings import settings
         stats = sb.compute_universe_stats([_snap()])
         breakdown = sb.score_symbol(_snap(), stats)
         composite, coverage, _ = fuse(breakdown)  # no weights arg -> settings.RANKER_FACTOR_WEIGHTS

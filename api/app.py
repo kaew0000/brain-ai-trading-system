@@ -68,7 +68,6 @@ from system_health.watchdog import get_watchdog
 from system_health.reconciliation import get_reconciliation_engine
 from system_health.recovery_engine import get_recovery_engine
 from utils.logger import get_logger
-from system_health.circuit_breaker import all_snapshots as _cb_snapshots
 
 logger = get_logger("api.app")
 

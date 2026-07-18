@@ -1,10 +1,7 @@
 """Unit tests for Execution, Risk, and Analytics layers."""
 import pytest
-import os
-import tempfile
-import numpy as np
 import pandas as pd
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 pytestmark = pytest.mark.unit
 
@@ -47,20 +44,17 @@ class TestTradeManager:
         assert TradeManager is not None
 
     def test_round_qty_floor(self):
-        from execution.trade_manager import TradeManager
         m, _ = self._make_manager()
         # 0.1234 → floor to 0.001 step → 0.123
         qty = m._round_qty(0.1234)
         assert abs(qty - 0.123) < 1e-9
 
     def test_round_qty_min(self):
-        from execution.trade_manager import TradeManager
         m, _ = self._make_manager()
         qty = m._round_qty(0.0001)
         assert qty == 0.001  # never below minQty
 
     def test_position_size_calculation(self):
-        from execution.trade_manager import TradeManager
         m, _ = self._make_manager()
         # risk = 1000 * 0.01 = 10 USDT
         # sl_dist = 50_500 - 50_000 = 500
@@ -77,7 +71,6 @@ class TestTradeManager:
 
     def test_position_size_no_cap_when_small(self):
         """When risk-based qty is under the margin cap, it should not be reduced."""
-        from execution.trade_manager import TradeManager
         m, _ = self._make_manager()
         # risk = 5000 * 0.01 = 50 USDT, sl_dist = 5000
         # raw qty = 50/5000 = 0.01 BTC
@@ -92,13 +85,11 @@ class TestTradeManager:
         assert qty == pytest.approx(0.01, abs=1e-6)
 
     def test_position_size_zero_sl_distance(self):
-        from execution.trade_manager import TradeManager
         m, _ = self._make_manager()
         qty = m.calculate_position_size(1_000.0, 50_000.0, 50_000.0)
         assert qty == 0.001  # minimum
 
     def test_place_market_order_buy(self):
-        from execution.trade_manager import TradeManager
         m, client = self._make_manager()
         client.new_order.return_value = {"orderId": 123, "status": "FILLED"}
         with patch("execution.trade_manager.settings") as ms:
@@ -111,7 +102,6 @@ class TestTradeManager:
         assert call_kwargs["type"] == "MARKET"
 
     def test_place_market_order_sell(self):
-        from execution.trade_manager import TradeManager
         m, client = self._make_manager()
         client.new_order.return_value = {"orderId": 456, "status": "FILLED"}
         with patch("execution.trade_manager.settings") as ms:
@@ -122,7 +112,6 @@ class TestTradeManager:
         assert call_kwargs["side"] == "SELL"
 
     def test_round_price_precision(self):
-        from execution.trade_manager import TradeManager
         m, _ = self._make_manager()
         price_str = m._round_price(50_123.456)
         # tickSize=0.10 → 1 decimal

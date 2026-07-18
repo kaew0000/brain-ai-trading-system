@@ -5,7 +5,9 @@ Phase 3A + 3B + 3C — complete test coverage.
 No mocks-only: all critical paths call real functions from main.py.
 """
 from __future__ import annotations
-import os, tempfile, pytest
+import os
+import tempfile
+import pytest
 from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
@@ -506,7 +508,7 @@ class TestCalibrator:
         assert 0.0 <= result <= 100.0
 
     def test_train_platt(self):
-        from ml.confidence_calibrator import train_calibrator, calibrate_confidence
+        from ml.confidence_calibrator import train_calibrator
         conf = list(np.linspace(10,90,40)); outcomes = [1 if c>50 else 0 for c in conf]
         cal = train_calibrator(conf, outcomes, method="platt")
         assert cal is not None

@@ -27,7 +27,8 @@ class TestExecutionFactory:
     def _factory(self, mode: str):
         os.environ["EXECUTION_MODE"] = mode
         # Reload module to pick up env change
-        import importlib, config.settings as s
+        import importlib
+        import config.settings as s
         s.EXECUTION_MODE = mode
         import execution.execution_factory as ef
         importlib.reload(ef)

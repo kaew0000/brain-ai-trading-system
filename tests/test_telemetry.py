@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import time
 import pytest
-from unittest.mock import MagicMock
 
 pytestmark = pytest.mark.unit
 
@@ -278,7 +277,7 @@ class TestBaseAgentTelemetry:
         """Telemetry must record ERROR status AND the original exception
         must still propagate unchanged — existing CEOAgent.decide() error
         handling contract must be preserved exactly."""
-        from agents.base_agent import BaseAgent, AgentReport
+        from agents.base_agent import BaseAgent
         from telemetry.agent_telemetry import get_telemetry_registry
 
         class BrokenAgent(BaseAgent):

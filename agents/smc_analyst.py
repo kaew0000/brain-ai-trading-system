@@ -214,7 +214,7 @@ class SMCAnalyst(BaseAgent):
     def _build_summary(self, signal, bos, bos_dir, choch, fvg, ob, mtf_aligned, mtf_dir) -> str:
         parts = []
         if bos:   parts.append(f"BOS {bos_dir}")
-        if choch: parts.append(f"CHoCH {choch_dir}" if (choch_dir := "") is None else f"CHoCH detected")
+        if choch: parts.append(f"CHoCH {choch_dir}" if (choch_dir := "") is None else "CHoCH detected")
         if fvg:   parts.append("FVG entry zone")
         if ob:    parts.append("Order Block present")
         if mtf_aligned: parts.append(f"MTF aligned {mtf_dir}")

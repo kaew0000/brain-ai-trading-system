@@ -36,7 +36,7 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
-from events.event_bus import get_event_bus, AgentPublisher
+from events.event_bus import AgentPublisher
 from telemetry.agent_telemetry import get_telemetry_registry
 from reasoning.reasoning_stream import get_reasoning_stream
 from utils.logger import get_logger

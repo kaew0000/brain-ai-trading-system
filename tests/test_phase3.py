@@ -13,7 +13,6 @@ Pytest coverage for Brain Bot V13 Phase 3 modules:
 
 from __future__ import annotations
 
-import math
 import threading
 import numpy as np
 import pandas as pd
@@ -226,7 +225,8 @@ class TestJournalV2:
         assert trades[0]["rr"] > 0
 
     def test_get_latest_signal_none_on_empty(self):
-        import tempfile, os
+        import tempfile
+        import os
         from journal.journal_v2 import TradeJournalV2
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
@@ -237,7 +237,8 @@ class TestJournalV2:
             os.unlink(db_path)
 
     def test_get_latest_regime_none_on_empty(self):
-        import tempfile, os
+        import tempfile
+        import os
         from journal.journal_v2 import TradeJournalV2
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
@@ -600,7 +601,7 @@ class TestConfidenceEngine:
         assert set(result.breakdown.keys()) == {"smc", "volume", "oi", "funding", "regime"}
 
     def test_custom_weights_normalised(self, engine):
-        from decision.confidence_engine import ConfidenceEngine, _normalise_weights
+        from decision.confidence_engine import _normalise_weights
         w = _normalise_weights({"smc": 50, "volume": 30, "oi": 10, "funding": 5, "regime": 5})
         assert abs(sum(w.values()) - 100.0) < 0.01
 
@@ -747,7 +748,7 @@ class TestEventBus:
 
     @pytest.fixture
     def bus(self):
-        from events.event_bus import EventBus, reset_event_bus
+        from events.event_bus import reset_event_bus
         # Use a fresh non-persistent bus for each test
         return reset_event_bus(journal=None, persist=False)
 
@@ -887,7 +888,8 @@ class TestEventBus:
         assert bus1 is bus2
 
     def test_event_bus_with_journal_persists(self):
-        import tempfile, os
+        import tempfile
+        import os
         from events.event_bus import EventBus
         from journal.journal_v2 import TradeJournalV2
         # Use a temp file db so each test gets a clean schema (not shared :memory:)
