@@ -61,6 +61,15 @@ class RankedOpportunity:
     explanation:   str            # human-readable one-liner summarizing why it ranked here
     ranked_at:     float          # unix epoch
     data_age_s:    float          # how stale the underlying scanner snapshot was, seconds
+    # V16 Phase 2A addition: previously computed by confidence_fusion.fuse()
+    # and only used inside its own explanation string, then discarded.
+    # portfolio/capital_manager.py needs it as real data (see its module
+    # docstring for why coverage replaces the brief's requested-but-
+    # UNAVAILABLE "AI Confidence" input) — additive field, defaults to 1.0
+    # so any existing RankedOpportunity(...) construction site that
+    # doesn't pass it is unaffected (1.0 = "assume full coverage", the
+    # same as omitting the concept entirely, which was the prior behavior).
+    coverage:      float = 1.0
 
     def to_dict(self) -> dict:
         return {
@@ -71,4 +80,5 @@ class RankedOpportunity:
             "explanation":      self.explanation,
             "ranked_at":        self.ranked_at,
             "data_age_s":       self.data_age_s,
+            "coverage":         self.coverage,
         }

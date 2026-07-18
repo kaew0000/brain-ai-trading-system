@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 2A: Portfolio Intelligence Core
+
+### Added
+- **Portfolio Intelligence Core** (`portfolio/`): `portfolio_models.py`
+  (dataclasses), `portfolio_state.py` (in-memory position/capital/risk
+  tracker, no exchange calls), `correlation_engine.py` (tier-based
+  correlation lookup against `config/correlation_table.py`),
+  `capital_manager.py` (`CapitalManager.decide()` — the decision engine:
+  ranked candidates + `RiskEngine` + `PortfolioState` → `PortfolioDecision`).
+  Decision-only — does not execute trades, place orders, or call Binance.
+  New `PORTFOLIO_*` settings (`config/settings.py`), all with defaults
+  matching `PortfolioLimits`' own dataclass defaults.
+- `RankedOpportunity.coverage` (`ranking/ranking_models.py`): additive
+  field, default `1.0`, backward compatible. Previously computed by
+  `confidence_fusion.fuse()` and discarded after use in a log string;
+  now stored and used by `capital_manager.py` in place of the
+  structurally-unavailable "AI Confidence" factor.
+- 81 new tests (`test_portfolio_models.py`, `test_portfolio_state.py`,
+  `test_correlation_engine.py`, `test_capital_manager.py`). Full suite:
+  1001 → 1082 passed, 0 failed.
+- `docs/architecture.md` §17 (design rationale) and §18 (next up).
+
+### Not included (see architecture.md §17/§18)
+- `portfolio/portfolio_manager.py` (orchestrator), Sector Engine, REST/
+  WebSocket/Dashboard, execution wiring, `RiskEngine` per-symbol/
+  aggregate exposure awareness. All explicitly out of scope for this
+  phase.
+
+---
+
 ## [V16.5] — Patch consolidation merge (this repository)
 
 Merged ten development-phase bundles into one tree. See

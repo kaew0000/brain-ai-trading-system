@@ -767,26 +767,155 @@ independently re-verified before this work started, + 37 new).
 
 ---
 
-## 16. Next up
+## 17. Portfolio Intelligence Core — V16 Phase 2A (2026-07-18)
 
-- **Confirm the resolution in §15** before Portfolio Manager gets built
-  on top of it — specifically whether excluding UNAVAILABLE factors from
-  the composite (vs. some other treatment) and the proxy definitions for
-  Trend/Momentum/Liquidity/Risk are acceptable as the interim signal.
-- **Portfolio Manager** (`portfolio/`) — consumes `OpportunityRanker`'s
-  top-N output; needs its own design pass for max concurrent positions,
-  capital allocation, risk budget, exposure control, cooldown, position
-  priority/replacement. Not started.
-- **Correlation Engine** — needs a decision on data source (price-history
-  correlation needs a return series per symbol pair; scanner cache is
-  single-point, same category of gap as §15's conflict). Not started.
-- **Capital Allocation Engine** — depends on Portfolio Manager's risk
-  budget model existing first. Not started.
-- **REST API / WebSocket / Dashboard pages** — deferred until there's a
-  Portfolio Manager to expose; building API surface for a ranking-only
-  system risks needing breaking changes once Portfolio Manager lands.
-- Everything carried over from the old §14: P1-C decision, per-symbol
-  health-check dashboard wiring, §13's "Deliberately not done" list,
-  reconciliation alert escalation (§6), `dashboard_api`/`websocket`
-  heartbeat gaps (§4).
+Addresses §16's first three open items (Portfolio Manager's decision
+layer, Correlation Engine, Capital Allocation Engine) — but as a pure
+decision engine only. Nothing here executes a trade, calls Binance, or
+runs on a schedule; `CapitalManager.decide()` takes a ranked candidate
+list + `RiskEngine` + `PortfolioState` + balance and returns a
+`PortfolioDecision`. Wiring that decision into actual execution is
+explicitly out of scope for this phase (see "Why execution is
+intentionally excluded" below).
+
+New: `portfolio/portfolio_models.py`, `portfolio_state.py`,
+`correlation_engine.py`, `capital_manager.py`; `config/correlation_table.py`.
+Additive: `ranking/ranking_models.py` (`RankedOpportunity.coverage`,
+default `1.0`), `config/settings.py` (`PORTFOLIO_*` fields).
+
+### Why "AI Confidence" isn't an allocation input, and coverage is
+
+The original brief for this phase asked for capital allocation weighted
+by AI Confidence and Historical Win Rate. Both map directly to
+`ranking/score_breakdown.py` factors that are **always**
+`ScoreStatus.UNAVAILABLE` — a constant `50.0` placeholder, deliberately
+excluded from the Ranker's own composite score (§15) specifically to
+avoid the per-symbol Binance calls the two-tier scanner design (§13)
+exists to avoid. Using that constant as a real allocation input would be
+identical for every candidate — not neutral, actively misleading, since
+it would present the allocation as AI-informed when it structurally
+isn't.
+
+`RankedOpportunity.coverage` (computed all along by
+`confidence_fusion.fuse()`, previously only used inside its own log
+string and discarded — now stored) is used instead. It's real,
+per-symbol-varying data: it's the fraction of the composite's intended
+weight that was backed by a `COMPUTED` factor this cycle, which varies
+with e.g. whether a symbol got a detail pass for OI/ATR data this cycle
+(§15's "top-N by volume" detail-pass limit). It answers an honest,
+related question — "how much of this composite_score can we actually
+trust" — rather than fabricating a confidence signal that doesn't exist.
+Historical Win Rate can become real once multi-symbol trading produces
+enough per-symbol trade history to compute it from; not fabricated now.
+
+### Why correlation is tier-based, not Pearson
+
+No historical price series exists anywhere in this codebase — the
+scanner (`scanner/market_scanner.py`) only ever retains the latest
+snapshot per symbol, confirmed by inspection before writing
+`correlation_engine.py` (this was §16's flagged open question). Real
+rolling/Pearson correlation is not computable today, full stop — not a
+scope choice.
+
+`config/correlation_table.py` is a hand-curated, two-level lookup
+(symbol → cluster → super-group) covering ~100 major/mid-cap symbols,
+not a per-pair matrix (infeasible to hand-write at ~300 symbols — 44,850
+pairs). Same cluster → HIGH, same super-group different cluster →
+MEDIUM, different super-group → LOW, either symbol unlisted → UNKNOWN.
+UNKNOWN is deliberately the *worst* penalty (0.25, worse than HIGH's
+0.5) — an unverified correlation should be treated more cautiously than
+a verified high one for a live-money portfolio, not less.
+
+**This is Version 1 and is meant to be replaced.** When real
+price-history correlation becomes computable (needs the scanner to
+retain a rolling window per symbol — not built), only
+`config/correlation_table.py` and `CorrelationEngine.get_tier()`'s
+implementation should need to change; `capital_manager.py` only ever
+consumes `(tier, penalty)`, never the table directly.
+
+### Why liquidity/spread are eligibility gates, not extra score weights
+
+`composite_score` already includes "liquidity" and "spread" as 2 of its
+8 computed factors (§15). Multiplying `final_score` by them again would
+double-count exactly those two factors relative to trend/momentum/
+funding/risk/volume/OI. Instead, `PortfolioLimits.min_liquidity_score`/
+`min_spread_score` reject a candidate outright below a threshold,
+regardless of composite score — honors "liquidity/spread should matter"
+without re-weighting them twice.
+
+### Why execution is intentionally excluded
+
+`CapitalManager.decide()` returns a `PortfolioDecision` — capital
+amounts and risk-%, not exchange order quantities, since Capital Manager
+has no entry/stop-loss price (those come from the per-symbol Strategy/
+Decision layer at execution time). Nothing in `portfolio/` imports from
+`execution/` or `data/`, calls `set_leverage`, or places an order. Two
+concrete reasons this phase stops at a decision:
+
+1. **`RiskEngine`'s daily-loss/consecutive-loss gate is a single
+   account-level circuit breaker** (§11), with no per-symbol or
+   aggregate multi-position awareness. `CapitalManager.decide()` reads
+   `RiskEngine.can_trade()`/`get_risk_pct()`/`get_leverage()` as-is
+   without modifying them — wiring real multi-symbol execution on top of
+   a still-single-account-level risk gate is exactly the ordering
+   mistake §16 already flagged avoiding.
+2. **No orchestrator exists yet** to read real exchange/journal state
+   into a `PortfolioState` each cycle, hold the position-state machine
+   (`WAITING→ALLOCATED→OPEN→...→ARCHIVED`, already defined in
+   `portfolio_models.py` for this reason) through its transitions, or
+   call `ExecutionCoordinator`'s per-symbol `TradeManager` (§13) with a
+   `PortfolioDecision`'s allocations. That orchestrator is
+   `portfolio/portfolio_manager.py`, deliberately not built this phase.
+
+### Known simplification (documented, not a bug)
+
+When `max_symbol_pct` caps a dominant candidate's allocation, the
+capital freed by the cap is **not** redistributed to the other selected
+candidates in this version — total deployed capital can end up below
+the full deployable amount even with room and eligible candidates
+remaining. An iterative water-filling redistribution would close this
+gap; not built here to keep the v1 allocation formula easy to reason
+about and test. Flagged as a candidate follow-up, not urgent.
+
+### Tests
+
+`tests/test_portfolio_models.py` (11), `test_portfolio_state.py` (18),
+`test_correlation_engine.py` (21, including the three tier examples
+given verbatim in the brief), `test_capital_manager.py` (31, covering
+the risk-gate, capacity, correlation hard-reject, eligibility gates,
+coverage weighting, volatility/leverage, capital scenarios, and
+allocation-ordering cases) — **81 new tests**, all mocking
+`RiskEngine`'s journal dependency only (never `RiskEngine` itself, to
+exercise its real `can_trade`/`get_risk_pct`/`get_leverage` contract) and
+never touching a network/exchange call.
+
+**Verified: `pytest tests/ -m unit -q` → 1082 passed, 0 failed** (1001
+baseline + 81). `ruff check` clean (4 unused-import findings, all
+auto-fixed, no logic changes).
+
+---
+
+## 18. Next up
+
+- **`portfolio/portfolio_manager.py`** — the orchestrator §17 deliberately
+  left out: reads real exchange/journal state into `PortfolioState` each
+  cycle, calls `CapitalManager.decide()`, drives the position state
+  machine, and is where position replacement/cooldown logic (never
+  built anywhere yet) belongs.
+- **`RiskEngine` per-symbol/aggregate exposure** — §11's single
+  account-level gate needs to become multi-position-aware before
+  multi-symbol execution actually goes live; §17 explicitly built on top
+  of it unchanged rather than fixing it in the same pass.
+- **Sector Engine** (`portfolio/sector_engine.py`) — no `sector` field is
+  populated anywhere yet; `PortfolioPosition.sector` and
+  `PortfolioState.sector_exposure()` exist and are tested against `None`
+  today, ready for this to populate them.
+- **Real (price-history) correlation** — needs the scanner to retain a
+  rolling window per symbol; §17's static tier table is the interim.
+- **REST API / WebSocket / Dashboard pages** — still deferred per §16's
+  original reasoning (nothing to expose without the orchestrator above).
+- Everything still carried over from §16/§14/§13 that Portfolio work
+  doesn't touch: reconciliation alert escalation (§6),
+  `dashboard_api`/`websocket` heartbeat gaps (§4).
+
 

@@ -151,6 +151,35 @@ class Settings(BaseSettings):
         alias="RANKER_FACTOR_WEIGHTS",
     )
 
+    # ── Portfolio Intelligence Core (V16 Phase 2A) ─────────────────────────
+    # See portfolio/portfolio_models.py:PortfolioLimits for what each of
+    # these means and portfolio/capital_manager.py for how they're applied.
+    # Defaults mirror PortfolioLimits' own dataclass defaults exactly —
+    # duplicated here (rather than only living on the dataclass) so they're
+    # tunable via .env without a code change, per project convention
+    # ("move constants into configuration files").
+    PORTFOLIO_MAX_POSITIONS:            int   = Field(default=5,    alias="PORTFOLIO_MAX_POSITIONS")
+    PORTFOLIO_MAX_SYMBOL_PCT:           float = Field(default=0.35, alias="PORTFOLIO_MAX_SYMBOL_PCT")
+    PORTFOLIO_MAX_SECTOR_PCT:           float = Field(default=0.50, alias="PORTFOLIO_MAX_SECTOR_PCT")
+    PORTFOLIO_MAX_CAPITAL_DEPLOYED_PCT: float = Field(default=0.80, alias="PORTFOLIO_MAX_CAPITAL_DEPLOYED_PCT")
+    PORTFOLIO_MAX_DAILY_RISK_PCT:       float = Field(default=0.03, alias="PORTFOLIO_MAX_DAILY_RISK_PCT")
+    PORTFOLIO_MAX_ACCOUNT_RISK_PCT:     float = Field(default=0.10, alias="PORTFOLIO_MAX_ACCOUNT_RISK_PCT")
+    PORTFOLIO_MAX_LEVERAGE:              int  = Field(default=10,   alias="PORTFOLIO_MAX_LEVERAGE")
+    PORTFOLIO_MIN_LIQUIDITY_SCORE:      float = Field(default=30.0, alias="PORTFOLIO_MIN_LIQUIDITY_SCORE")
+    PORTFOLIO_MIN_SPREAD_SCORE:         float = Field(default=20.0, alias="PORTFOLIO_MIN_SPREAD_SCORE")
+    PORTFOLIO_MIN_COVERAGE:             float = Field(default=0.0,  alias="PORTFOLIO_MIN_COVERAGE")
+    PORTFOLIO_CORRELATION_HARD_REJECT_ENABLED: bool = Field(
+        default=True, alias="PORTFOLIO_CORRELATION_HARD_REJECT_ENABLED"
+    )
+    # Coverage-weighting floor: final_score = composite_score *
+    # (COVERAGE_WEIGHT_FLOOR + (1-COVERAGE_WEIGHT_FLOOR)*coverage) * correlation_penalty
+    # 0.5 means even 0% coverage retains half weight — see
+    # capital_manager.py module docstring for why a harsh linear multiply
+    # was rejected (it would conflate "3 factors are structurally always
+    # unavailable for every symbol" with "this symbol specifically has
+    # worse data than its peers").
+    PORTFOLIO_COVERAGE_WEIGHT_FLOOR:    float = Field(default=0.5, alias="PORTFOLIO_COVERAGE_WEIGHT_FLOOR")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
