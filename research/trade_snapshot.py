@@ -8,7 +8,7 @@ def _sf(v, fb=None, default=0.0):
     for c in (v, fb):
         if c is None: continue
         try: return float(c)
-        except: continue
+        except Exception: continue
     return default
 
 def build_feature_vector(mission=None, trade_row: Optional[dict]=None,
@@ -59,7 +59,7 @@ def build_outcome(trade_row: dict):
             try:
                 from datetime import datetime
                 ht = (datetime.fromisoformat(closed) - datetime.fromisoformat(opened)).total_seconds()
-            except: pass
+            except Exception: pass
         return result, pnl, ht
     except Exception as exc:
         logger.error(f"build_outcome failed: {exc}", exc_info=True)

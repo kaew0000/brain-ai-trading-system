@@ -411,7 +411,9 @@ class TestEventBus:
         from events.event_bus import reset_event_bus
         bus = reset_event_bus(persist=False)
         calls: List[int] = []
-        cb = lambda e: calls.append(1)
+
+        def cb(e):
+            calls.append(1)
 
         bus.subscribe("Z", cb)
         bus.publish("Z", "E", "m1")

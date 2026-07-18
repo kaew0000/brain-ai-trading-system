@@ -813,7 +813,10 @@ class TestEventBus:
 
     def test_unsubscribe(self, bus):
         received = []
-        cb = lambda e: received.append(e)
+
+        def cb(e):
+            received.append(e)
+
         bus.subscribe("SMC_ANALYST", cb)
         bus.publish("SMC_ANALYST", "EVENT_1", "before unsub")
         bus.unsubscribe("SMC_ANALYST", cb)

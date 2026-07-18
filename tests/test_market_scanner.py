@@ -75,9 +75,9 @@ def _mock_klines(n=20, start=100.0):
     out = []
     price = start
     for i in range(n):
-        o, h, l, c = price, price * 1.01, price * 0.99, price * 1.002
+        o, h, low, c = price, price * 1.01, price * 0.99, price * 1.002
         out.append([
-            1700000000000 + i * 900000, str(o), str(h), str(l), str(c), "1000",
+            1700000000000 + i * 900000, str(o), str(h), str(low), str(c), "1000",
             1700000899999 + i * 900000, "100000", 500, "500", "50000", "0",
         ])
         price = c

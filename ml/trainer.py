@@ -79,7 +79,7 @@ def train_outcome_predictor(df: pd.DataFrame) -> Optional[tuple]:
         probs = model.predict_proba(X_val)[:,1]
         from sklearn.metrics import roc_auc_score
         try: auc = roc_auc_score(y_val, probs)
-        except: auc = 0.5
+        except Exception: auc = 0.5
         win_rate = float(y_val.mean()) if len(y_val) > 0 else 0.0
         metrics = {"auc": auc, "win_rate": win_rate, "profit_factor": 0.0,
                    "max_drawdown": 0.0, "training_rows": len(X_tr), "validation_rows": len(X_val)}

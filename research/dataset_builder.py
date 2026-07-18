@@ -56,7 +56,7 @@ class DatasetBuilder:
 
     def row_count(self, labelled_only: bool=True) -> int:
         try: return self._store.count(labelled_only=labelled_only)
-        except: return 0
+        except Exception: return 0
 
 _db: Optional[DatasetBuilder] = None
 _db_lock = threading.Lock()
