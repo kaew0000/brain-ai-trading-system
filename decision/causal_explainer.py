@@ -138,9 +138,6 @@ class CausalExplainer:
             market_context,
             confidence_result.direction,
             confidence_result.breakdown.get("smc", 0),
-            confidence_result.breakdown.get("smc", 0)
-              / max(confidence_result.confidence, 1) * 100
-              if confidence_result.confidence else 0,
         ))
 
         # ── Volume factor (agent: VOLUME_ANALYST) ─────────────────────────────
@@ -200,7 +197,7 @@ class CausalExplainer:
     # ── SMC explanation ───────────────────────────────────────────────────────
 
     @staticmethod
-    def _explain_smc(ctx: dict, direction: str, contribution: int, weight_pct: float) -> list[dict]:
+    def _explain_smc(ctx: dict, direction: str, contribution: int) -> list[dict]:
         factors = []
         smc = ctx.get("smc_m15", {})
         if not smc:

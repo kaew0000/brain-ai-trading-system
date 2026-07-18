@@ -164,6 +164,7 @@ class ManagedConn:
         return self._conn
 
     def __exit__(self, exc_type, exc, tb) -> bool:
+        del tb  # required by context-manager protocol, unused here
         try:
             if self._conn and self._path != ":memory:":
                 try:
@@ -197,6 +198,7 @@ class ReadConn:
         return self._conn
 
     def __exit__(self, exc_type, exc, tb) -> bool:
+        del tb  # required by context-manager protocol, unused here
         if self._conn and self._path != ":memory:":
             try:
                 self._conn.close()

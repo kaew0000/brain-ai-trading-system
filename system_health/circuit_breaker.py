@@ -105,6 +105,7 @@ class CircuitBreaker:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        del exc_tb  # required by context-manager protocol, unused here
         if exc_type is None:
             self._on_success()
         elif exc_type is not CircuitBreakerOpen:

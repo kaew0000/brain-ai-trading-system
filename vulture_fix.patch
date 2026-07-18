@@ -1,0 +1,67 @@
+diff --git a/database/db.py b/database/db.py
+index 8c9d6cb..fbecc87 100644
+--- a/database/db.py
++++ b/database/db.py
+@@ -164,6 +164,7 @@ class ManagedConn:
+         return self._conn
+ 
+     def __exit__(self, exc_type, exc, tb) -> bool:
++        del tb  # required by context-manager protocol, unused here
+         try:
+             if self._conn and self._path != ":memory:":
+                 try:
+@@ -197,6 +198,7 @@ class ReadConn:
+         return self._conn
+ 
+     def __exit__(self, exc_type, exc, tb) -> bool:
++        del tb  # required by context-manager protocol, unused here
+         if self._conn and self._path != ":memory:":
+             try:
+                 self._conn.close()
+diff --git a/decision/causal_explainer.py b/decision/causal_explainer.py
+index 6368033..29b9b44 100644
+--- a/decision/causal_explainer.py
++++ b/decision/causal_explainer.py
+@@ -138,9 +138,6 @@ class CausalExplainer:
+             market_context,
+             confidence_result.direction,
+             confidence_result.breakdown.get("smc", 0),
+-            confidence_result.breakdown.get("smc", 0)
+-              / max(confidence_result.confidence, 1) * 100
+-              if confidence_result.confidence else 0,
+         ))
+ 
+         # ── Volume factor (agent: VOLUME_ANALYST) ─────────────────────────────
+@@ -200,7 +197,7 @@ class CausalExplainer:
+     # ── SMC explanation ───────────────────────────────────────────────────────
+ 
+     @staticmethod
+-    def _explain_smc(ctx: dict, direction: str, contribution: int, weight_pct: float) -> list[dict]:
++    def _explain_smc(ctx: dict, direction: str, contribution: int) -> list[dict]:
+         factors = []
+         smc = ctx.get("smc_m15", {})
+         if not smc:
+diff --git a/system_health/circuit_breaker.py b/system_health/circuit_breaker.py
+index 73a6669..899ab44 100644
+--- a/system_health/circuit_breaker.py
++++ b/system_health/circuit_breaker.py
+@@ -105,6 +105,7 @@ class CircuitBreaker:
+         return self
+ 
+     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
++        del exc_tb  # required by context-manager protocol, unused here
+         if exc_type is None:
+             self._on_success()
+         elif exc_type is not CircuitBreakerOpen:
+diff --git a/telemetry/agent_telemetry.py b/telemetry/agent_telemetry.py
+index efe62aa..50f5159 100644
+--- a/telemetry/agent_telemetry.py
++++ b/telemetry/agent_telemetry.py
+@@ -215,6 +215,7 @@ class telemetry_timer:
+         return self
+ 
+     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
++        del exc_tb  # required by context-manager protocol, unused here
+         self._frozen_ms = round((time.perf_counter() - self._start) * 1000, 2)
+         return False  # never suppress exceptions
+ 

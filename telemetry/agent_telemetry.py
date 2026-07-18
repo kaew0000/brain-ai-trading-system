@@ -215,6 +215,7 @@ class telemetry_timer:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        del exc_tb  # required by context-manager protocol, unused here
         self._frozen_ms = round((time.perf_counter() - self._start) * 1000, 2)
         return False  # never suppress exceptions
 
