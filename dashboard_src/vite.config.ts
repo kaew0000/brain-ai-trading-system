@@ -21,6 +21,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
+          // UI framework core
+          'ui-vendor': ['react', 'react-dom', 'react-router-dom', 'zustand'],
+          // Animation library (large, used on subset of routes)
+          'animation-vendor': ['framer-motion'],
+          // Phaser game engine (always separate)
           // Separate Phaser into its own chunk (~4MB)
           phaser: ['phaser'],
           // React + framer in another

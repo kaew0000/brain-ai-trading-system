@@ -141,3 +141,26 @@ export const timeAgo=(iso:string|null|undefined)=>{
   const s=Math.floor((Date.now()-new Date(iso).getTime())/1000)
   if(s<60)return`${s}s ago`;if(s<3600)return`${Math.floor(s/60)}m ago`;return`${Math.floor(s/3600)}h ago`
 }
+
+// ── New in V16: Suspense fallback ────────────────────────────────────────────
+
+export function PageLoader() {
+  return (
+    <div className="h-screen flex items-center justify-center bg-surface">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-accent-blue/30 border-t-accent-blue rounded-full animate-spin" />
+        <span className="text-xs text-text-muted font-mono tracking-wider">LOADING MODULE…</span>
+      </div>
+    </div>
+  )
+}
+
+export function Skeleton({ className, lines = 1 }: { className?: string; lines?: number }) {
+  return (
+    <div className={`space-y-2 animate-pulse ${className ?? ''}`}>
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="h-2 bg-surface-3 rounded" style={{ width: `${70 + (i % 3) * 10}%` }} />
+      ))}
+    </div>
+  )
+}
