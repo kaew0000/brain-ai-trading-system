@@ -895,27 +895,191 @@ auto-fixed, no logic changes).
 
 ---
 
-## 18. Next up
+## 18. Portfolio Manager Orchestrator — V16 Phase 2B (2026-07-19)
 
-- **`portfolio/portfolio_manager.py`** — the orchestrator §17 deliberately
-  left out: reads real exchange/journal state into `PortfolioState` each
-  cycle, calls `CapitalManager.decide()`, drives the position state
-  machine, and is where position replacement/cooldown logic (never
-  built anywhere yet) belongs.
-- **`RiskEngine` per-symbol/aggregate exposure** — §11's single
-  account-level gate needs to become multi-position-aware before
-  multi-symbol execution actually goes live; §17 explicitly built on top
-  of it unchanged rather than fixing it in the same pass.
-- **Sector Engine** (`portfolio/sector_engine.py`) — no `sector` field is
-  populated anywhere yet; `PortfolioPosition.sector` and
-  `PortfolioState.sector_exposure()` exist and are tested against `None`
-  today, ready for this to populate them.
+The orchestration layer §17 deliberately left out: `portfolio/portfolio_manager.py`
+wraps `CapitalManager.decide()` (called unmodified) with the three things
+it structurally has no way to do itself — sector exposure enforcement,
+replacement logic, and cooldown/min-hold bookkeeping — plus a new
+`portfolio/sector_engine.py` and `config/sector_table.py` to give it
+sector data to work with. `PortfolioManager` still does not execute
+trades, place orders, or read real exchange/journal state — same
+decision-only boundary §17 already drew for `CapitalManager`, one layer
+up.
+
+### Orchestration flow
+
+`PortfolioManager.decide(candidates, risk_engine, state, balance)`:
+
+1. **Cooldown filter.** Any non-held candidate currently in cooldown
+   (see below) is pulled out before `CapitalManager` ever sees it —
+   rejected with `"in_cooldown"`, not counted against `available_slots`.
+2. **`CapitalManager.decide()`**, unmodified, on what's left. If it's
+   blocked (RiskEngine circuit breaker), that propagates straight
+   through and nothing else runs this cycle.
+3. **Sector exposure enforcement.** Walks `CapitalManager`'s already
+   priority-sorted `selected` list, tracking cumulative **capital**
+   (margin, not leveraged notional — see "Why capital, not notional"
+   below) per sector, moving anything that would push its sector over
+   `PortfolioLimits.max_sector_pct * balance` into `rejected` instead
+   (`"sector_exposure_exceeded"`). This is the enforcement §17's own
+   `max_sector_pct` comment flagged as missing.
+4. **Replacement evaluation** (only when the portfolio was full this
+   cycle) — see below.
+5. **Persistence** via `portfolio/portfolio_history.py`, non-fatal on
+   failure (same double-try/except belt-and-suspenders pattern as
+   `ranking_history.save_ranking`).
+
+Returns an `OrchestratedDecision` — `selected`/`total_capital_allocated`/
+`total_risk_allocated` describe only what's allocatable within capacity
+*this* cycle; `replacements` is a separate, informational list nothing
+in the totals reflects (see below).
+
+### Why capital, not notional, for sector-cap enforcement
+
+The first implementation compared each sector's **notional** exposure
+(leveraged) against `max_sector_pct * balance` (unleveraged) — and
+immediately failed its own tests: at 5x leverage, one ordinary
+single-symbol allocation already produces notional several times
+account balance, so even a generous 50% sector cap rejected a lone
+starter position. `max_symbol_pct` next to it in `PortfolioLimits` was
+already capital-based (a cap on `allocation_pct`, §17); `max_sector_pct`
+now matches that same definition — `SectorEngine.capital_by_sector()`
+sums `margin_used`, not `notional`. `SectorEngine.exposure_by_sector()`
+(notional-based) is kept as a *separate* method, deliberately: it feeds
+`diversification_score()` and the `sector_exposure` field reported back
+in the decision, where "how much price-correlated market exposure am I
+carrying" is the right question — a different question from "how much
+of my capital is committed", which is what the cap enforces. Two
+methods, two intentionally different answers, same class.
+
+### Replacement strategy
+
+When the portfolio is at `max_positions` and a strong new candidate got
+rejected purely for lack of capacity (never even eligibility-checked in
+that case), re-implementing `CapitalManager`'s eligibility/correlation/
+scoring rules a second time here to evaluate it would be a maintenance
+hazard — two copies of the same logic, free to drift apart. Instead,
+`_evaluate_replacements()` re-runs `CapitalManager` itself with room for
+exactly one more slot (`max_positions + 1`) against the same held state
+and candidate list. Anything that probe decision selects beyond what the
+real decision already selected is, by construction, the single best
+candidate the real eligibility rules would actually allow in. That
+challenger is compared against the weakest held position's *current-cycle*
+score (0.0 if it's fallen out of the ranked universe entirely — the
+strongest possible signal) and proposed as a swap only if it clears
+`PORTFOLIO_REPLACEMENT_THRESHOLD_PCT` above it. At most one replacement
+per cycle, deliberately, to avoid several simultaneous swaps
+destabilizing the book in one pass. `ReplacementProposal` is a
+recommendation only — `PortfolioManager` never closes or opens anything;
+there's no entry/stop-loss price at this decision layer to size a
+not-yet-open replacement with anyway (same reasoning §17 already gives
+for why `CapitalManager` returns capital amounts, not order quantities).
+
+### Cooldown / minimum-hold
+
+A replacement's outgoing symbol enters cooldown
+(`PORTFOLIO_COOLDOWN_SECONDS`, default 1h) — ineligible as a *new*
+candidate until it expires; its incoming symbol is protected from being
+proposed as an outgoing side again for `PORTFOLIO_MIN_HOLD_SECONDS`
+(default 30m). Together these stop a single volatile ranking cycle from
+oscillating a symbol in and out repeatedly. `notify_position_closed()`
+is the hook a future execution-wiring phase should call for *real*
+closures (stop-loss, take-profit, manual) — cooldown/protection are
+currently registered at proposal time, not confirmed-execution time,
+since no feedback loop exists yet telling `PortfolioManager` whether a
+proposal was actually acted on. Flagged as a known V1 limitation, not
+hidden.
+
+### Sector Engine (`portfolio/sector_engine.py`, `config/sector_table.py`)
+
+Symbol → sector classification, same "hand-curated table, not a
+computed classification" precedent as §17's correlation table — no
+on-chain/business-category data source exists anywhere in this codebase.
+13 fixed sectors (Layer1, Layer2, DeFi, Meme, AI, Infrastructure,
+Exchange, Stablecoin, Privacy, Oracle, Gaming, RWA, Unknown), ~110
+symbols curated, `Unknown` a first-class bucket for anything not yet
+added rather than an error state. **Explicitly Version 1** — meant to be
+extended incrementally, not replaced wholesale; the diversification-score
+math assumes a roughly-stable sector universe cycle to cycle.
+`diversification_score()` (0-100, higher = more spread) is
+`100 * (1 - HHI)` over sector-weight shares, a standard concentration
+measure, computed fresh from symbols on every call rather than trusting
+`PortfolioPosition.sector` — that field stays structurally `None` until
+whatever phase eventually constructs real `PortfolioPosition` objects
+populates it (see "Why execution is intentionally excluded" below);
+trusting it today would make sector accounting a silent no-op.
+
+### Why execution is intentionally excluded (still)
+
+Same two reasons §17 gave, still both true one phase later:
+
+1. `RiskEngine`'s circuit breaker is still account-level, not
+   per-position — `PortfolioManager` adds sector-level and replacement
+   awareness on top of `CapitalManager`, neither of which changes that.
+2. **Still no orchestrator** reads real exchange/journal state into a
+   `PortfolioState` each cycle or calls `ExecutionCoordinator`'s
+   per-symbol `TradeManager` (§13) with an `OrchestratedDecision`'s
+   allocations or a `ReplacementProposal`. `PortfolioManager` is written
+   so that future phase (§19 below) only has to call `decide()` and act
+   on its output — nothing in this module needs to change when it's
+   built.
+
+### Known simplifications (documented, not bugs)
+
+- Sector-cap rejections don't redistribute freed capital to remaining
+  candidates — same "known simplification" §17 already accepted for
+  `max_symbol_pct`, same reasoning (keep the v1 formula easy to reason
+  about and test).
+- At most one replacement proposed per `decide()` call, even if several
+  held positions are individually weak enough to justify one.
+- Cooldown/min-hold are proposal-time, not confirmed-execution-time (see
+  "Cooldown / minimum-hold" above).
+
+### Tests
+
+`tests/test_sector_engine.py` (60, including a 19-case parametrized
+sweep over the full sector table), `test_portfolio_manager.py` (36,
+covering sector-cap enforcement, replacement logic, cooldown/min-hold,
+`decide()` end-to-end, and persistence), `test_portfolio_history.py`
+(10) — **106 new tests**, all mocking only `RiskEngine`'s journal
+dependency (never `RiskEngine`/`CapitalManager`/`CorrelationEngine`
+themselves) and never touching a network/exchange call, matching §17's
+own testing convention exactly.
+
+**Verified: `pytest tests/ -q` → 1188 passed, 0 failed** (1082 baseline
++ 106). `ruff check . --exclude dashboard_src --exclude dashboard` →
+clean.
+
+---
+
+## 19. Next up
+
+- **Real orchestrator wiring** (provisionally "Phase 2E") — the piece
+  both §17 and §18 deliberately left out: reading real exchange/journal
+  state into a `PortfolioState` each cycle, driving the position state
+  machine, calling `ExecutionCoordinator`'s per-symbol `TradeManager`
+  with an `OrchestratedDecision`'s allocations, and actually acting on
+  (or discarding) a `ReplacementProposal` — including feeding real
+  closures back through `PortfolioManager.notify_position_closed()`
+  instead of §18's proposal-time-only cooldown registration.
+- **`RiskEngine` per-symbol/aggregate exposure** — still §11's
+  single account-level gate; §17 and §18 have both now built on top of
+  it unchanged rather than fixing it.
 - **Real (price-history) correlation** — needs the scanner to retain a
-  rolling window per symbol; §17's static tier table is the interim.
+  rolling window per symbol; §17's static tier table is still the
+  interim, and §18's sector table is a separate, deliberately
+  non-identical taxonomy (see §18's Sector Engine note) rather than a
+  substitute for this.
+- **Sector-cap capital redistribution** — §18's own "Known
+  simplification": a rejected sector-capped candidate's freed capital
+  currently isn't redistributed to remaining candidates.
 - **REST API / WebSocket / Dashboard pages** — still deferred per §16's
-  original reasoning (nothing to expose without the orchestrator above).
+  original reasoning (nothing to expose without the real orchestrator
+  above).
 - Everything still carried over from §16/§14/§13 that Portfolio work
   doesn't touch: reconciliation alert escalation (§6),
   `dashboard_api`/`websocket` heartbeat gaps (§4).
+
 
 

@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 2B: Portfolio Manager Orchestrator
+
+### Added
+- **`portfolio/portfolio_manager.py`** (`PortfolioManager.decide()`): the
+  orchestrator §17/§18 deliberately left out. Wraps `CapitalManager.decide()`
+  (called unmodified) with sector exposure enforcement, replacement logic
+  (re-runs `CapitalManager` with one extra slot to find the best
+  capacity-blocked challenger, no eligibility rules re-implemented), and
+  cooldown/min-hold bookkeeping. Decision-only — does not execute trades,
+  place orders, or call Binance; returns an `OrchestratedDecision`.
+- **`portfolio/sector_engine.py`** + **`config/sector_table.py`**: symbol
+  → sector classification (13 sectors, ~110 symbols, Version 1/hand-curated,
+  same precedent as `config/correlation_table.py`), sector exposure
+  (capital- and notional-based, kept separate — see architecture.md §18),
+  and a Herfindahl-index diversification score.
+- **`portfolio/portfolio_history.py`**: persists each `decide()` cycle to a
+  new `portfolio_history` table (additive schema change, `CREATE TABLE IF
+  NOT EXISTS`), mirroring `ranking/ranking_history.py`'s pattern exactly.
+- Additive dataclasses in `portfolio/portfolio_models.py`:
+  `ReplacementProposal`, `OrchestratedDecision`. Nothing existing changed.
+- New `PORTFOLIO_REPLACEMENT_THRESHOLD_PCT` / `PORTFOLIO_COOLDOWN_SECONDS`
+  / `PORTFOLIO_MIN_HOLD_SECONDS` / `PORTFOLIO_HISTORY_RETENTION_HOURS`
+  settings (`config/settings.py`).
+- 106 new tests (`test_sector_engine.py` 60, `test_portfolio_manager.py`
+  36, `test_portfolio_history.py` 10). Full suite: 1082 → 1188 passed,
+  0 failed.
+- `docs/architecture.md` §18 (design rationale, replacing the previous
+  "Next up" placeholder) and §19 (next up).
+
+### Fixed (found during this phase's own test-writing, not a released bug)
+- Sector-cap enforcement was first written comparing leveraged notional
+  exposure against an unleveraged `balance`-based cap — failed its own
+  tests immediately (one ordinary position at 5x leverage already
+  exceeds a 50% cap measured that way). Fixed to compare capital
+  (margin), matching how `max_symbol_pct` already works. Never merged
+  in the broken form; see architecture.md §18 "Why capital, not
+  notional" for the full explanation.
+
+### Not included (see architecture.md §19)
+- Real orchestrator wiring (reading live exchange/journal state into
+  `PortfolioState`, driving the position state machine, calling
+  `ExecutionCoordinator`, acting on a `ReplacementProposal`) —
+  provisionally "Phase 2E". REST/WebSocket/Dashboard, `RiskEngine`
+  per-symbol/aggregate exposure, real price-history correlation,
+  sector-cap capital redistribution. All explicitly out of scope for
+  this phase.
+
+---
+
 ## [Unreleased] — V16 Phase 2A: Portfolio Intelligence Core
 
 ### Added

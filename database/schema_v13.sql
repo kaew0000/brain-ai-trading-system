@@ -393,3 +393,31 @@ CREATE TABLE IF NOT EXISTS ml_predictions (
     actual_result         TEXT    DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_ml_predictions_timestamp ON ml_predictions(timestamp);
+
+-- ----------------------------------------------------------------------------
+-- portfolio_history — V16 Phase 2B (Portfolio Manager Orchestrator). One row
+-- per PortfolioManager.decide() cycle, same one-row-per-cycle JSON-blob
+-- convention as ranking_history/scanner_snapshots above, for the same
+-- reason — a wide, dynamic shape (selected/rejected/replacements/sector
+-- exposure) that would be awkward and slow as one column-per-field row.
+-- portfolio_score is the capital-weighted mean final_score of `selected`
+-- (see portfolio/portfolio_models.py:OrchestratedDecision) — lets a
+-- dashboard/alert flag a degraded-quality cycle without parsing `data`.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS portfolio_history (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp                TEXT    NOT NULL,     -- ISO8601 UTC
+    decided_at               REAL    NOT NULL,     -- unix epoch
+    blocked                  INTEGER NOT NULL DEFAULT 0,
+    block_reason             TEXT,
+    selected_count            INTEGER NOT NULL DEFAULT 0,
+    rejected_count            INTEGER NOT NULL DEFAULT 0,
+    replacement_count          INTEGER NOT NULL DEFAULT 0,
+    total_capital_allocated    REAL    DEFAULT 0.0,
+    total_risk_allocated       REAL    DEFAULT 0.0,
+    diversification_score      REAL    DEFAULT 100.0,
+    portfolio_score            REAL    DEFAULT 0.0,
+    drawdown                  REAL    DEFAULT 0.0,
+    data                     TEXT    NOT NULL      -- JSON: OrchestratedDecision.to_dict() + sector_exposure/drawdown context
+);
+CREATE INDEX IF NOT EXISTS idx_portfolio_history_timestamp ON portfolio_history(timestamp);

@@ -180,6 +180,27 @@ class Settings(BaseSettings):
     # worse data than its peers").
     PORTFOLIO_COVERAGE_WEIGHT_FLOOR:    float = Field(default=0.5, alias="PORTFOLIO_COVERAGE_WEIGHT_FLOOR")
 
+    # ── Portfolio Manager Orchestrator (V16 Phase 2B) ──────────────────────
+    # See portfolio/portfolio_manager.py for how each of these is applied.
+    # Replacement threshold: a new candidate must beat the weakest held
+    # position's current-cycle score by more than this fraction before a
+    # ReplacementProposal is generated — prevents proposing a swap for a
+    # marginal, noise-level improvement.
+    PORTFOLIO_REPLACEMENT_THRESHOLD_PCT: float = Field(default=0.15, alias="PORTFOLIO_REPLACEMENT_THRESHOLD_PCT")
+    # Cooldown: once a symbol is replaced out (or externally reported closed
+    # via notify_position_closed()), it's ineligible for re-selection as a
+    # NEW candidate for this many seconds — prevents immediate flip-flopping
+    # between two similarly-scored symbols.
+    PORTFOLIO_COOLDOWN_SECONDS:          int   = Field(default=3600, alias="PORTFOLIO_COOLDOWN_SECONDS")
+    # Minimum hold: a symbol just proposed as a replacement's incoming side
+    # is protected from being proposed as an outgoing (replaced-out) side
+    # again for this many seconds — the pairing to PORTFOLIO_COOLDOWN_SECONDS
+    # that keeps a single volatile ranking cycle from oscillating a position
+    # in and out repeatedly.
+    PORTFOLIO_MIN_HOLD_SECONDS:          int   = Field(default=1800, alias="PORTFOLIO_MIN_HOLD_SECONDS")
+    # Retention for portfolio_history rows, mirrors RANKER_HISTORY_RETENTION_HOURS.
+    PORTFOLIO_HISTORY_RETENTION_HOURS:   int   = Field(default=168,  alias="PORTFOLIO_HISTORY_RETENTION_HOURS")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
