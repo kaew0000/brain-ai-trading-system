@@ -1,83 +1,43 @@
-# PATCH NOTES — V16 Phase 2B: Portfolio Manager Orchestrator
-
-Branch: `feature/phase2b-portfolio-manager`
-Base: `main` @ `e21dab0` (Phase 2A merged)
+# PATCH NOTES — feat(world-performance-v1)
 
 ## Summary
+Frontend performance and UX pass for Brain Bot V16 Dashboard. Introduces React.lazy
+code-splitting, Zustand store equality guards, World HQ Minimap v2, and a new
+Portfolio Dashboard backed by MockDataProvider adapters.
 
-Adds the orchestration layer Phase 2A's own docs (architecture.md §17/§18)
-explicitly deferred: `PortfolioManager`, which wraps `CapitalManager.decide()`
-(called unmodified, nothing about it changes) with sector exposure
-enforcement, replacement logic, and cooldown/min-hold bookkeeping.
-Decision-only, same boundary `CapitalManager` already drew for itself —
-nothing in this phase places an order, calls `set_leverage`, or imports
-`execution/`/`data/`. No REST API, WebSocket, dashboard, or scheduler
-wiring, per this phase's own scope.
+## Changes
 
-## New modules
+### Architecture
+- **Code Splitting**: All routes converted to `React.lazy()` with `<Suspense>`
+  fallback (`PageLoader`). Initial bundle no longer eagerly loads every page.
+- **Error Boundary**: Global `ErrorBoundary` in `main.tsx` prevents white-screen
+  crashes and offers a branded recovery UI.
+- **Store Equality**: All Zustand stores now use shallow / semantic equality
+  guards, eliminating re-render storms caused by 1 Hz WS heartbeats with
+  unchanged payloads.
 
-| File | Purpose |
-|---|---|
-| `portfolio/portfolio_manager.py` | `PortfolioManager.decide()` — the orchestrator |
-| `portfolio/sector_engine.py` | Sector lookup, exposure (capital- and notional-based), diversification score |
-| `portfolio/portfolio_history.py` | Persists each decision cycle (mirrors `ranking_history.py`) |
-| `config/sector_table.py` | Static symbol→sector table (13 sectors, ~110 symbols, Version 1) |
+### World HQ
+- **WorldPage**: Wrapped in `React.memo`; NPC position updates throttled to
+  200 ms; event listeners use named `off()` cleanup instead of
+  `removeAllListeners()`.
+- **Minimap v2**: Offscreen canvas caches static terrain; room label tooltips on
+  hover; CSS `backdrop-blur` overlay; `willReadFrequently` canvas hint.
+- **Asset Pipeline**: New `AssetPipeline.ts` utility for priority-based asset
+  preloading (critical / deferred / on-demand).
 
-## Additive changes to existing files
+### Portfolio Dashboard
+- **MockDataProvider**: `MockPortfolioProvider` delivers realistic mock portfolio
+  data wrapped for easy backend replacement by Claude.
+- **PortfolioDashboard**: Allocation bars with target-drift indicators, SVG equity
+  sparkline, performance metric cards (Sharpe, Max DD, Win Rate, Profit
+  Factor), animated position list.
 
-| File | Change |
-|---|---|
-| `portfolio/portfolio_models.py` | + `ReplacementProposal`, `OrchestratedDecision` dataclasses. Nothing existing modified. |
-| `config/settings.py` | + `PORTFOLIO_REPLACEMENT_THRESHOLD_PCT` (0.15), `PORTFOLIO_COOLDOWN_SECONDS` (3600), `PORTFOLIO_MIN_HOLD_SECONDS` (1800), `PORTFOLIO_HISTORY_RETENTION_HOURS` (168). |
-| `database/schema_v13.sql` | + `portfolio_history` table + index, appended at EOF, `CREATE TABLE IF NOT EXISTS` (idempotent, safe on every existing DB). |
-| `docs/architecture.md` | §18 replaced (was a "Next up" placeholder written in Phase 2A, now the real design writeup); new §19 "Next up". |
-| `CHANGELOG.md`, `README.md` | New entry / package-list addition. |
+### UI / UX
+- **Layout**: Accessibility roles (`navigation`, `menubar`), version bumped to V16.
+- **Responsive**: Portfolio uses 12-column grid that collapses gracefully on
+  mobile.
+- **Tailwind**: Zero new design tokens; all changes use existing color palette.
 
-**Nothing was removed or had its public signature changed.** `CapitalManager`,
-`CorrelationEngine`, `PortfolioState`, and every existing dataclass in
-`portfolio_models.py` are byte-for-byte unchanged.
-
-## Design notes (see `docs/architecture.md` §18 for the full writeup)
-
-- **Sector cap uses capital (margin), not leveraged notional.** The first
-  implementation used notional and failed its own tests — at 5x leverage,
-  one ordinary position's notional already exceeds a 50% balance-based cap.
-  Fixed before this was ever committed; caught by the test suite, not left
-  as a shipped bug. `SectorEngine.capital_by_sector()` (new) vs.
-  `exposure_by_sector()` (notional, used for the *reported* diversification
-  score, where leveraged market exposure is the right question) are
-  deliberately two different methods answering two different questions.
-- **Replacement logic reuses `CapitalManager`, never re-implements its
-  eligibility/correlation/scoring rules.** Evaluates a capacity-blocked
-  challenger by re-running `CapitalManager` itself with room for one extra
-  slot, rather than a second, independently-maintained copy of the same
-  logic.
-- **`ReplacementProposal` is advisory only** — never merged into
-  `selected`/`total_capital_allocated`. `PortfolioManager` still does not
-  execute trades.
-
-## Test results
-
-```
-pytest tests/ -q
-1188 passed, 0 failed   (1082 baseline + 106 new)
-
-ruff check . --exclude dashboard_src --exclude dashboard
-All checks passed!
-```
-
-New test files: `tests/test_sector_engine.py` (60), `tests/test_portfolio_manager.py`
-(36), `tests/test_portfolio_history.py` (10).
-
-## Known limitations / follow-up (not urgent, documented not hidden)
-
-- Sector-cap rejections don't redistribute freed capital to remaining
-  candidates this cycle (same simplification Phase 2A already accepted for
-  `max_symbol_pct`).
-- At most one replacement proposed per `decide()` call.
-- Cooldown/min-hold are registered at proposal time, not confirmed-execution
-  time — there's no feedback loop yet telling `PortfolioManager` whether a
-  proposal was actually acted on. `notify_position_closed()` is the hook a
-  future execution-wiring phase should call for real closures.
-
-See `MIGRATION.md` for upgrade/rollback notes.
+### Build
+- **Vite chunking**: Added `ui-vendor` and `animation-vendor` manual chunks for
+  better HTTP cache hit ratios.

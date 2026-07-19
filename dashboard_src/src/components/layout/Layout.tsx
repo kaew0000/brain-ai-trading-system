@@ -35,15 +35,15 @@ export default function Layout(){
 
   return(
     <div className="flex h-screen overflow-hidden bg-surface bg-grid bg-grid">
-      <aside className="flex flex-col w-14 xl:w-52 shrink-0 border-r border-border bg-surface-1">
+      <aside className="flex flex-col w-14 xl:w-52 shrink-0 border-r border-border bg-surface-1" role="navigation" aria-label="Primary">
         <div className="px-3 py-3 border-b border-border flex items-center gap-2">
           <div className="w-7 h-7 rounded bg-accent-blue/20 border border-accent-blue/50 flex items-center justify-center text-accent-blue text-sm font-bold shrink-0">B</div>
           <div className="hidden xl:block overflow-hidden">
             <div className="text-xs font-mono font-bold text-text-primary leading-none">BRAIN BOT</div>
-            <div className="text-[9px] text-text-muted tracking-widest mt-0.5">V14 · COMMAND OFFICE</div>
+            <div className="text-[9px] text-text-muted tracking-widest mt-0.5">V16 · COMMAND OFFICE</div>
           </div>
         </div>
-        <nav className="flex-1 py-2 px-1.5 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 py-2 px-1.5 space-y-0.5 overflow-y-auto" role="menubar">
           {NAV.map(n=>(
             <NavLink key={n.to} to={n.to} end={n.to==='/'}
               className={({isActive})=>clsx('nav-item',isActive&&'active')}>

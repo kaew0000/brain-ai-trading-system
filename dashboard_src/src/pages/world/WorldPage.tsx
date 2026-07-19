@@ -1,11 +1,17 @@
 // ============================================================
-// Brain Bot V15 — World HQ Page
+// Brain Bot V16 — World HQ Page
 // Root React component for the 2D pixel-art trading HQ.
 // Mounts Phaser, bridges events to React overlays, manages
 // the full module lifecycle cleanly.
+//
+// V16 changes:
+//   • React.memo to prevent parent re-render cascades
+//   • Throttled NPC position updates (200 ms)
+//   • Named event listener cleanup (no removeAllListeners)
+//   • Loading overlay while Phaser boots
 // ============================================================
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import Phaser from 'phaser';
 import { WorldScene, WORLD_EVENTS } from './WorldScene';
 import { startWorldApi, stopWorldApi } from './worldApi';
@@ -13,6 +19,7 @@ import { useWorldStore, THEME_COLORS } from './worldStore';
 import { buildWorldMap } from './MapLoader';
 import { ROOM_DEFINITIONS } from './Room';
 import type { WorldMap } from './types/world.types';
+import { useThrottle } from '@/hooks/useThrottle';
 
 import WorldOverlay from './components/WorldOverlay';
 import SearchBar from './components/SearchBar';
@@ -21,7 +28,6 @@ import InteractionModal from './components/InteractionModal';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Find the closest room to a given tile coordinate */
 function closestRoomId(tx: number, ty: number): string {
   let best = 'plaza';
   let bestDist = Infinity;
@@ -34,13 +40,11 @@ function closestRoomId(tx: number, ty: number): string {
   return best;
 }
 
-// ── Phaser game factory ────────────────────────────────────────────────────────
-
 function createPhaserConfig(parent: HTMLElement): Phaser.Types.Core.GameConfig {
   return {
     type: Phaser.AUTO,
     parent,
-    width:  '100%',
+    width: '100%',
     height: '100%',
     backgroundColor: '#070714',
     pixelArt: true,
@@ -60,18 +64,27 @@ function createPhaserConfig(parent: HTMLElement): Phaser.Types.Core.GameConfig {
 
 // ── WorldPage ─────────────────────────────────────────────────────────────────
 
-export default function WorldPage() {
+export default memo(function WorldPage() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const gameRef      = useRef<Phaser.Game | null>(null);
-  const sceneRef     = useRef<WorldScene | null>(null);
+  const gameRef = useRef<Phaser.Game | null>(null);
+  const sceneRef = useRef<WorldScene | null>(null);
 
-  const [worldMap, setWorldMap]         = useState<WorldMap | null>(null);
+  const [worldMap, setWorldMap] = useState<WorldMap | null>(null);
   const [npcPositions, setNpcPositions] = useState<Array<{ id: string; tx: number; ty: number }>>([]);
-  const [searchOpen, setSearchOpen]     = useState(false);
-  const [ready, setReady]               = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [ready, setReady] = useState(false);
 
   const { theme, openModal } = useWorldStore();
   const colors = THEME_COLORS[theme];
+
+  // Throttle NPC position updates to 200 ms — prevents React re-render storm
+  // when player walks across many tiles quickly.
+  const throttledSetNpcPositions = useThrottle(
+    useCallback((positions: Array<{ id: string; tx: number; ty: number }>) => {
+      setNpcPositions(positions);
+    }, []),
+    200
+  );
 
   // ── Mount Phaser ─────────────────────────────────────────────
 
@@ -81,38 +94,42 @@ export default function WorldPage() {
     const game = new Phaser.Game(createPhaserConfig(containerRef.current));
     gameRef.current = game;
 
-    game.events.on(WORLD_EVENTS.READY, () => {
+    const onReady = () => {
       const scene = game.scene.getScene('WorldScene') as WorldScene;
       sceneRef.current = scene;
       setWorldMap(buildWorldMap());
       setReady(true);
-    });
+    };
 
-    game.events.on(
-      WORLD_EVENTS.INTERACT,
-      (data: { type: any; roomId: string; npcId?: string }) => {
-        openModal(data.type, data.roomId, data.npcId);
-      },
-    );
+    const onInteract = (data: { type: any; roomId: string; npcId?: string }) => {
+      openModal(data.type, data.roomId, data.npcId);
+    };
 
-    // NPC positions updated every tile-move
-    game.events.on(WORLD_EVENTS.PLAYER_MOVE, () => {
+    const onPlayerMove = () => {
       if (sceneRef.current) {
-        setNpcPositions(sceneRef.current.getNpcPositions());
+        throttledSetNpcPositions(sceneRef.current.getNpcPositions());
       }
-    });
+    };
 
-    // Ctrl+K from Phaser keyboard
-    game.events.on('world:search', () => setSearchOpen(true));
+    const onSearch = () => setSearchOpen(true);
+
+    game.events.on(WORLD_EVENTS.READY, onReady);
+    game.events.on(WORLD_EVENTS.INTERACT, onInteract);
+    game.events.on(WORLD_EVENTS.PLAYER_MOVE, onPlayerMove);
+    game.events.on('world:search', onSearch);
 
     return () => {
-      game.events.removeAllListeners();
+      // Named removal — safe, does not nuke Phaser internal listeners
+      game.events.off(WORLD_EVENTS.READY, onReady);
+      game.events.off(WORLD_EVENTS.INTERACT, onInteract);
+      game.events.off(WORLD_EVENTS.PLAYER_MOVE, onPlayerMove);
+      game.events.off('world:search', onSearch);
       game.destroy(true);
       gameRef.current = null;
       sceneRef.current = null;
       setReady(false);
     };
-  }, [openModal]);
+  }, [openModal, throttledSetNpcPositions]);
 
   // ── Start API connections ─────────────────────────────────────
 
@@ -152,145 +169,38 @@ export default function WorldPage() {
     sceneRef.current?.teleportToRoom(roomId);
   }, []);
 
-  // ── Render ────────────────────────────────────────────────────
+  // ── Render ───────────────────
 
   return (
-    <div style={{
-      position: 'relative',
-      width: '100%',
-      height: '100vh',
-      overflow: 'hidden',
-      background: colors.bg,
-      userSelect: 'none',
-    }}>
-      {/* ── Phaser canvas ── */}
-      <div
-        ref={containerRef}
-        id="world-hq-canvas"
-        style={{ position: 'absolute', inset: 0, zIndex: 0 }}
-      />
-
-      {/* ── Loading screen ── */}
-      {!ready && <LoadingScreen colors={colors} />}
-
-      {/* ── React overlays (only after Phaser is ready) ── */}
-      {ready && (
+    <div className="relative w-full h-full overflow-hidden bg-surface" ref={containerRef}>
+      {ready && worldMap && (
         <>
-          {/*
-            NOTE: the minimap used to be a separate React <canvas> that drew
-            flat color rectangles for rooms. It's now a real second Phaser
-            camera (see ui/MinimapCamera.ts) that renders the actual world
-            geometry/sprites in the top-right corner of the game canvas
-            itself, and handles its own click-to-teleport input directly
-            in WorldScene — so there's nothing to mount here anymore.
-          */}
-
-          <WorldOverlay />
-
-          <ThemeToolbar onSearch={() => setSearchOpen(true)} />
-
-          <InteractionModal onTeleport={handleTeleportRoom} />
-
-          <SearchBar
-            open={searchOpen}
-            onClose={() => setSearchOpen(false)}
-            onTeleportRoom={handleTeleportRoom}
-            onTeleportNpc={handleTeleportNpc}
+          <WorldOverlay
+            worldMap={worldMap}
+            npcPositions={npcPositions}
+            onMinimapTeleport={handleMinimapTeleport}
+            colors={colors}
           />
+          <ThemeToolbar />
+          {searchOpen && (
+            <SearchBar
+              worldMap={worldMap}
+              onTeleportRoom={handleTeleportRoom}
+              onTeleportNpc={handleTeleportNpc}
+              onClose={() => setSearchOpen(false)}
+            />
+          )}
+          <InteractionModal />
         </>
+      )}
+      {!ready && (
+        <div className="absolute inset-0 flex items-center justify-center bg-surface z-50">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-accent-blue/30 border-t-accent-blue rounded-full animate-spin" />
+            <span className="text-xs text-text-muted font-mono tracking-wider">LOADING WORLD HQ…</span>
+          </div>
+        </div>
       )}
     </div>
   );
-}
-
-// ── LoadingScreen ─────────────────────────────────────────────────────────────
-
-function LoadingScreen({ colors }: { colors: any }) {
-  return (
-    <div style={{
-      position: 'absolute', inset: 0,
-      background: '#070714',
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      zIndex: 500, fontFamily: 'monospace',
-    }}>
-      <style>{`
-        @keyframes hq-scan {
-          0%   { left: 0%;  width: 30%; }
-          50%  { left: 70%; width: 30%; }
-          100% { left: 0%;  width: 30%; }
-        }
-        @keyframes hq-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-      `}</style>
-
-      {/* Brain icon pulse */}
-      <div style={{ fontSize: 40, marginBottom: 16, animation: 'hq-blink 1.8s ease-in-out infinite' }}>
-        🧠
-      </div>
-
-      <div style={{
-        color: '#00ff88', fontSize: 13, letterSpacing: 4,
-        marginBottom: 4, textTransform: 'uppercase',
-      }}>
-        Brain Bot V15
-      </div>
-      <div style={{ color: '#ffd700', fontSize: 10, letterSpacing: 2, marginBottom: 32 }}>
-        Command World — Loading
-      </div>
-
-      {/* Progress bar */}
-      <div style={{
-        width: 200, height: 4, background: '#111',
-        borderRadius: 2, overflow: 'hidden', position: 'relative',
-        border: '1px solid #1a1a3e',
-      }}>
-        <div style={{
-          position: 'absolute', height: '100%',
-          background: '#00ff88', borderRadius: 2,
-          animation: 'hq-scan 1.6s ease-in-out infinite',
-        }} />
-      </div>
-
-      <div style={{ color: '#333', fontSize: 8, marginTop: 24, letterSpacing: 1 }}>
-        GENERATING PIXEL WORLD · CONNECTING AGENTS
-      </div>
-
-      {/* Boot messages */}
-      <div style={{
-        marginTop: 32, textAlign: 'left', width: 260,
-        color: '#1a4a1a', fontSize: 8, lineHeight: 2,
-      }}>
-        {[
-          'Initializing Phaser 3 renderer…',
-          'Generating procedural tile map…',
-          'Spawning 10 AI agents…',
-          'Connecting WebSocket streams…',
-          'Loading trading data…',
-        ].map((msg, i) => (
-          <div key={i} style={{
-            color: '#1a5a1a',
-            animation: `hq-blink ${1 + i * 0.2}s ease-in-out infinite`,
-            animationDelay: `${i * 0.3}s`,
-          }}>
-            ▶ {msg}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Audio integration note ─────────────────────────────────────
-// Import and initialize AudioManager in the mount useEffect:
-//
-//   import { initAudio, destroyAudio, playModalOpen, playTeleport } from './AudioManager';
-//
-//   // Inside mount useEffect:
-//   initAudio();
-//   return () => { destroyAudio(); ... }
-//
-//   // On teleport:
-//   playTeleport();
-//
-//   // On modal open:
-//   playModalOpen();
+});
