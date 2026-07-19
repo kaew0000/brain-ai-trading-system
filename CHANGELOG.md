@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 2C: Portfolio API
+
+### Added
+- **`api/portfolio_api.py`**: REST read layer over `portfolio_history`
+  (`GET /api/portfolio/state`, `/decision/latest`, `/history`
+  [limit/offset/symbol/sector], `/sectors`, `/allocations`). `APIRouter`
+  included into the existing `api/app.py` singleton — not a second
+  FastAPI app. No exchange calls, no `PortfolioManager`/`CapitalManager`
+  calls; reads only what Phase 2B already persisted.
+- **`api/portfolio_ws.py`**: `WS /ws/portfolio` — `decision`/`state`/
+  `sectors`/`allocations`/`replacement_proposal` events, broadcast only
+  when a new row appears in `portfolio_history` (deduped by row id),
+  plus a 5s heartbeat. No polling loop of its own — hooks into
+  `api/app.py`'s existing supervised `_broadcast_loop()` (same one
+  `/ws/decision`, `/ws/agents`, `/ws/missions` already ride on).
+- **`api/portfolio_serializers.py`**: pure row-dict → JSON shaping.
+  Every payload carries an explicit `"source": "latest_persisted_decision"`
+  / `"live": false` marker — this API reports the latest *persisted*
+  decision cycle, never a live `PortfolioState` (none exists yet; see
+  architecture.md §19's flagged-and-resolved conflict with §18's
+  original "wait for the orchestrator" recommendation).
+- Additive extensions to `portfolio/portfolio_history.py`:
+  `query_decisions()` (paginated, optional symbol/sector filter) and
+  `count_decisions()`. `get_latest_decisions()` itself unchanged —
+  same signature, same one existing caller (its own tests).
+- 92 new tests (`test_portfolio_serializers.py` 33,
+  `test_portfolio_history_query.py` 14, `test_portfolio_api.py` 27,
+  `test_portfolio_ws.py` 18). Full suite: 1188 → 1280 passed, 0 failed.
+- `docs/architecture.md` §19 (design rationale, including the flagged
+  architecture conflict and its resolution) and renumbered the previous
+  §19 "Next up" to §20.
+
+### Not included (explicitly out of scope for this phase)
+- No scheduler/orchestrator calling `PortfolioManager.decide()` on a
+  cadence — `portfolio_history` remains unpopulated in production until
+  that future phase exists; every endpoint here already handles that
+  honestly (200 + empty/null, never fabricated).
+- No dashboard page consuming this API yet.
+- No new auth role — `/api/portfolio/*` already covered by
+  `_auth_middleware`'s default VIEWER-role path; `/ws/portfolio` uses
+  the existing `enforce_ws_role()`.
+
+---
+
 ## [Unreleased] — V16 Phase 2B: Portfolio Manager Orchestrator
 
 ### Added
