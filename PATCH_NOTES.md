@@ -1,83 +1,108 @@
-# PATCH NOTES — V16 Phase 2B: Portfolio Manager Orchestrator
+# PATCH NOTES — V16 Phase 2C: Portfolio API
 
-Branch: `feature/phase2b-portfolio-manager`
-Base: `main` @ `e21dab0` (Phase 2A merged)
+Branch: `feature/phase2c-portfolio-api`
+Base: `main` @ `6dd7f21` (Phase 2B merged)
 
 ## Summary
 
-Adds the orchestration layer Phase 2A's own docs (architecture.md §17/§18)
-explicitly deferred: `PortfolioManager`, which wraps `CapitalManager.decide()`
-(called unmodified, nothing about it changes) with sector exposure
-enforcement, replacement logic, and cooldown/min-hold bookkeeping.
-Decision-only, same boundary `CapitalManager` already drew for itself —
-nothing in this phase places an order, calls `set_leverage`, or imports
-`execution/`/`data/`. No REST API, WebSocket, dashboard, or scheduler
-wiring, per this phase's own scope.
+Adds a REST + WebSocket read layer over `portfolio_history` (Phase 2B's
+persistence table). Decision-only boundary preserved one layer further:
+this phase never calls `PortfolioManager`/`CapitalManager`, never touches
+`execution/`/`data/`, never places an order.
+
+**Architecture conflict found and resolved before building (flagged,
+not silently overridden):** Phase 2B's own architecture.md §19 "Next up"
+said REST/WebSocket should wait for real orchestrator wiring — verified
+that's still literally true (`PortfolioManager` is never instantiated
+outside tests, so `portfolio_history` is empty in production today) —
+but resolved it by building the API as a genuine read layer that is
+honest about that emptiness rather than waiting. See architecture.md
+§19 for the full writeup.
 
 ## New modules
 
 | File | Purpose |
 |---|---|
-| `portfolio/portfolio_manager.py` | `PortfolioManager.decide()` — the orchestrator |
-| `portfolio/sector_engine.py` | Sector lookup, exposure (capital- and notional-based), diversification score |
-| `portfolio/portfolio_history.py` | Persists each decision cycle (mirrors `ranking_history.py`) |
-| `config/sector_table.py` | Static symbol→sector table (13 sectors, ~110 symbols, Version 1) |
+| `api/portfolio_api.py` | REST endpoints (`APIRouter`, included into the existing `api/app.py` singleton) |
+| `api/portfolio_ws.py` | `/ws/portfolio` — hooks into `api/app.py`'s existing `_broadcast_loop()`, no new poll loop |
+| `api/portfolio_serializers.py` | Pure row-dict → JSON shaping, `source`/`live` marker on every payload |
 
 ## Additive changes to existing files
 
 | File | Change |
 |---|---|
-| `portfolio/portfolio_models.py` | + `ReplacementProposal`, `OrchestratedDecision` dataclasses. Nothing existing modified. |
-| `config/settings.py` | + `PORTFOLIO_REPLACEMENT_THRESHOLD_PCT` (0.15), `PORTFOLIO_COOLDOWN_SECONDS` (3600), `PORTFOLIO_MIN_HOLD_SECONDS` (1800), `PORTFOLIO_HISTORY_RETENTION_HOURS` (168). |
-| `database/schema_v13.sql` | + `portfolio_history` table + index, appended at EOF, `CREATE TABLE IF NOT EXISTS` (idempotent, safe on every existing DB). |
-| `docs/architecture.md` | §18 replaced (was a "Next up" placeholder written in Phase 2A, now the real design writeup); new §19 "Next up". |
-| `CHANGELOG.md`, `README.md` | New entry / package-list addition. |
+| `portfolio/portfolio_history.py` | + `query_decisions()`, `count_decisions()`. `get_latest_decisions()` untouched — same signature, same one existing caller. |
+| `api/app.py` | + 3 import lines, + `app.include_router()` x2, + one `await _portfolio_ws_check()` call inside the existing broadcast loop, + module docstring endpoint list update. No existing route/behavior changed. |
+| `docs/architecture.md` | New §19 (design + the conflict above); old §19 "Next up" renumbered to §20, with one stale bullet updated to reflect this phase now existing. |
+| `CHANGELOG.md` | New entry. |
 
-**Nothing was removed or had its public signature changed.** `CapitalManager`,
-`CorrelationEngine`, `PortfolioState`, and every existing dataclass in
-`portfolio_models.py` are byte-for-byte unchanged.
+**Nothing was removed or had its public signature changed.** Every Phase
+2A/2B module (`CapitalManager`, `CorrelationEngine`, `PortfolioState`,
+`PortfolioManager`, `SectorEngine`, all existing dataclasses) is
+byte-for-byte unchanged.
 
-## Design notes (see `docs/architecture.md` §18 for the full writeup)
+## Endpoints
 
-- **Sector cap uses capital (margin), not leveraged notional.** The first
-  implementation used notional and failed its own tests — at 5x leverage,
-  one ordinary position's notional already exceeds a 50% balance-based cap.
-  Fixed before this was ever committed; caught by the test suite, not left
-  as a shipped bug. `SectorEngine.capital_by_sector()` (new) vs.
-  `exposure_by_sector()` (notional, used for the *reported* diversification
-  score, where leveraged market exposure is the right question) are
-  deliberately two different methods answering two different questions.
-- **Replacement logic reuses `CapitalManager`, never re-implements its
-  eligibility/correlation/scoring rules.** Evaluates a capacity-blocked
-  challenger by re-running `CapitalManager` itself with room for one extra
-  slot, rather than a second, independently-maintained copy of the same
-  logic.
-- **`ReplacementProposal` is advisory only** — never merged into
-  `selected`/`total_capital_allocated`. `PortfolioManager` still does not
-  execute trades.
+REST (all under `/api/portfolio`, existing VIEWER-role auth applies
+automatically — no `api/auth.py` change needed):
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/state` | Positions implied by the latest persisted decision (NOT a live `PortfolioState`) |
+| GET | `/decision/latest` | Full latest persisted `OrchestratedDecision` |
+| GET | `/history` | Paginated decision history — `limit`, `offset`, `symbol`, `sector` query params |
+| GET | `/sectors` | Sector exposure + diversification score from the latest decision |
+| GET | `/allocations` | `selected` list from the latest decision |
+
+WebSocket: `WS /ws/portfolio` — `init` frame on connect (always,
+regardless of dedup state — reconnect-safe), then `decision`/`state`/
+`sectors`/`allocations`/`replacement_proposal` events only when a new
+row appears in `portfolio_history` (deduped by row id — a row id can
+only newly appear once, so this is the entire dedup mechanism), plus a
+`heartbeat` every 5s regardless.
+
+## Why every payload says "not live"
+
+Rule from this phase's brief: never fabricate runtime state, never
+invent a live `PortfolioState`. Every serializer output carries
+`"source": "latest_persisted_decision"` and `"live": false` explicitly,
+and `/state`'s payload shape is deliberately not a mirror of
+`PortfolioState` — it's "positions the latest persisted decision
+selected", which is real, just not continuously live. See
+`api/portfolio_serializers.py`'s module docstring for the full reasoning.
+
+## No decision ever persisted → real empty state, not a 404
+
+Every endpoint returns 200 with `null`/`[]`/`{}` (never a synthesized
+placeholder), matching this codebase's existing `/api/paper` convention.
+The WebSocket's `init` frame does the same, then the connection simply
+stays idle apart from its heartbeat.
 
 ## Test results
 
 ```
-pytest tests/ -q
-1188 passed, 0 failed   (1082 baseline + 106 new)
+pytest tests/ -m unit -q
+1280 passed, 0 failed   (1188 baseline + 92 new)
 
 ruff check . --exclude dashboard_src --exclude dashboard
 All checks passed!
 ```
 
-New test files: `tests/test_sector_engine.py` (60), `tests/test_portfolio_manager.py`
-(36), `tests/test_portfolio_history.py` (10).
+New test files: `tests/test_portfolio_serializers.py` (33),
+`tests/test_portfolio_history_query.py` (14), `tests/test_portfolio_api.py`
+(27), `tests/test_portfolio_ws.py` (18).
 
-## Known limitations / follow-up (not urgent, documented not hidden)
+## Known limitations / follow-up (documented, not hidden)
 
-- Sector-cap rejections don't redistribute freed capital to remaining
-  candidates this cycle (same simplification Phase 2A already accepted for
-  `max_symbol_pct`).
-- At most one replacement proposed per `decide()` call.
-- Cooldown/min-hold are registered at proposal time, not confirmed-execution
-  time — there's no feedback loop yet telling `PortfolioManager` whether a
-  proposal was actually acted on. `notify_position_closed()` is the hook a
-  future execution-wiring phase should call for real closures.
+- `portfolio_history` is empty in production until a future orchestrator
+  phase calls `PortfolioManager.decide()` on a schedule — every endpoint
+  here already handles that honestly today; no code change needed once
+  that phase lands.
+- `GET /history`'s symbol/sector filter is applied in Python over
+  decoded JSON, not SQL `WHERE` (no indexed column for either in
+  `portfolio_history`'s one-JSON-blob-per-row schema). `pagination.total`
+  is `null` whenever a filter is active, for the same reason — an exact
+  filtered count isn't cheap without decoding the whole table.
+- No dashboard page consumes this API yet.
 
 See `MIGRATION.md` for upgrade/rollback notes.
