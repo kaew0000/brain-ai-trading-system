@@ -61,7 +61,8 @@ pytest tests/ -q
 
 ## Repository layout
 
-Key backend packages: `agents/`, `api/`, `commander/`, `config/`, `data/`,
+Key backend packages: `agents/`, `api/` (incl. `portfolio_api.py`/`portfolio_ws.py`,
+V16 Phase 2C), `commander/`, `config/`, `data/`,
 `decision/`, `execution/`, `features/`, `intelligence/`, `journal/`,
 `ml/`, `paper/`, `pipeline/`, `portfolio/` (V16 Phase 2A/2B), `ranking/`
 (V16 Phase 2), `regime/`, `risk/`, `scanner/` (V16 Phase 2),

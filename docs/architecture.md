@@ -1053,16 +1053,144 @@ clean.
 
 ---
 
-## 19. Next up
+## 19. Portfolio API — V16 Phase 2C (2026-07-19)
+
+**Architecture conflict found and resolved (flagged before building, per
+this phase's own STOP-and-explain rule):** §18's own "Next up" section
+(now §20 below) said REST/WebSocket should wait for real orchestrator
+wiring, on the reasoning that there'd be "nothing to expose" without it.
+Verified that's still true in the literal sense — `PortfolioManager` is
+never instantiated outside tests, so nothing populates `portfolio_history`
+in production yet — but "nothing to expose" doesn't have to mean "nothing
+worth building yet": the persistence layer (`portfolio_history` table,
+`OrchestratedDecision.to_dict()`) already exists and is already real, it's
+just currently unpopulated. Resolution: build the API as a genuine read
+layer over that real (if currently empty) storage, with every response
+honestly labeled as a snapshot of the latest *persisted* decision rather
+than a live view, so nothing here has to change or be revisited once a
+future orchestrator phase starts calling `PortfolioManager.decide()` on a
+schedule — that phase only has to start calling `portfolio_history.save_decision()`
+regularly, and every endpoint here starts reflecting real, current data
+with no code change.
+
+### What's built
+
+`api/portfolio_api.py` (REST, `APIRouter` included into the existing
+`api/app.py` singleton — not a second FastAPI app), `api/portfolio_ws.py`
+(`/ws/portfolio`), `api/portfolio_serializers.py` (pure row-dict → JSON
+shaping, no DB/exchange access). Two small additive extensions to
+`portfolio/portfolio_history.py`: `query_decisions()` (paginated,
+optional symbol/sector filter) and `count_decisions()` —
+`get_latest_decisions()` itself is untouched, same signature, same one
+existing caller (its own tests).
+
+REST: `GET /api/portfolio/state`, `/decision/latest`, `/history`
+(limit/offset/symbol/sector), `/sectors`, `/allocations`. WebSocket:
+`/ws/portfolio` — `decision`/`state`/`sectors`/`allocations`/
+`replacement_proposal` events, only when a new row appears in
+`portfolio_history` (deduped by row id — a given id can only newly
+appear once, so this is the entire duplicate-prevention mechanism, no
+separate already-sent set needed), plus a heartbeat every 5s regardless.
+Every connection gets a full `init` frame immediately on connect
+(current latest-persisted snapshot, explicit nulls if nothing's ever
+been persisted) so a reconnecting client is never left waiting on the
+next new decision to resync.
+
+### Why every payload carries an explicit `source`/`live` marker
+
+Per the phase's own rules: never fabricate runtime state, never invent a
+live `PortfolioState`. Every serializer output
+(`api/portfolio_serializers.py`) includes `"source":
+"latest_persisted_decision"` and `"live": false` so a client — or a
+human reading a raw response — cannot mistake this for a continuously-
+updated live view even without reading this doc. `GET
+/api/portfolio/state` in particular is deliberately NOT shaped to look
+like `portfolio/portfolio_state.py`'s `PortfolioState` class; it reports
+the *positions the latest persisted decision selected*, which is real
+data, just presented as exactly what it is — a decision-cycle snapshot,
+not a live account view.
+
+### No decision ever persisted → real empty state, not a 404
+
+Matches this codebase's existing convention (`/api/paper`,
+`/api/paper/trades`: "disabled/unavailable is a normal, expected runtime
+state... NOT a server error"). Every endpoint returns 200 with an
+honestly empty/null payload (`"decision": null`, `"positions": []`,
+`"sector_exposure": {}`) rather than a 404 or a synthesized placeholder.
+The WebSocket does the equivalent by sending its `init` frame with the
+same nulls and then staying idle apart from its heartbeat — "the stream
+simply remains idle" per the phase's own rule 4.
+
+### Why symbol/sector history filtering is Python-side, not SQL WHERE
+
+`portfolio_history` stores one JSON blob per decision cycle (same "wide,
+dynamic shape" reasoning `schema_v13.sql` already gives for this table —
+see §18) — there's no indexed column for either symbol or sector to
+filter on in SQL. `query_decisions()` decodes a generously-sized page
+and filters in Python instead. Fine at this table's expected scale (one
+row per decision cycle, pruned by `PORTFOLIO_HISTORY_RETENTION_HOURS`);
+flagged here as a known limitation rather than hidden, same convention
+every other "known simplification" in this codebase follows. One
+consequence: `GET /api/portfolio/history`'s `pagination.total` is `null`
+whenever a symbol/sector filter is active (an exact filtered count isn't
+cheap without decoding the whole table) — `has_more` falls back to an
+honest best-effort (`true` only when a full page was returned) rather
+than a fabricated total.
+
+### Why /ws/portfolio has no polling loop of its own
+
+`check_and_broadcast()` is called once per tick from `api/app.py`'s
+existing, already-supervised `_broadcast_loop()` — the same single loop
+every other WS channel in this codebase already rides on
+(`/ws/decision`, `/ws/agents`, `/ws/missions`). A second independent
+poll loop here would be exactly the duplicate-scheduler infrastructure
+this phase's rules rule out ("No Scheduler"); hooking into the existing
+one is the additive option.
+
+### Deliberately not done (out of scope for this slice)
+
+No dashboard page — the brief scoped this to "no dashboard changes
+beyond what is required to consume the new API", and nothing yet
+consumes it. No scheduler/orchestrator calling `PortfolioManager.decide()`
+on a cadence — still §20's own next item below, unchanged by this phase.
+No new auth role — `/api/portfolio/*` already falls under
+`_auth_middleware`'s default VIEWER-role path (any `/api/*` route not in
+`_AUTH_PUBLIC_PATHS`), and `/ws/portfolio` calls `enforce_ws_role()`
+exactly like every other `/ws/*` handler; `api/auth.py` needed no changes.
+
+### Tests
+
+`tests/test_portfolio_serializers.py` (33, pure functions — no DB, no
+FastAPI), `tests/test_portfolio_history_query.py` (14, `query_decisions`/
+`count_decisions` against a real `:memory:` DB, same pattern as §18's
+`test_portfolio_history.py`), `tests/test_portfolio_api.py` (27, REST
+endpoints against the real `api.app` singleton via `TestClient`,
+`portfolio_history` monkeypatched for isolation), `tests/test_portfolio_ws.py`
+(18, init-frame/dedup/heartbeat/reconnect/dead-client-drop, calling
+`check_and_broadcast()` directly rather than depending on
+`_broadcast_loop`'s real 1s cadence) — **92 new tests**, none touching a
+network/exchange call, matching §17/§18's own testing convention.
+
+**Verified: `pytest tests/ -m unit -q` → 1280 passed, 0 failed** (1188
+baseline + 92). `ruff check . --exclude dashboard_src --exclude dashboard`
+→ clean.
+
+---
+
+## 20. Next up
 
 - **Real orchestrator wiring** (provisionally "Phase 2E") — the piece
-  both §17 and §18 deliberately left out: reading real exchange/journal
-  state into a `PortfolioState` each cycle, driving the position state
-  machine, calling `ExecutionCoordinator`'s per-symbol `TradeManager`
-  with an `OrchestratedDecision`'s allocations, and actually acting on
-  (or discarding) a `ReplacementProposal` — including feeding real
-  closures back through `PortfolioManager.notify_position_closed()`
-  instead of §18's proposal-time-only cooldown registration.
+  §17, §18, and now §19 have all deliberately left out: reading real
+  exchange/journal state into a `PortfolioState` each cycle, driving the
+  position state machine, calling `ExecutionCoordinator`'s per-symbol
+  `TradeManager` with an `OrchestratedDecision`'s allocations, and
+  actually acting on (or discarding) a `ReplacementProposal` — including
+  feeding real closures back through
+  `PortfolioManager.notify_position_closed()` instead of §18's
+  proposal-time-only cooldown registration. The moment this phase starts
+  calling `portfolio_history.save_decision()` on a schedule, every §19
+  endpoint starts reflecting real, current data with no code change on
+  the API side.
 - **`RiskEngine` per-symbol/aggregate exposure** — still §11's
   single account-level gate; §17 and §18 have both now built on top of
   it unchanged rather than fixing it.
@@ -1074,9 +1202,8 @@ clean.
 - **Sector-cap capital redistribution** — §18's own "Known
   simplification": a rejected sector-capped candidate's freed capital
   currently isn't redistributed to remaining candidates.
-- **REST API / WebSocket / Dashboard pages** — still deferred per §16's
-  original reasoning (nothing to expose without the real orchestrator
-  above).
+- **Dashboard Portfolio page** — §19 built the API to consume; no UI
+  consumes it yet.
 - Everything still carried over from §16/§14/§13 that Portfolio work
   doesn't touch: reconciliation alert escalation (§6),
   `dashboard_api`/`websocket` heartbeat gaps (§4).

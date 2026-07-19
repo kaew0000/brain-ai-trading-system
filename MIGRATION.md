@@ -1,78 +1,84 @@
-# MIGRATION — V16 Phase 2B: Portfolio Manager Orchestrator
+# MIGRATION — V16 Phase 2C: Portfolio API
 
 ## Do you need to do anything?
 
 **No code changes required for existing callers.** Nothing in Phase 2A
-(`CapitalManager`, `CorrelationEngine`, `PortfolioState`, existing
-`portfolio_models.py` dataclasses) changed signature, behavior, or default.
-If you're not yet calling `CapitalManager.decide()` directly from anywhere
-outside tests, there is nothing to migrate — this phase is purely additive.
+or Phase 2B (`CapitalManager`, `CorrelationEngine`, `PortfolioState`,
+`PortfolioManager`, `SectorEngine`, `portfolio_history.save_decision()`/
+`get_latest_decisions()`, every existing dataclass) changed signature,
+behavior, or default. This phase only adds new files plus new,
+additive functions — nothing existing was touched in a way that affects
+any current caller.
 
-## If you want to start using `PortfolioManager`
+## If you want to start using the API
 
-Replace a direct `CapitalManager.decide()` call with `PortfolioManager.decide()`
-— same four arguments, same `PortfolioState`/`RiskEngine` contract:
+It's already live once this branch is deployed — `api/app.py` includes
+both routers unconditionally, no feature flag or config change needed.
 
-```python
-# Before (Phase 2A)
-from portfolio.capital_manager import CapitalManager
-cm = CapitalManager.from_settings()
-decision = cm.decide(candidates, risk_engine, state, balance)
-# decision: PortfolioDecision
-
-# After (Phase 2B) — additive, CapitalManager still works standalone
-from portfolio.portfolio_manager import PortfolioManager
-pm = PortfolioManager.from_settings()
-decision = pm.decide(candidates, risk_engine, state, balance)
-# decision: OrchestratedDecision — superset of PortfolioDecision's fields
-# (.selected, .rejected, .blocked, .block_reason, .total_capital_allocated,
-#  .total_risk_allocated, .explanation all present with the same meaning),
-# plus .replacements, .sector_exposure, .diversification_score, .portfolio_score
+```bash
+curl http://localhost:8000/api/portfolio/state
+# {"ok": true, "data": {"positions": [], "total_capital_allocated": 0.0,
+#   "blocked": null, "source": "latest_persisted_decision", "live": false,
+#   "as_of": null, "note": "No portfolio decision has ever been persisted yet..."}}
 ```
 
-`OrchestratedDecision.selected` is `CapitalManager`'s own selections after
-additional sector-cap filtering — it can be a *subset* of what calling
-`CapitalManager.decide()` directly would have returned (a candidate that
-passed every 2A gate can still be rejected here for `sector_exposure_exceeded`).
-Nothing else about `.selected`'s contents changes.
+That empty response is **expected and correct** today — see PATCH_NOTES.md's
+"No decision ever persisted" section. It will start reflecting real data
+automatically, with no further deploy, the moment some future phase
+starts calling `PortfolioManager.decide()` + `portfolio_history.save_decision()`
+on a schedule.
+
+```javascript
+const ws = new WebSocket("ws://localhost:8000/ws/portfolio");
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  // msg.type: "init" | "heartbeat" | "decision" | "state" | "sectors"
+  //         | "allocations" | "replacement_proposal"
+};
+```
 
 ## Database
 
-`database/schema_v13.sql` gained one new table, `portfolio_history`, via
-`CREATE TABLE IF NOT EXISTS` — applied automatically the next time any
-process calls `get_connection()`/`ManagedConn()`/`ReadConn()` against an
-existing database file; no manual migration step, no data touched in any
-existing table. Safe to deploy without downtime. If you never call
-`PortfolioManager.decide()`, this table simply stays empty.
-
-**Rollback:** if you need to revert this phase, `DROP TABLE IF EXISTS
-portfolio_history;` is safe and reverses the only schema change — no
-existing table's structure or data was touched.
+No schema change. `portfolio_history` already exists (Phase 2B). This
+phase only adds two new *read* functions
+(`portfolio_history.query_decisions()`, `count_decisions()`) — no new
+table, no new column, no migration step, nothing to apply.
 
 ## Configuration
 
-Four new settings, all with defaults matching what's described in
-`docs/architecture.md` §18 — no `.env`/config change required to deploy:
+No new settings. No `.env` change required to deploy.
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `PORTFOLIO_REPLACEMENT_THRESHOLD_PCT` | `0.15` | Challenger must beat weakest held position's score by >15% to trigger a replacement proposal |
-| `PORTFOLIO_COOLDOWN_SECONDS` | `3600` | How long a replaced/closed symbol is ineligible for new selection |
-| `PORTFOLIO_MIN_HOLD_SECONDS` | `1800` | How long a freshly-replaced-in symbol is protected from being proposed as an outgoing side |
-| `PORTFOLIO_HISTORY_RETENTION_HOURS` | `168` | `portfolio_history` row retention (mirrors `RANKER_HISTORY_RETENTION_HOURS`) |
+## Auth
+
+No change to `api/auth.py`. `/api/portfolio/*` already falls under
+`_auth_middleware`'s existing default (any `/api/*` path not explicitly
+public requires at least VIEWER role, exactly like every other `/api/*`
+route already added in P1-A). `/ws/portfolio` calls the existing
+`enforce_ws_role(ws, Role.VIEWER)`, same as `/ws/decision`/`/ws/agents`/
+`/ws/missions`. If `API_AUTH_ENABLED=false` (the current default per
+the startup warning), these routes are open like everything else already
+is — this phase doesn't change that posture either way.
 
 ## What is explicitly NOT part of this migration
 
-- No execution wiring. `PortfolioManager.decide()` returns decisions; nothing
-  calls `ExecutionCoordinator`, places an order, or reads live exchange state.
-- No REST/WebSocket/dashboard exposure of the new decision data.
-- No changes to `RiskEngine`'s account-level (not yet per-symbol) circuit
-  breaker.
+- No scheduler/orchestrator wiring — `portfolio_history` stays empty in
+  production until that separate future phase exists.
+- No execution wiring, no order placement, no Binance calls anywhere in
+  this phase's new code.
+- No dashboard page. Nothing in `dashboard_src/`/`dashboard/` was
+  touched.
+- No changes to `RiskEngine`, `CapitalManager`, `PortfolioManager`,
+  `SectorEngine`, or any Phase 2A/2B dataclass.
 
 ## Rollback (code)
 
-This entire phase lives in four new files plus additive-only edits to four
-existing ones (see `PATCH_NOTES.md`'s table). Reverting the single commit
-on `feature/phase2b-portfolio-manager` — or simply not merging the branch —
-fully removes it with zero impact on Phase 2A functionality, since nothing
-Phase 2A already shipped was modified.
+This entire phase lives in three new files
+(`api/portfolio_api.py`, `api/portfolio_ws.py`,
+`api/portfolio_serializers.py`) plus additive-only edits to two existing
+ones (`portfolio/portfolio_history.py`: two new functions appended;
+`api/app.py`: three import lines, two `include_router()` calls, one
+`await` inside the existing broadcast loop, one docstring update).
+Reverting the single commit on `feature/phase2c-portfolio-api` — or
+simply not merging the branch — fully removes it with zero impact on
+Phase 2A/2B functionality, since nothing they already shipped was
+modified. No database rollback needed (no schema change this phase).

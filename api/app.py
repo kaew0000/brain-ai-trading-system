@@ -21,12 +21,19 @@ POST /api/chat                         — interactive agent chat
 POST /api/auth/token                   — P1-A: exchange API key for bearer token
 POST /api/auth/rotate                  — P1-A: rotate the caller's bearer token
 
+GET  /api/portfolio/state              — V16 Phase 2C: latest persisted decision's positions (not live)
+GET  /api/portfolio/decision/latest    — V16 Phase 2C: latest persisted OrchestratedDecision
+GET  /api/portfolio/history            — V16 Phase 2C: paginated decision history (limit/offset/symbol/sector)
+GET  /api/portfolio/sectors            — V16 Phase 2C: sector exposure + diversification score
+GET  /api/portfolio/allocations        — V16 Phase 2C: latest persisted allocation list
+
 WebSocket streams
 -----------------
 WS   /ws/events        — EventBus fan-out (every new event)
 WS   /ws/signals       — new signals as they arrive
 WS   /ws/decision      — latest decision on every cycle tick
 WS   /ws/agents        — v14: agent telemetry snapshot, pushed ~1 Hz
+WS   /ws/portfolio     — V16 Phase 2C: new persisted portfolio decisions + 5s heartbeat
 
 Run standalone
 --------------
@@ -68,6 +75,12 @@ from system_health.watchdog import get_watchdog
 from system_health.reconciliation import get_reconciliation_engine
 from system_health.recovery_engine import get_recovery_engine
 from utils.logger import get_logger
+
+# V16 Phase 2C — Portfolio API (REST + WebSocket). See api/portfolio_api.py
+# and api/portfolio_ws.py module docstrings for design rationale.
+from api.portfolio_api import router as _portfolio_router
+from api.portfolio_ws import router as _portfolio_ws_router
+from api.portfolio_ws import check_and_broadcast as _portfolio_ws_check
 
 logger = get_logger("api.app")
 
@@ -249,6 +262,15 @@ async def _broadcast_loop() -> None:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
 
+            # ── /ws/portfolio — V16 Phase 2C: heartbeat + new-decision-only
+            # broadcast, entirely inside this same existing loop tick (see
+            # api/portfolio_ws.py's module docstring for why this isn't a
+            # second independent poll loop).
+            try:
+                await _portfolio_ws_check()
+            except Exception as exc:
+                logger.debug(f"portfolio WS check_and_broadcast error: {exc}")
+
             # ── /ws/missions — only push when missions changed ────────────────
             if _ws_missions.count > 0:
                 tracker = get_mission_tracker()
@@ -313,6 +335,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# V16 Phase 2C — Portfolio API. /api/portfolio/* routes are covered by the
+# existing _auth_middleware below automatically (any path starting with
+# "/api/" that isn't in _AUTH_PUBLIC_PATHS defaults to VIEWER role) — no
+# auth changes needed. /ws/portfolio enforces its own VIEWER role the same
+# way every other /ws/* handler in this file does.
+app.include_router(_portfolio_router)
+app.include_router(_portfolio_ws_router)
 
 
 # ── P1-A: Dashboard authentication ─────────────────────────────────────────
