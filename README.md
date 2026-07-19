@@ -63,9 +63,9 @@ pytest tests/ -q
 
 Key backend packages: `agents/`, `api/`, `commander/`, `config/`, `data/`,
 `decision/`, `execution/`, `features/`, `intelligence/`, `journal/`,
-`ml/`, `paper/`, `pipeline/`, `ranking/` (V16 Phase 2), `regime/`,
-`risk/`, `scanner/` (V16 Phase 2), `system_health/`, `telemetry/`,
-`trend/`, `utils/`.
+`ml/`, `paper/`, `pipeline/`, `portfolio/` (V16 Phase 2A/2B), `ranking/`
+(V16 Phase 2), `regime/`, `risk/`, `scanner/` (V16 Phase 2),
+`system_health/`, `telemetry/`, `trend/`, `utils/`.
 
 See `docs/architecture.md` for the authoritative, generated dependency
 graph — the list above is a quick orientation, not a substitute for it.

@@ -215,3 +215,81 @@ class PortfolioDecision:
             "total_risk_allocated":    self.total_risk_allocated,
             "explanation":             self.explanation,
         }
+
+
+# ── V16 Phase 2B additions (portfolio/portfolio_manager.py) ─────────────────
+#
+# Additive only — nothing above this line changes. PortfolioManager sits
+# one layer above CapitalManager: it calls CapitalManager.decide()
+# unmodified and wraps the result with orchestration-level context
+# (sector exposure, diversification, cooldown/replacement bookkeeping)
+# that CapitalManager has no reason to know about. See
+# portfolio_manager.py's own module docstring for the full design
+# rationale.
+
+
+@dataclass(frozen=True)
+class ReplacementProposal:
+    """
+    A proposed swap: close `outgoing_symbol` (a currently-held position)
+    to make room for `incoming_symbol` (a new candidate rejected only for
+    lack of capacity). This is a RECOMMENDATION, not an action —
+    PortfolioManager never closes or opens anything itself (see
+    "PortfolioManager MUST NOT execute trades" in portfolio_manager.py's
+    module docstring). Deliberately NOT merged into
+    OrchestratedDecision.selected/total_capital_allocated: there is no
+    entry/stop-loss price at this decision layer to size a not-yet-open
+    replacement position with (same reasoning CapitalManager itself gives
+    for why it returns capital amounts, not exchange order quantities).
+    """
+    incoming_symbol: str
+    outgoing_symbol: str
+    incoming_score:  float   # challenger's final_score (composite * coverage_weight * correlation_penalty)
+    outgoing_score:  float   # currently-held symbol's current-cycle composite_score, or 0.0 if it fell out of the ranked universe entirely
+    reason:          str
+
+
+@dataclass(frozen=True)
+class OrchestratedDecision:
+    """
+    The complete output of one PortfolioManager.decide() call — wraps a
+    CapitalManager PortfolioDecision with orchestration-level context.
+    `selected`/`total_capital_allocated`/`total_risk_allocated` describe
+    ONLY what's actually allocatable within current capacity this cycle
+    (CapitalManager's own output, after PortfolioManager's additional
+    sector-exposure and cooldown filtering); `replacements` is a
+    separate, informational list of proposed swaps (see
+    ReplacementProposal) that a future execution-wiring phase may choose
+    to act on — nothing in `replacements` is reflected in the allocation
+    totals.
+    """
+    generated_at:             float
+    blocked:                  bool
+    block_reason:             Optional[str]
+    selected:                 List[PortfolioAllocation]  = field(default_factory=list)
+    rejected:                 List[RejectedCandidate]     = field(default_factory=list)
+    replacements:              List[ReplacementProposal]   = field(default_factory=list)
+    sector_exposure:           Dict[str, float]            = field(default_factory=dict)
+    diversification_score:     float = 100.0
+    total_capital_allocated:   float = 0.0
+    total_risk_allocated:      float = 0.0
+    portfolio_score:            float = 0.0   # capital-weighted mean final_score of `selected`, 0 if nothing selected
+    explanation:                str  = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "generated_at":            self.generated_at,
+            "blocked":                 self.blocked,
+            "block_reason":            self.block_reason,
+            "selected":                [asdict(a) | {
+                                            "correlation_tier": a.correlation_tier.value
+                                        } for a in self.selected],
+            "rejected":                [asdict(r) for r in self.rejected],
+            "replacements":            [asdict(r) for r in self.replacements],
+            "sector_exposure":         dict(self.sector_exposure),
+            "diversification_score":   self.diversification_score,
+            "total_capital_allocated": self.total_capital_allocated,
+            "total_risk_allocated":    self.total_risk_allocated,
+            "portfolio_score":         self.portfolio_score,
+            "explanation":             self.explanation,
+        }
