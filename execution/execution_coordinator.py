@@ -197,6 +197,27 @@ class ExecutionCoordinator:
             leverage=leverage,
         )
 
+    def close_position(
+        self,
+        direction: str,
+        quantity: float,
+        symbol: Optional[str] = None,
+        client_order_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Route to the TradeManager for `symbol` (default symbol if
+        omitted) — added in V16 Phase 2E for ExecutionOrchestrator's
+        replacement-close path. Deliberately NOT left to __getattr__'s
+        fallback: that delegates only to the DEFAULT symbol's manager
+        (see this class's own __getattr__ docstring), which would close
+        the wrong symbol's position for any non-default symbol. Mirrors
+        execute_trade()'s exact get_manager(symbol)-then-forward
+        pattern; TradeManager.close_position's own signature/behavior is
+        unchanged.
+        """
+        return self.get_manager(symbol).close_position(
+            direction, quantity, client_order_id=client_order_id,
+        )
+
     # ── Properties ───────────────────────────────────────────────────────
 
     @property

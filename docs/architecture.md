@@ -1208,7 +1208,9 @@ baseline + 92). `ruff check . --exclude dashboard_src --exclude dashboard`
   doesn't touch: reconciliation alert escalation (§6),
   `dashboard_api`/`websocket` heartbeat gaps (§4).
 
+---
 
+<<<<<<< HEAD
 ## 21. Bundle Manager — tools/ (2026-07-20)
 
 New `tools/` package: `git_utils.py`, `bundle_utils.py`, `history.py`,
@@ -1309,4 +1311,209 @@ everything, no network" convention. `history.py`'s tests use real
   health-check dashboard wiring, §13's "Deliberately not done" list,
   reconciliation alert escalation (§6), `dashboard_api`/`websocket`
   heartbeat gaps (§4).
+=======
+## 21. Execution Wiring & Live Orchestrator — V16 Phase 2E (2026-07-20)
+>>>>>>> origin/feature/phase2e-execution-wiring
 
+§20 above named this piece before it existed: "calling
+ExecutionCoordinator's per-symbol TradeManager with an
+OrchestratedDecision's allocations, and actually acting on (or
+discarding) a ReplacementProposal — including feeding real closures back
+through PortfolioManager.notify_position_closed()". This phase builds
+that connection. It deliberately does NOT build the other two things
+§20 listed in the same sentence — see "Scope boundary" below.
+
+**New modules** (`execution/`): `execution_events.py`,
+`execution_state.py`, `execution_metrics.py`, `execution_orchestrator.py`.
+**Modified** (additive only): `execution/execution_coordinator.py` (+1
+method), `config/settings.py` (+2 fields), `api/portfolio_ws.py` (+1
+function, wired into the existing `check_and_broadcast()` tick),
+`api/app.py` (+1 router include). **New API**: `api/execution_api.py`.
+
+### Signal boundary (why ExecutionOrchestrator takes a signal_provider)
+
+`portfolio/portfolio_models.py`'s `PortfolioAllocation` carries
+`capital_amount`/`risk_pct`/`leverage` but explicitly no entry/stop-loss/
+take-profit price — that module's own docstring says those "come from
+the per-symbol Strategy/Decision layer at execution time, which is out
+of scope here". `execution/strategy.py`'s `SMC_OI_Regime_Strategy` is
+that layer today, but it is single-symbol-shaped (reads one global
+`data_provider`, no symbol parameter) — reshaping it into a
+per-arbitrary-symbol signal source would be redesigning existing
+execution/decision logic, ruled out by this phase's brief.
+`ExecutionOrchestrator` instead takes a
+`signal_provider: Callable[[str], Optional[ExecutionSignal]]` as a
+constructor dependency, matching the DI idiom already used throughout
+this codebase (`TradeManager(data_provider)`,
+`CapitalManager(correlation_engine=...)`,
+`SMC_OI_Regime_Strategy(decision_engine, ...)`). Whatever future phase
+adapts per-symbol signal generation for the portfolio plugs in as this
+callable; the orchestrator does not know or care how it's implemented.
+
+### Execution lifecycle
+
+Per allocation in `OrchestratedDecision.selected`:
+`enqueue (PENDING)` → `signal_provider()` → (no/flat signal → `CANCELLED`,
+reason `no_signal`) → `start (RUNNING)` → `execution_engine.execute_trade()`
+→ success → `COMPLETED`, position added to the caller's `PortfolioState`;
+failure → retry-or-`FAILED` (see Retry policy). `execution_engine` is
+whatever `execution.execution_factory.build_execution_engine()` returned
+(paper/testnet/live) — the orchestrator is engine-mode-agnostic by
+construction, same as `main.py` already is.
+
+Per `ReplacementProposal` in `OrchestratedDecision.replacements`: closes
+`outgoing_symbol` only (via the new `ExecutionCoordinator.close_position()`
+— see below), then calls `PortfolioManager.notify_position_closed()` on
+confirmed closure. Does **not** open `incoming_symbol` — that
+proposal's own docstring is explicit it's "a RECOMMENDATION, not an
+action" and deliberately carries no sizing data; the freed capacity lets
+`incoming_symbol` (or whatever ranks highest) get selected as an
+ordinary, fully-specified allocation on a subsequent `decide()` cycle
+instead.
+
+`execute()` returns an `ExecutionBatch` (one per call) containing
+`ExecutionResult`s; `ExecutionBatch.summary()` gives a batch-scoped
+`ExecutionSummary`. `ExecutionOrchestrator.metrics()` gives the
+separate, process-wide, cumulative `ExecutionMetricsSnapshot` — the two
+are intentionally different views (this decision's execution vs.
+execution health overall), not redundant.
+
+### Retry strategy
+
+Orchestration-level retry is layered **above** `trade_manager.py`'s own
+`@retry_api_call` decorator, not a duplicate of it — by the time
+`execute_trade()` returns `success=False`, TradeManager has already
+exhausted its own retries for ordinary transient API errors, so what
+reaches the orchestrator is either a genuine business rejection or a
+fully-exhausted transient failure. `execution/execution_orchestrator.py`'s
+`_NON_RECOVERABLE_MARKERS` classifies `result["error"]` text; anything
+matching (`"rejected by exchange"`, `"invalid qty"`, `"duplicate"`,
+`"manual_cancel"`, config errors) is never retried — matches the phase
+brief's explicit "never retry: risk rejection, insufficient capital,
+duplicate order, manual cancel". Everything else is retried up to
+`settings.EXECUTION_MAX_RETRIES` (default 2), with an optional
+`EXECUTION_RETRY_DELAY_SECONDS` pause between attempts.
+
+### Idempotency
+
+`execution/execution_state.py`'s `ExecutionState` keys an in-memory
+ledger on `(batch_id, symbol)` — the default `batch_id` is
+`f"decision-{decision.generated_at}"`, so re-calling `execute()` on the
+*same* `OrchestratedDecision` object is a guaranteed no-op (results come
+back `CANCELLED`, reason `already_executed`) rather than placing orders
+twice. This is in-memory only (matches every other state container in
+this package — `PortfolioState`, `EventBus` — being pure in-memory
+containers too): it protects against accidental double-calls within one
+process's lifetime, not across a restart. A caller wanting
+restart-safe idempotency must derive `batch_id` from something
+persisted (e.g. the `portfolio_history` row id once a decision is
+saved) and pass it explicitly.
+
+A record already `enqueue()`'d and separately `request_cancel()`'d
+(e.g. a concurrent caller cancelling allocation N+1 while allocation N
+is still executing — a real window, since `execute()`'s loop processes
+allocations one at a time) is respected rather than silently
+re-armed — `_execute_allocation`/`_execute_replacement_close` check for
+an existing `CANCELLED` record before calling `enqueue()` again.
+
+### Execution events
+
+Published through the existing `events/event_bus.py` `EventBus` — not a
+second pub/sub mechanism. `execution/execution_events.py` defines the
+closed vocabulary (`execution_started`/`_completed`/`_failed`/
+`_cancelled`/`_metrics_updated`) under a fixed `EXECUTION_ORCHESTRATOR`
+agent name. `api/portfolio_ws.py`'s `check_and_broadcast()` relays new
+events (dedup by `BusEvent.seq`, same shape as its existing
+dedup-by-row-id decision relay) over the *same* `/ws/portfolio`
+connection Phase 2C already established — no protocol redesign, no
+second WebSocket route. This relay call had to be placed independently
+of the decision-broadcast's own early-returns: nesting it inside
+"only runs when the decision row changed" (an earlier draft's mistake,
+caught by `tests/test_portfolio_ws.py::TestExecutionEventRelay::
+test_execution_event_relayed_when_decision_row_unchanged`) would mean
+execution events almost never actually reach clients, since a decision
+changes far less often than a batch executes.
+
+### Execution metrics
+
+`execution/execution_metrics.py`'s `compute_metrics()` is a pure
+function over whatever `ExecutionState` already holds — no independent
+counters. Exposed read-only via `GET /api/execution/metrics`
+(cumulative) and `GET /api/execution/status` (current pending/running/
+finished counts), plus `GET /api/execution/executions[?status=]` and
+`GET /api/execution/executions/{id}` for the underlying records — all
+four additive, under `/api/execution/*`, covered automatically by the
+existing prefix-generic `_auth_middleware` (no auth changes needed,
+same reasoning as §19's own `/api/portfolio/*`).
+
+### History updates
+
+Deliberately **not** touched in this phase. `portfolio_history.py`'s
+`save_decision()` already runs once per `decide()` call (§18); adding a
+second, execution-outcome-shaped persistence path (fills, slippage,
+actual vs. planned entry price) is real, valuable, and explicitly out
+of scope here — `ExecutionResult`/`ExecutionBatch` are in-memory-only
+for this phase (mirrors `ExecutionState` itself), not persisted to
+`portfolio_history` or any other table. Recorded as new "Next up" work
+below rather than folded in as an afterthought.
+
+### Scope boundary
+
+Two things §20 mentioned in the same breath as this phase, NOT built
+here:
+- **"Reading real exchange/journal state into a PortfolioState each
+  cycle"** — that's reconciliation (`system_health/reconciliation.py`
+  already exists for this concern). `ExecutionOrchestrator` is handed a
+  `PortfolioState` by its caller and updates it as executions complete;
+  it does not construct one from scratch.
+- **A scheduler** calling `PortfolioManager.decide()` then
+  `ExecutionOrchestrator.execute()` on a timer. `CLAUDE.md`'s own
+  priority list has "Execution Scheduler" as a distinct, later priority
+  after Portfolio Manager/Capital Allocation/Correlation/Sector Engine —
+  building it as part of this phase would be starting a future phase
+  early. `execute()` is a plain method any scheduler can call once one
+  exists; nothing here assumes or builds the calling loop.
+
+### Testing
+
+100 new tests (`tests/test_execution_state.py`,
+`test_execution_metrics.py`, `test_execution_events.py`,
+`test_execution_orchestrator.py`, `test_execution_api.py`, +2 in the
+existing `test_execution_coordinator.py`, +7 in the existing
+`test_portfolio_ws.py`) — no Binance, no network, no real event loop
+(WS relay tests call `check_and_broadcast()` directly, same convention
+§19 already established). Every scenario the phase brief listed is
+covered with a real assertion, not a placeholder: duplicate execution,
+retry (including capped-at-max and zero-retries), cancel (both
+"predicted execution_id cancelled in advance" and "cancelled while a
+sibling allocation in the same batch is still processing"), latency,
+metrics, execution failure, risk rejection (`decision.blocked`),
+duplicate symbols within one batch, partial execution (mixed
+success/failure in one batch), and successful execution.
+
+**Verified: `pytest tests/ -q` → 1380 passed, 0 failed** (1280 baseline
++ 100). `ruff check .` → clean (one `F401` unused-import finding during
+development, fixed before this count).
+
+### Next up
+
+- **Execution history persistence** — fills/slippage/actual-vs-planned
+  entry price, keyed off `ExecutionResult`, in a new
+  `portfolio_history`-adjacent table (see "History updates" above).
+- **Execution Scheduler** — the timer loop that actually calls
+  `PortfolioManager.decide()` then `ExecutionOrchestrator.execute()` in
+  production (see "Scope boundary" above); `CLAUDE.md`'s own next
+  priority after this phase.
+- **Per-symbol signal generation for the portfolio** — the
+  `signal_provider` this phase depends on as an injected dependency
+  still needs a real, multi-symbol-capable implementation (see "Signal
+  boundary" above); `execution/strategy.py`'s `SMC_OI_Regime_Strategy`
+  remains single-symbol-only.
+- **Dashboard execution panel** — `/api/execution/*` and the
+  `/ws/portfolio` execution-event relay are both built; no UI consumes
+  them yet (same gap §19 already noted for the Portfolio page).
+- Everything §20 already carried forward and this phase didn't touch:
+  RiskEngine's single account-level gate, real correlation tracking,
+  sector-cap capital redistribution, Dashboard Portfolio page,
+  reconciliation alert escalation, `dashboard_api`/`websocket`
+  heartbeat gaps.

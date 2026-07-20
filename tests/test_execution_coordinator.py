@@ -233,6 +233,38 @@ class TestExecutionCoordinatorRouting:
         # only the ETHUSDT manager should have been created
         assert list(coordinator._managers.keys()) == ["ETHUSDT"]
 
+    def test_close_position_routes_to_requested_symbol(self):
+        """V16 Phase 2E: close_position() must route to the SAME
+        per-symbol manager execute_trade() does — not fall through to
+        __getattr__'s default-symbol-only delegation (see
+        ExecutionCoordinator.close_position's own docstring for why that
+        would be a routing bug for any non-default symbol)."""
+        coordinator, client = self._make_coordinator(symbols=["BTCUSDT", "ETHUSDT"])
+        client.new_order.return_value = {"orderId": 99, "status": "FILLED"}
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            order = coordinator.close_position(
+                direction="LONG", quantity=1.5, symbol="ETHUSDT",
+            )
+        assert order == {"orderId": 99, "status": "FILLED"}
+        call = client.new_order.call_args
+        assert call[1]["symbol"] == "ETHUSDT"
+        assert call[1]["side"] == "SELL"        # closing a LONG => SELL
+        assert call[1]["reduceOnly"] == "true"
+        # Only the ETHUSDT manager should have been created — closing
+        # ETHUSDT must not touch/create a BTCUSDT manager.
+        assert list(coordinator._managers.keys()) == ["ETHUSDT"]
+
+    def test_close_position_default_symbol_matches_bare_trademanager(self):
+        coordinator, client = self._make_coordinator(symbols=["BTCUSDT"])
+        client.new_order.return_value = {"orderId": 1, "status": "FILLED"}
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            order = coordinator.close_position(direction="SHORT", quantity=0.5)
+        assert order == {"orderId": 1, "status": "FILLED"}
+        assert client.new_order.call_args[1]["symbol"] == "BTCUSDT"
+        assert client.new_order.call_args[1]["side"] == "BUY"  # closing a SHORT => BUY
+
     def test_getattr_passthrough_to_default_manager(self):
         """Safety-net delegation for attributes the coordinator doesn't
         define itself (e.g. .client, .cancel_all_orders)."""

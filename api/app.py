@@ -82,6 +82,11 @@ from api.portfolio_api import router as _portfolio_router
 from api.portfolio_ws import router as _portfolio_ws_router
 from api.portfolio_ws import check_and_broadcast as _portfolio_ws_check
 
+# V16 Phase 2E — Execution API. See api/execution_api.py's module
+# docstring for design rationale (same additive-router pattern as
+# Phase 2C above).
+from api.execution_api import router as _execution_router
+
 logger = get_logger("api.app")
 
 # ── Startup time ──────────────────────────────────────────────────────────────
@@ -343,6 +348,10 @@ app.add_middleware(
 # way every other /ws/* handler in this file does.
 app.include_router(_portfolio_router)
 app.include_router(_portfolio_ws_router)
+
+# V16 Phase 2E — Execution API. /api/execution/* is covered by the SAME
+# prefix-generic _auth_middleware — no auth changes needed here either.
+app.include_router(_execution_router)
 
 
 # ── P1-A: Dashboard authentication ─────────────────────────────────────────

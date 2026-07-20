@@ -220,6 +220,13 @@ class Settings(BaseSettings):
     BUNDLE_PUSH_RETRIES:        int = Field(default=3,   alias="BUNDLE_PUSH_RETRIES")
     BUNDLE_GIT_TIMEOUT_SECONDS: int = Field(default=120, alias="BUNDLE_GIT_TIMEOUT_SECONDS")
 
+    # ── V16 Phase 2E: Execution Wiring & Live Orchestrator ──────────────
+    # Orchestration-level retry (see execution/execution_orchestrator.py's
+    # module docstring for why this is separate from — and layered above
+    # — trade_manager.py's own @retry_api_call retries).
+    EXECUTION_MAX_RETRIES:              int   = Field(default=2,   alias="EXECUTION_MAX_RETRIES")
+    EXECUTION_RETRY_DELAY_SECONDS:      float = Field(default=0.0, alias="EXECUTION_RETRY_DELAY_SECONDS")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

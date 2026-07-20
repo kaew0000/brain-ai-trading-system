@@ -14,8 +14,10 @@ multi-symbol migration notes.
 This repository is the result of merging ten development-phase patch
 bundles (Fix #1/#2, P1-A, P1-B1, Multi-Symbol Foundation, Scanner,
 Opportunity Ranker, and related architecture/doc/test updates) back into
-one clean tree. See `MERGE_REPORT.md` for exactly what was merged from
-where and why.
+one clean tree, since extended through V16 Phase 2A-2E (Portfolio
+Intelligence, Manager, API, and Execution Orchestrator — see
+`docs/architecture.md` §17-21). See `MERGE_REPORT.md` for exactly what
+was merged from where and why.
 
 ## Requirements
 
@@ -57,13 +59,16 @@ npm run dev
 pytest tests/ -q
 ```
 
-1001 tests, all passing as of this merge — see `TEST_REPORT.md`.
+1380 tests, all passing as of V16 Phase 2E — see `docs/architecture.md`
+§21 for the verified count and how it was reached (`TEST_REPORT.md`
+reflects the earlier V16.5.0 merge baseline, not this phase).
 
 ## Repository layout
 
-Key backend packages: `agents/`, `api/` (incl. `portfolio_api.py`/`portfolio_ws.py`,
-V16 Phase 2C), `commander/`, `config/`, `data/`,
-`decision/`, `execution/`, `features/`, `intelligence/`, `journal/`,
+Key backend packages: `agents/`, `api/` (incl. `portfolio_api.py`/`portfolio_ws.py`
+from V16 Phase 2C and `execution_api.py` from V16 Phase 2E), `commander/`, `config/`, `data/`,
+`decision/`, `execution/` (incl. `execution_orchestrator.py`/`execution_state.py`/
+`execution_events.py`/`execution_metrics.py`, V16 Phase 2E), `features/`, `intelligence/`, `journal/`,
 `ml/`, `paper/`, `pipeline/`, `portfolio/` (V16 Phase 2A/2B), `ranking/`
 (V16 Phase 2), `regime/`, `risk/`, `scanner/` (V16 Phase 2),
 `system_health/`, `telemetry/`, `trend/`, `utils/`.

@@ -16,6 +16,18 @@ dedup-by-row-id logic below. If nothing new has been persisted since the
 last tick (including "nothing has ever been persisted"), the stream
 sends only its heartbeat and stays otherwise idle, per the brief's rule
 5 ("If nothing is persisted, the stream simply remains idle").
+
+V16 Phase 2E addition — execution event relay
+------------------------------------------------------------------------
+execution/execution_orchestrator.py publishes execution_started/
+completed/failed/cancelled/metrics_updated through the existing
+events.event_bus.EventBus (see execution/execution_events.py) rather
+than a second pub/sub mechanism. _relay_execution_events(), called from
+the SAME check_and_broadcast() tick, dedups by BusEvent.seq (a
+monotonic counter EventBus already maintains) exactly the way the
+decision broadcast above dedups by row id — no second poll loop, no
+protocol redesign, same /ws/portfolio connection and message envelope
+({"type": ..., "data": ..., "timestamp": ...}).
 """
 from __future__ import annotations
 
@@ -34,6 +46,8 @@ from api.portfolio_serializers import (
     serialize_sectors,
     serialize_allocations,
 )
+from events.event_bus import get_event_bus
+from execution.execution_events import EXECUTION_AGENT
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,6 +68,12 @@ _clients: Set[WebSocket] = set()
 # been broadcast to everyone", not anything per-connection.
 _last_broadcast_row_id: Optional[int] = None
 _last_heartbeat_at: float = 0.0
+
+# V16 Phase 2E: separate dedup pointer for the execution-event relay —
+# a distinct BusEvent.seq stream from portfolio_history's row ids, so it
+# gets its own last-broadcast marker rather than overloading the
+# decision one.
+_last_broadcast_execution_seq: int = 0
 
 
 async def _broadcast(message: dict) -> None:
@@ -140,6 +160,15 @@ async def check_and_broadcast() -> None:
     if not _clients:
         return
 
+    # V16 Phase 2E: independent of the decision-broadcast path below —
+    # execution events happen on their own cadence (a batch can span
+    # many ticks after the decision that triggered it was already
+    # broadcast, or several ticks with no new decision at all), so this
+    # must NOT be nested inside the row-id-changed branch below, or it
+    # would only ever run in the one tick a decision also happened to
+    # change in.
+    await _relay_execution_events()
+
     rows = portfolio_history.get_latest_decisions(limit=1)
     if not rows:
         return  # nothing persisted yet — stream stays idle apart from heartbeat
@@ -158,6 +187,44 @@ async def check_and_broadcast() -> None:
         await _broadcast({"type": "replacement_proposal", "data": proposal, "timestamp": _now_iso()})
 
 
+async def _relay_execution_events() -> None:
+    """V16 Phase 2E: forward any new EXECUTION_AGENT events since the
+    last tick. Same dedup shape as the decision broadcast above (compare
+    against a last-seen marker, advance it, no separate already-sent
+    set) but keyed on BusEvent.seq instead of a portfolio_history row
+    id. Gated behind the SAME `if not _clients: return` in
+    check_and_broadcast() the decision-broadcast path already uses —
+    the dedup pointer does not advance while no one is connected,
+    exactly mirroring how _last_broadcast_row_id also doesn't advance
+    in that situation.
+
+    Unlike the decision path, _send_init_frame() does NOT include any
+    execution snapshot on connect (by design — it only ever composes
+    decision/state/sectors/allocations; see that function's own
+    docstring). A client that connects after missing some execution
+    events gets nothing about them here until the next NEW one fires —
+    api/execution_api.py's GET /api/execution/metrics and /status are
+    the actual catch-up mechanism for current execution state, not this
+    WebSocket."""
+    global _last_broadcast_execution_seq
+
+    recent = get_event_bus().get_recent(limit=50, agent=EXECUTION_AGENT)
+    if not recent:
+        return
+    # get_recent() returns newest-first; broadcast in chronological order.
+    new_events = [e for e in reversed(recent) if e["seq"] > _last_broadcast_execution_seq]
+    if not new_events:
+        return
+
+    for event in new_events:
+        _last_broadcast_execution_seq = max(_last_broadcast_execution_seq, event["seq"])
+        await _broadcast({
+            "type": event["event"],       # execution_started / _completed / _failed / _cancelled / _metrics_updated
+            "data": event["payload"],
+            "timestamp": event["timestamp"],
+        })
+
+
 def client_count() -> int:
     """Exposed for tests and for api/app.py's heartbeat meta (mirrors
     ConnectionManager.count elsewhere in api/app.py)."""
@@ -168,7 +235,8 @@ def _reset_for_tests() -> None:  # pragma: no cover
     """Test-only: clear module-level dedup/heartbeat state between test
     cases, since it's intentionally module-level (see check_and_broadcast
     docstring) rather than per-connection."""
-    global _last_broadcast_row_id, _last_heartbeat_at
+    global _last_broadcast_row_id, _last_heartbeat_at, _last_broadcast_execution_seq
     _last_broadcast_row_id = None
     _last_heartbeat_at = 0.0
+    _last_broadcast_execution_seq = 0
     _clients.clear()

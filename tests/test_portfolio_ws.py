@@ -19,6 +19,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.portfolio_ws as portfolio_ws
+from events.event_bus import reset_event_bus
+from execution.execution_events import ExecutionEventType, publish_execution_event
 
 pytestmark = pytest.mark.unit
 
@@ -50,8 +52,10 @@ def _row(row_id=1, symbol="BTCUSDT", replacements=None):
 @pytest.fixture(autouse=True)
 def _reset():
     portfolio_ws._reset_for_tests()
+    reset_event_bus()
     yield
     portfolio_ws._reset_for_tests()
+    reset_event_bus()
 
 
 @pytest.fixture()
@@ -282,3 +286,121 @@ class TestWsPortfolioNoFabrication:
             assert frame["state"]["live"] is False
             assert frame["sectors"]["live"] is False
             assert frame["allocations"]["live"] is False
+
+
+class TestExecutionEventRelay:
+    """V16 Phase 2E: check_and_broadcast() must also relay
+    execution_orchestrator events published through the shared
+    EventBus — independent of whether a portfolio decision changed in
+    the same tick (see api/portfolio_ws.py's own module docstring
+    addition for why that independence was the actual bug fixed here)."""
+
+    def _fake_ws(self, sink: list):
+        class _FakeWS:
+            async def send_text(self, msg):
+                sink.append(msg)
+        return _FakeWS()
+
+    def _no_decisions(self, monkeypatch):
+        monkeypatch.setattr(
+            "api.portfolio_ws.portfolio_history.get_latest_decisions", lambda limit=1: []
+        )
+
+    def test_execution_event_relayed_even_with_no_decision_ever_persisted(self, monkeypatch):
+        """This is the exact scenario the placement bug broke: no
+        portfolio_history row exists at all, yet an execution event
+        must still reach the client."""
+        self._no_decisions(monkeypatch)
+        sink = []
+        portfolio_ws._clients.add(self._fake_ws(sink))
+
+        publish_execution_event(ExecutionEventType.STARTED, execution_id="exec-1", symbol="BTCUSDT")
+        asyncio.run(portfolio_ws.check_and_broadcast())
+
+        types = [__import__("json").loads(m)["type"] for m in sink]
+        assert "execution_started" in types
+
+    def test_execution_event_relayed_when_decision_row_unchanged(self, monkeypatch):
+        """The far more common real scenario: a decision already
+        broadcast in an earlier tick hasn't changed, but a NEW execution
+        event has arrived since — this was the second way the placement
+        bug silently dropped events."""
+        monkeypatch.setattr(
+            "api.portfolio_ws.portfolio_history.get_latest_decisions", lambda limit=1: [_row(row_id=1)]
+        )
+        sink = []
+        portfolio_ws._clients.add(self._fake_ws(sink))
+        portfolio_ws._last_broadcast_row_id = 1  # simulate "already broadcast this decision"
+
+        publish_execution_event(ExecutionEventType.COMPLETED, execution_id="exec-2", symbol="ETHUSDT")
+        asyncio.run(portfolio_ws.check_and_broadcast())
+
+        import json as _json
+        types = [_json.loads(m)["type"] for m in sink]
+        assert "decision" not in types       # unchanged row correctly NOT re-broadcast
+        assert "execution_completed" in types  # but the new execution event still is
+
+    def test_relayed_event_payload_matches_published_payload(self, monkeypatch):
+        self._no_decisions(monkeypatch)
+        sink = []
+        portfolio_ws._clients.add(self._fake_ws(sink))
+
+        publish_execution_event(
+            ExecutionEventType.FAILED, execution_id="exec-3", symbol="SOLUSDT",
+            payload={"error": "Invalid qty=0"},
+        )
+        asyncio.run(portfolio_ws.check_and_broadcast())
+
+        import json as _json
+        frames = [_json.loads(m) for m in sink]
+        failed = next(f for f in frames if f["type"] == "execution_failed")
+        assert failed["data"]["symbol"] == "SOLUSDT"
+        assert failed["data"]["error"] == "Invalid qty=0"
+
+    def test_same_event_not_relayed_twice_across_ticks(self, monkeypatch):
+        self._no_decisions(monkeypatch)
+        sink = []
+        portfolio_ws._clients.add(self._fake_ws(sink))
+
+        publish_execution_event(ExecutionEventType.STARTED, execution_id="exec-1", symbol="BTCUSDT")
+        asyncio.run(portfolio_ws.check_and_broadcast())
+        asyncio.run(portfolio_ws.check_and_broadcast())  # second tick, nothing new published
+
+        import json as _json
+        started_count = sum(1 for m in sink if _json.loads(m)["type"] == "execution_started")
+        assert started_count == 1
+
+    def test_multiple_new_events_relayed_in_chronological_order(self, monkeypatch):
+        self._no_decisions(monkeypatch)
+        sink = []
+        portfolio_ws._clients.add(self._fake_ws(sink))
+
+        publish_execution_event(ExecutionEventType.STARTED, execution_id="exec-1", symbol="BTCUSDT")
+        publish_execution_event(ExecutionEventType.COMPLETED, execution_id="exec-1", symbol="BTCUSDT")
+        asyncio.run(portfolio_ws.check_and_broadcast())
+
+        import json as _json
+        types = [_json.loads(m)["type"] for m in sink if _json.loads(m)["type"].startswith("execution_")]
+        assert types == ["execution_started", "execution_completed"]
+
+    def test_no_clients_does_not_crash_and_nothing_relayed(self, monkeypatch):
+        self._no_decisions(monkeypatch)
+        publish_execution_event(ExecutionEventType.STARTED, execution_id="exec-1", symbol="BTCUSDT")
+        asyncio.run(portfolio_ws.check_and_broadcast())  # no clients registered — must not raise
+
+    def test_events_from_other_agents_are_not_relayed(self, monkeypatch):
+        """Only EXECUTION_AGENT events go through this relay — an
+        unrelated agent publishing to the same shared EventBus must not
+        leak onto the portfolio WebSocket."""
+        self._no_decisions(monkeypatch)
+        sink = []
+        portfolio_ws._clients.add(self._fake_ws(sink))
+
+        from events.event_bus import get_event_bus
+        get_event_bus().publish(agent="SOME_OTHER_AGENT", event="something_happened", message="x")
+        asyncio.run(portfolio_ws.check_and_broadcast())
+
+        import json as _json
+        types = [_json.loads(m)["type"] for m in sink]
+        assert "something_happened" not in types
+

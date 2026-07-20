@@ -1,10 +1,64 @@
 # CHANGELOG
 
-<<<<<<< HEAD
+- **`execution/execution_orchestrator.py`** (`ExecutionOrchestrator.execute()`):
+  connects `PortfolioManager`'s `OrchestratedDecision` to the existing
+  execution layer. Per allocation: idempotent (keyed on
+  `(batch_id, symbol)`), retries recoverable failures up to
+  `EXECUTION_MAX_RETRIES` (never retries risk rejection/insufficient
+  capital/duplicate order/manual cancel), publishes lifecycle events,
+  updates the caller's `PortfolioState` on success. Per replacement:
+  closes `outgoing_symbol` only and calls
+  `PortfolioManager.notify_position_closed()` — does not open
+  `incoming_symbol` (no sizing data exists for it at this decision
+  layer; see architecture.md §21).
+- **`execution/execution_state.py`**, **`execution_metrics.py`**,
+  **`execution_events.py`**: in-memory execution-lifecycle tracking,
+  pure metrics computation over it, and a thin vocabulary wrapper over
+  the existing `events/event_bus.py` (no second pub/sub mechanism).
+- **`execution/execution_coordinator.py`**: `+close_position()` —
+  additive passthrough routing to the correct per-symbol `TradeManager`
+  (needed for replacement-close; the existing `__getattr__` fallback
+  only delegates to the *default* symbol's manager, which would have
+  closed the wrong position for any non-default symbol).
+- **`api/execution_api.py`**: `GET /api/execution/metrics`, `/status`,
+  `/executions[?status=][&limit=]`, `/executions/{id}` — additive
+  router, same pattern as Phase 2C's `portfolio_api.py`.
+- **`api/portfolio_ws.py`**: relays `execution_started`/`_completed`/
+  `_failed`/`_cancelled`/`_metrics_updated` over the existing
+  `/ws/portfolio` connection (dedup by `EventBus` seq, same shape as
+  the existing dedup-by-row-id decision relay) — no protocol redesign,
+  no second WebSocket route.
+- **`config/settings.py`**: `+EXECUTION_MAX_RETRIES` (default 2),
+  `+EXECUTION_RETRY_DELAY_SECONDS` (default 0.0).
+- 100 new tests (`test_execution_state.py` 25, `test_execution_metrics.py`
+  9, `test_execution_events.py` 9, `test_execution_orchestrator.py` 34,
+  `test_execution_api.py` 14, +2 in `test_execution_coordinator.py`,
+  +7 in `test_portfolio_ws.py`). Full suite: 1280 → 1380 passed, 0
+  failed. `ruff check .` clean.
+- `docs/architecture.md` §21 (design rationale, scope boundary, and the
+  real placement bug caught during testing — see that section for
+  details). §20 "Next up" left untouched, per the phase's own
+  documentation rules.
+
+### Not included (explicitly out of scope for this phase)
+- No execution-outcome persistence (`portfolio_history` remains
+  decision-only; fills/slippage are not yet written anywhere durable —
+  see architecture.md §21 "History updates").
+- No scheduler calling `PortfolioManager.decide()` then
+  `ExecutionOrchestrator.execute()` on a cadence — `CLAUDE.md`'s own
+  next priority after this phase, not started early.
+- No multi-symbol-capable signal generation — `ExecutionOrchestrator`
+  takes `signal_provider` as an injected dependency;
+  `execution/strategy.py`'s existing `SMC_OI_Regime_Strategy` remains
+  single-symbol-only and unmodified.
+- No dashboard panel consuming `/api/execution/*` or the new WS events
+  yet.
+
+---
+
 ## [Unreleased] — V16 Phase 2C: Portfolio API
 
 ### Added
-- **`api/portfolio_api.py`**: REST read layer over `portfolio_history`
   (`GET /api/portfolio/state`, `/decision/latest`, `/history`
   [limit/offset/symbol/sector], `/sectors`, `/allocations`). `APIRouter`
   included into the existing `api/app.py` singleton — not a second
@@ -121,12 +175,10 @@
   WebSocket/Dashboard, execution wiring, `RiskEngine` per-symbol/
   aggregate exposure awareness. All explicitly out of scope for this
   phase.
-=======
 ## [Unreleased] — Bundle Manager (tools/)
 
 ### Added
 - New `tools/` package: `git_utils.py`, `bundle_utils.py`, `history.py`,
-  `github_actions.py`, `sync.py`, `ui.py`, `bundle_manager.py` (CLI).
   Automates importing `.bundle`/`.bundle.txt` files dropped into
   `update/incoming/`: verify → extract feature branch/SHA → skip
   duplicates (`bundle_history.json`) → fetch → checkout → push → file
@@ -149,13 +201,11 @@
   ledger), atomic writes.
 - No `.github/workflows/*.yml` generated — out of scope, needs its own
   secrets/permissions design.
->>>>>>> 1455eaf48b28c93df04defbe90d88c1b2914ea70
 
 ---
 
 ## [V16.5] — Patch consolidation merge (this repository)
 
-Merged ten development-phase bundles into one tree. See
 `MERGE_REPORT.md` for full detail. Summary of functional changes
 relative to the pre-merge `Brain_Bot_RUN` baseline:
 
