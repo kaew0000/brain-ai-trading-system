@@ -200,6 +200,25 @@ class Settings(BaseSettings):
     PORTFOLIO_MIN_HOLD_SECONDS:          int   = Field(default=1800, alias="PORTFOLIO_MIN_HOLD_SECONDS")
     # Retention for portfolio_history rows, mirrors RANKER_HISTORY_RETENTION_HOURS.
     PORTFOLIO_HISTORY_RETENTION_HOURS:   int   = Field(default=168,  alias="PORTFOLIO_HISTORY_RETENTION_HOURS")
+    # ── Bundle Manager (tools/) ────────────────────────────────────────────
+    # See tools/bundle_manager.py for the CLI and this module's own
+    # docstring in tools/ for the full workflow. Paths are repo-root-
+    # relative; resolved to absolute paths by tools/bundle_utils.py so this
+    # works identically regardless of the working directory the tool is
+    # invoked from (Windows/Linux/Termux).
+    BUNDLE_INCOMING_DIR:  str = Field(default="update/incoming",     alias="BUNDLE_INCOMING_DIR")
+    BUNDLE_APPLIED_DIR:   str = Field(default="update/applied",      alias="BUNDLE_APPLIED_DIR")
+    BUNDLE_FAILED_DIR:    str = Field(default="update/failed",       alias="BUNDLE_FAILED_DIR")
+    BUNDLE_HISTORY_FILE:  str = Field(default="bundle_history.json", alias="BUNDLE_HISTORY_FILE")
+    BUNDLE_REMOTE:        str = Field(default="origin",              alias="BUNDLE_REMOTE")
+    BUNDLE_BASE_BRANCH:   str = Field(default="main",                alias="BUNDLE_BASE_BRANCH")
+    # Network-touching git ops (fetch-from-bundle is local I/O, but push
+    # goes over the network) get a small retry budget — see
+    # tools/git_utils.py's module docstring for why this isn't
+    # utils/retry.py's decorator (that one's exception set is
+    # Binance/requests-specific, not subprocess/git-specific).
+    BUNDLE_PUSH_RETRIES:        int = Field(default=3,   alias="BUNDLE_PUSH_RETRIES")
+    BUNDLE_GIT_TIMEOUT_SECONDS: int = Field(default=120, alias="BUNDLE_GIT_TIMEOUT_SECONDS")
 
     model_config = {
         "env_file": ".env",

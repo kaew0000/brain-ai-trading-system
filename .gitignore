@@ -36,3 +36,15 @@ coverage.xml
 .vscode/
 .idea/
 *.swp
+
+# ─── Bundle Manager (tools/bundle_manager.py) ─────────────
+# The bundle files themselves are transient inbound/outbound artifacts,
+# not source — never commit them. bundle_history.json (repo root) IS
+# tracked deliberately (shared duplicate-import ledger, not local cache)
+# and is NOT excluded here.
+update/incoming/*
+update/applied/*
+update/failed/*
+!update/incoming/.gitkeep
+!update/applied/.gitkeep
+!update/failed/.gitkeep

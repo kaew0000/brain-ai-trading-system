@@ -1,5 +1,6 @@
 # CHANGELOG
 
+<<<<<<< HEAD
 ## [Unreleased] — V16 Phase 2C: Portfolio API
 
 ### Added
@@ -120,6 +121,35 @@
   WebSocket/Dashboard, execution wiring, `RiskEngine` per-symbol/
   aggregate exposure awareness. All explicitly out of scope for this
   phase.
+=======
+## [Unreleased] — Bundle Manager (tools/)
+
+### Added
+- New `tools/` package: `git_utils.py`, `bundle_utils.py`, `history.py`,
+  `github_actions.py`, `sync.py`, `ui.py`, `bundle_manager.py` (CLI).
+  Automates importing `.bundle`/`.bundle.txt` files dropped into
+  `update/incoming/`: verify → extract feature branch/SHA → skip
+  duplicates (`bundle_history.json`) → fetch → checkout → push → file
+  into `update/applied/` or `update/failed/`. `sync` fast-forwards the
+  base branch after a merge. See `docs/architecture.md` §17.
+- New `PORTFOLIO_*`-style `BUNDLE_*` settings in `config/settings.py`
+  (`BUNDLE_INCOMING_DIR`, `BUNDLE_APPLIED_DIR`, `BUNDLE_FAILED_DIR`,
+  `BUNDLE_HISTORY_FILE`, `BUNDLE_REMOTE`, `BUNDLE_BASE_BRANCH`,
+  `BUNDLE_PUSH_RETRIES`, `BUNDLE_GIT_TIMEOUT_SECONDS`).
+- `update/{incoming,applied,failed}/` directories (tracked via
+  `.gitkeep`; contents gitignored).
+- 98 new tests (`tests/test_bundle_manager_*.py`). Full suite:
+  1001 → 1099 passed, 0 failed.
+
+### Design notes
+- Dry-run preview + confirmation before any real fetch/checkout/push;
+  never force-pushes/force-fetches without `--force` (and then via
+  `--force-with-lease`, never a bare `--force`).
+- `bundle_history.json` is tracked in git (shared duplicate-import
+  ledger), atomic writes.
+- No `.github/workflows/*.yml` generated — out of scope, needs its own
+  secrets/permissions design.
+>>>>>>> 1455eaf48b28c93df04defbe90d88c1b2914ea70
 
 ---
 
