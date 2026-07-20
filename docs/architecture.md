@@ -767,8 +767,86 @@ independently re-verified before this work started, + 37 new).
 
 ---
 
-## 16. Next up
+## 17. Bundle Manager — tools/ (2026-07-20)
 
+New `tools/` package: `git_utils.py`, `bundle_utils.py`, `history.py`,
+`github_actions.py`, `sync.py`, `ui.py`, `bundle_manager.py` (CLI entry
+point). Automates the workflow this repo had been doing by hand up to
+this point — a human copying patch-bundle files in and applying them —
+without changing anything about how bundles themselves get produced.
+
+### What it does
+`python -m tools.bundle_manager import` scans `update/incoming/` for
+`*.bundle`/`*.bundle.txt` files and, per bundle: verifies it
+(`git bundle verify`), extracts exactly one feature branch + head SHA
+(`git bundle list-heads` — fails closed, not guessed, if a bundle has
+zero or more than one `refs/heads/*` ref), skips it if that SHA is
+already in `bundle_history.json` (duplicate-import guard), fetches +
+checks out + pushes the branch, then files the bundle into
+`update/applied/` or `update/failed/`. `sync` fast-forwards the local
+base branch after a merge (never merges anything itself — see
+`tools/sync.py`'s docstring). `history` shows what's been imported.
+
+### Design decisions
+- **Dry-run preview + confirmation by default.** Every `import` run does
+  a full verify/extract/dedupe pass with zero repository mutation first,
+  shows the results, and asks before doing anything real — `--yes` skips
+  this for CI. Never force-pushes/force-fetches unless `--force` is
+  passed explicitly (uses `--force-with-lease`, not a bare `--force`).
+- **One module owns all git subprocess calls** (`git_utils.py`) — list-
+  form args only, no `shell=True` anywhere in the package, `git`
+  resolved via `shutil.which` rather than a fixed path (Windows/Linux/
+  Termux compatibility). Every other module goes through it rather than
+  shelling out itself.
+- **`bundle_history.json` is tracked in git**, not gitignored — it's
+  shared history (a fresh clone needs to know what's already been
+  imported), not local cache. Writes are atomic (temp file + `os.replace`)
+  so a crash mid-write can't corrupt it.
+- **A prior `failed` record doesn't block retrying** the same SHA — only
+  a successful `applied` one does. A transient push failure shouldn't
+  permanently lock out a bundle once whatever broke it is fixed.
+- **A real bug caught during manual end-to-end testing** (not by unit
+  tests — this only shows up against a real repo): git refuses to fetch
+  into whatever branch is currently checked out. `import_bundle()`
+  always checks out `base_branch` first for this reason; there's a
+  regression test (`test_full_success_path_checks_out_base_branch_first`)
+  asserting the exact call order.
+
+### Cross-platform status
+Designed for Windows/Linux/Termux (stdlib `argparse`/`pathlib`/
+`subprocess` only, no `shell=True`, no OS-specific path handling) and
+**verified end-to-end against real (throwaway) git repositories on
+Linux** — a bare "origin," a working clone, and a separate authoring
+clone, covering the full import→push→duplicate-skip→sync path plus a
+genuinely corrupt bundle routing to `update/failed/`. **Not been run on
+Windows or Termux** — no such environment was available to test
+against; flagging the distinction between "designed for" and "verified
+on" rather than claiming both.
+
+### Tests
+98 new tests across 6 files (`test_bundle_manager_{git_utils,bundle_utils,
+history,github_actions,sync,cli}.py`), all mocking `subprocess`/git calls
+— zero real git processes spawned, matching this project's "mock
+everything, no network" convention. `history.py`'s tests use real
+`tmp_path` file I/O (no network involved, nothing to mock).
+**Verified: 1001 → 1099 passed, 0 failed.** `ruff check` clean.
+
+### Deliberately not built
+- No `.github/workflows/*.yml` — `github_actions.py` is named for the
+  remote-touching *actions* (fetch/push), not GitHub's CI product; see
+  its module docstring for this naming decision. Wiring this tool into
+  CI is a reasonable follow-up, not built here (a real workflow needs
+  its own secrets/permissions design this tool shouldn't assume).
+- No REST/WebSocket surface for this tool — it's a local CLI, out of
+  `docs/API.md`'s scope (REST/WS endpoints only).
+
+---
+
+## 18. Next up
+
+- CI wiring for the Bundle Manager, if wanted (see above).
+- Windows/Termux empirical verification — designed for both, only
+  actually run on Linux so far.
 - **Confirm the resolution in §15** before Portfolio Manager gets built
   on top of it — specifically whether excluding UNAVAILABLE factors from
   the composite (vs. some other treatment) and the proxy definitions for
