@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-20T08:46:16Z",
+  "updated_at": "2026-07-20T11:43:54Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -8,6 +8,15 @@
       "bundle_filename": "phase2e-execution-wiring.bundle",
       "status": "applied",
       "imported_at": "2026-07-20T08:46:16Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "367afb8214d0eacddb3e7c28a7f7e12872573110",
+      "branch": "docs/brain-ai-os-master-constitution",
+      "bundle_filename": "brain-ai-os-master-constitution.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-20T11:43:54Z",
       "pushed": true,
       "reason": null
     }
