@@ -59,9 +59,10 @@ npm run dev
 pytest tests/ -q
 ```
 
-1380 tests, all passing as of V16 Phase 2E — see `docs/architecture.md`
-§21 for the verified count and how it was reached (`TEST_REPORT.md`
-reflects the earlier V16.5.0 merge baseline, not this phase).
+1478 tests, all passing as of the Bundle Manager + V16 Phase 2E merge
+(1380 from Phase 2E — see `docs/architecture.md` §23 — plus 98 more
+from Bundle Manager, §21) — see `TEST_REPORT.md` for the earlier
+V16.5.0 merge baseline this count has since grown from.
 
 ## Repository layout
 

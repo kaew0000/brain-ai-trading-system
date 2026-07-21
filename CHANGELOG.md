@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 2E: Execution Wiring & Live Orchestrator
+
+### Added
 - **`execution/execution_orchestrator.py`** (`ExecutionOrchestrator.execute()`):
   connects `PortfolioManager`'s `OrchestratedDecision` to the existing
   execution layer. Per allocation: idempotent (keyed on
@@ -10,7 +13,7 @@
   closes `outgoing_symbol` only and calls
   `PortfolioManager.notify_position_closed()` — does not open
   `incoming_symbol` (no sizing data exists for it at this decision
-  layer; see architecture.md §21).
+  layer; see architecture.md §23).
 - **`execution/execution_state.py`**, **`execution_metrics.py`**,
   **`execution_events.py`**: in-memory execution-lifecycle tracking,
   pure metrics computation over it, and a thin vocabulary wrapper over
@@ -35,7 +38,7 @@
   `test_execution_api.py` 14, +2 in `test_execution_coordinator.py`,
   +7 in `test_portfolio_ws.py`). Full suite: 1280 → 1380 passed, 0
   failed. `ruff check .` clean.
-- `docs/architecture.md` §21 (design rationale, scope boundary, and the
+- `docs/architecture.md` §23 (design rationale, scope boundary, and the
   real placement bug caught during testing — see that section for
   details). §20 "Next up" left untouched, per the phase's own
   documentation rules.
@@ -43,7 +46,7 @@
 ### Not included (explicitly out of scope for this phase)
 - No execution-outcome persistence (`portfolio_history` remains
   decision-only; fills/slippage are not yet written anywhere durable —
-  see architecture.md §21 "History updates").
+  see architecture.md §23 "History updates").
 - No scheduler calling `PortfolioManager.decide()` then
   `ExecutionOrchestrator.execute()` on a cadence — `CLAUDE.md`'s own
   next priority after this phase, not started early.
@@ -183,7 +186,7 @@
   `update/incoming/`: verify → extract feature branch/SHA → skip
   duplicates (`bundle_history.json`) → fetch → checkout → push → file
   into `update/applied/` or `update/failed/`. `sync` fast-forwards the
-  base branch after a merge. See `docs/architecture.md` §17.
+  base branch after a merge. See `docs/architecture.md` §21.
 - New `PORTFOLIO_*`-style `BUNDLE_*` settings in `config/settings.py`
   (`BUNDLE_INCOMING_DIR`, `BUNDLE_APPLIED_DIR`, `BUNDLE_FAILED_DIR`,
   `BUNDLE_HISTORY_FILE`, `BUNDLE_REMOTE`, `BUNDLE_BASE_BRANCH`,

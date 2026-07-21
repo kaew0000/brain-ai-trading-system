@@ -767,7 +767,7 @@ independently re-verified before this work started, + 37 new).
 
 ---
 
-## 21. Portfolio Intelligence Core — V16 Phase 2A (2026-07-18)
+## 17. Portfolio Intelligence Core — V16 Phase 2A (2026-07-18)
 
 Addresses §16's first three open items (Portfolio Manager's decision
 layer, Correlation Engine, Capital Allocation Engine) — but as a pure
@@ -1177,7 +1177,7 @@ baseline + 92). `ruff check . --exclude dashboard_src --exclude dashboard`
 
 ---
 
-## 20. Next up (superseded, see section 22 below)
+## 20. Next up (superseded, see section 21 below)
 
 - **Real orchestrator wiring** (provisionally "Phase 2E") — the piece
   §17, §18, and now §19 have all deliberately left out: reading real
@@ -1210,7 +1210,6 @@ baseline + 92). `ruff check . --exclude dashboard_src --exclude dashboard`
 
 ---
 
-<<<<<<< HEAD
 ## 21. Bundle Manager — tools/ (2026-07-20)
 
 New `tools/` package: `git_utils.py`, `bundle_utils.py`, `history.py`,
@@ -1286,7 +1285,7 @@ everything, no network" convention. `history.py`'s tests use real
 
 ---
 
-## 22. Next up
+## 22. Next up (superseded, see section 23 below)
 
 - CI wiring for the Bundle Manager, if wanted (see above).
 - Windows/Termux empirical verification — designed for both, only
@@ -1311,9 +1310,19 @@ everything, no network" convention. `history.py`'s tests use real
   health-check dashboard wiring, §13's "Deliberately not done" list,
   reconciliation alert escalation (§6), `dashboard_api`/`websocket`
   heartbeat gaps (§4).
-=======
-## 21. Execution Wiring & Live Orchestrator — V16 Phase 2E (2026-07-20)
->>>>>>> origin/feature/phase2e-execution-wiring
+
+**Note (2026-07-20): this list predates Bundle Manager's own merge and
+was never updated afterward** — by the time it was written, Portfolio
+Manager/Capital Allocation/REST API/WebSocket/Dashboard above were
+already built (§18/§19) and Correlation Engine's data-source question
+was already resolved (§17's static tier table, per §20's own "Real
+(price-history) correlation" note above). Left as-is rather than
+silently rewritten — this is exactly the kind of stale cross-branch
+"Next up" list §23 below was written to properly supersede.
+
+---
+
+## 23. Execution Wiring & Live Orchestrator — V16 Phase 2E (2026-07-20)
 
 §20 above named this piece before it existed: "calling
 ExecutionCoordinator's per-symbol TradeManager with an

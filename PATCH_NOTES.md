@@ -1,10 +1,114 @@
-<<<<<<< HEAD
-# PATCH NOTES — V16 Phase 2C + feat(world-performance-v1)
+# PATCH NOTES — V16 Phase 2C + feat(world-performance-v1) + Phase 2E: Execution Wiring & Live Orchestrator
+
+*(This file's own merge conflict was left unresolved by a previous
+import — raw `<<<<<<</=======/>>>>>>>` markers were committed to main.
+Reconstructed here from `git show a3d9b4c:PATCH_NOTES.md` (the true
+pre-conflict state) plus the original Phase 2E content. One note below
+marks the single spot where the recovered source itself was already
+truncated mid-sentence before this conflict ever happened — not
+something this fix could recover, so it's flagged rather than
+invented.)*
 
 ## Backend: Phase 2C — Portfolio API
-=======
-# PATCH NOTES — V16 Phase 2E: Execution Wiring & Live Orchestrator
->>>>>>> origin/feature/phase2e-execution-wiring
+
+Branch: `feature/phase2c-portfolio-api`
+Base: `main` @ `6dd7f21` (Phase 2B merged)
+
+### Summary
+
+Adds a REST + WebSocket read layer over `portfolio_history` (Phase 2B's
+persistence table). Decision-only boundary preserved one layer further:
+this phase never calls `PortfolioManager`/`CapitalManager`, never touches
+`execution/`/`data/`, never places an order.
+
+**Architecture conflict found and resolved before building (flagged,
+not silently overridden):** Phase 2B's own architecture.md §19 "Next up"
+said REST/WebSocket should wait for real orchestrator wiring — verified
+that's still literally true (`PortfolioManager` is never instantiated
+outside tests, so `portfolio_history` is empty in production today) —
+but resolved it by building the API as a genuine read layer that is
+honest about that emptiness rather than waiting. See architecture.md
+§19 for the full writeup.
+
+### New modules
+
+| File | Purpose |
+|---|---|
+| `api/portfolio_api.py` | REST endpoints (`APIRouter`, included into the existing `api/app.py` singleton) |
+| `api/portfolio_ws.py` | `/ws/portfolio` — hooks into `api/app.py`'s existing `_broadcast_loop()`, no new poll loop |
+| `api/portfolio_serializers.py` | Pure row-dict → JSON shaping, `source`/`live` marker on every payload |
+
+### Changes to existing modules
+
+| File | Change |
+|---|---|
+| `portfolio/portfolio_history.py` | + `query_decisions()`, `count_decisions()`. `get_latest_decisions()` untouched — same signature, same one existing caller. |
+| `api/app.py` | + 3 import lines, + `app.include_router()` x2, + one `await _portfolio_ws_check()` call inside the existing broadcast loop, + module docstring endpoint list update. No existing route/behavior changed. |
+| `docs/architecture.md` | New §19 (design + the conflict above); old §19 "Next up" renumbered to §20, with one stale bullet updated to reflect this phase now existing. |
+| `CHANGELOG.md` | New entry. |
+
+**Nothing was removed or had its public signature changed.** Every Phase
+2A/2B module (`CapitalManager`, `CorrelationEngine`, `PortfolioState`,
+`PortfolioManager`, `SectorEngine`, `portfolio_history`) is untouched.
+
+### Test results
+
+- 92 new tests added. Full suite: 1188 → **1280 passed, 0 failed**.
+- `test_portfolio_serializers.py` 33, `test_portfolio_history_query.py` 14,
+  `test_portfolio_api.py` 27, `test_portfolio_ws.py` 18.
+
+---
+
+## Frontend: feat(world-performance-v1)
+
+Branch: `feature/world-performance-v1`
+Base: `main` @ `fc9afa1` (Phase 2C merged)
+
+### Summary
+
+Frontend performance and UX pass for Brain Bot V16 Dashboard. Introduces
+React.lazy code-splitting, Zustand store equality guards, World HQ Minimap
+v2, and a new Portfolio Dashboard backed by MockDataProvider adapters.
+
+### Changes
+
+#### Architecture
+- **Code Splitting**: All routes converted to `React.lazy()` with `<Suspense>`
+  fallback (`PageLoader`). Initial bundle no longer eagerly loads every page.
+- **Error Boundary**: Global `ErrorBoundary` in `main.tsx` prevents white-screen
+  crashes and offers a branded recovery UI.
+- **Store Equality**: All Zustand stores now use shallow / semantic equality
+  guards, eliminating re-render storms caused by 1 Hz WS heartbeats with
+  unchanged payloads.
+
+#### World HQ
+- **WorldPage**: Wrapped in `React.memo`; NPC position updates throttled to
+  200 ms; event listeners use named `off()` cleanup instead of
+  `removeAllListeners()`.
+- **Minimap v2**: Offscreen canvas caches static terrain; room label tooltips on
+  hover; CSS `backdrop-blur` overlay; `willReadFrequently` canvas hint.
+- **Asset Pipeline**: New `AssetPipeline.ts` utility for priority-based asset
+  preloading (critical / deferred / on-demand).
+
+#### Portfolio Dashboard
+- **MockDataProvider**: `MockPortfolioProvider` delivers realistic mock portfolio
+  data wrapped **[recovered source truncates mid-sentence here — see note
+  at top of this file; not recoverable from git history available to this
+  fix]**.
+
+**Note relevant to "why does `/world` show the old V13 dashboard"
+(reported separately in this conversation):** this branch's changes are
+all in `dashboard_src/` (source) — none of them touch, add, or automate
+building `dashboard/dist/`. `dashboard/dist/` is `.gitignore`'d and
+nothing in `setup.bat`/`install.py` runs `npm run build` for it. A fresh
+checkout — including one with this branch's improvements already
+merged — will still fall back to the legacy static `dashboard/index.html`
+until someone runs `cd dashboard_src && npm install && npm run build`
+manually.
+
+---
+
+## Backend: Phase 2E — Execution Wiring & Live Orchestrator
 
 Branch: `feature/phase2e-execution-wiring`
 Base: `main` @ `fc9afa1` (Phase 2C merged)
@@ -21,7 +125,7 @@ call it "Phase 2E", not "Phase 2D") the repository itself already uses.
 
 **Two things intentionally NOT built, despite being named in the same
 breath by §20** (documented, not silently dropped — see
-architecture.md §21 "Scope boundary" for the full reasoning):
+architecture.md §23 "Scope boundary" for the full reasoning):
 
 - Reading real exchange/journal state into a `PortfolioState` each cycle
   — that's reconciliation (`system_health/reconciliation.py` already
@@ -50,21 +154,16 @@ architecture.md §21 "Scope boundary" for the full reasoning):
 | `config/settings.py` | `+EXECUTION_MAX_RETRIES` (default 2), `+EXECUTION_RETRY_DELAY_SECONDS` (default 0.0) |
 | `api/portfolio_ws.py` | `+_relay_execution_events()`, called from the existing `check_and_broadcast()` tick — dedup by `EventBus` seq, same shape as the existing dedup-by-row-id decision relay. **A real placement bug was caught and fixed during testing** (see below) |
 | `api/app.py` | + 1 import line, + `app.include_router(_execution_router)`. No existing route/behavior changed |
-| `docs/architecture.md` | New §21 (design rationale, scope boundary, the placement bug). §20 "Next up" **byte-for-byte untouched** — verified with `diff`, not just asserted |
+| `docs/architecture.md` | New §23 (design rationale, scope boundary, the placement bug). §20 "Next up" **byte-for-byte untouched** — verified with `diff`, not just asserted |
 | `README.md` | Updated repo layout/test count (also corrected an already-stale count unrelated to this phase, since the file was already being touched) |
 | `CHANGELOG.md` | New entry at the top, previous entries unchanged |
 
-<<<<<<< HEAD
-**Nothing was removed or had its public signature changed.** Every Phase
-2A/2B module (`CapitalManager`, `CorrelationEngine`, `PortfolioState`,
-`PortfolioManager`, `SectorEngine`, `portfolio_history`) is untouched.
-=======
 **Nothing was removed or had its public signature changed.** Every
 Phase 2A/2B/2C module (`CapitalManager`, `PortfolioManager`,
 `PortfolioState`, `SectorEngine`, `portfolio_api.py`, `portfolio_ws.py`,
 every existing dataclass) is byte-for-byte unchanged.
 
-## A real bug caught by testing, not just written around
+### A real bug caught by testing, not just written around
 
 Building test coverage for "cancel a pending execution" surfaced that
 `_execute_allocation`'s original `enqueue()` call unconditionally
@@ -84,30 +183,9 @@ of the decision-broadcast path; see
 `tests/test_portfolio_ws.py::TestExecutionEventRelay::
 test_execution_event_relayed_when_decision_row_unchanged`, which fails
 against the original placement and passes against the fix.
->>>>>>> origin/feature/phase2e-execution-wiring
 
-### Test results
+### Endpoints
 
-<<<<<<< HEAD
-- 92 new tests added. Full suite: 1188 → **1280 passed, 0 failed**.
-- `test_portfolio_serializers.py` 33, `test_portfolio_history_query.py` 14,
-  `test_portfolio_api.py` 27, `test_portfolio_ws.py` 18.
-
----
-
-## Frontend: feat(world-performance-v1)
-
-Branch: `feature/world-performance-v1`
-Base: `main` @ `fc9afa1` (Phase 2C merged)
-
-### Summary
-
-Frontend performance and UX pass for Brain Bot V16 Dashboard. Introduces
-React.lazy code-splitting, Zustand store equality guards, World HQ Minimap
-v2, and a new Portfolio Dashboard backed by MockDataProvider adapters.
-
-### Changes
-=======
 REST (all under `/api/execution`, existing VIEWER-role auth applies
 automatically — no `api/auth.py` change needed):
 
@@ -123,31 +201,9 @@ WebSocket: existing `/ws/portfolio` connection now also emits
 `_metrics_updated` frames — no new route, no protocol change to the
 existing `decision`/`state`/`sectors`/`allocations`/
 `replacement_proposal`/`heartbeat` frames.
->>>>>>> origin/feature/phase2e-execution-wiring
 
-#### Architecture
-- **Code Splitting**: All routes converted to `React.lazy()` with `<Suspense>`
-  fallback (`PageLoader`). Initial bundle no longer eagerly loads every page.
-- **Error Boundary**: Global `ErrorBoundary` in `main.tsx` prevents white-screen
-  crashes and offers a branded recovery UI.
-- **Store Equality**: All Zustand stores now use shallow / semantic equality
-  guards, eliminating re-render storms caused by 1 Hz WS heartbeats with
-  unchanged payloads.
+### Test results
 
-<<<<<<< HEAD
-#### World HQ
-- **WorldPage**: Wrapped in `React.memo`; NPC position updates throttled to
-  200 ms; event listeners use named `off()` cleanup instead of
-  `removeAllListeners()`.
-- **Minimap v2**: Offscreen canvas caches static terrain; room label tooltips on
-  hover; CSS `backdrop-blur` overlay; `willReadFrequently` canvas hint.
-- **Asset Pipeline**: New `AssetPipeline.ts` utility for priority-based asset
-  preloading (critical / deferred / on-demand).
-
-#### Portfolio Dashboard
-- **MockDataProvider**: `MockPortfolioProvider` delivers realistic mock portfolio
-  data wrapped
-=======
 ```
 pytest tests/ -q
 1380 passed, 0 failed   (1280 baseline + 100 new)
@@ -163,11 +219,11 @@ New test files: `tests/test_execution_state.py` (25),
 Additive to existing files: `test_execution_coordinator.py` (+2),
 `test_portfolio_ws.py` (+7).
 
-## Known limitations / follow-up (documented, not hidden)
+### Known limitations / follow-up (documented, not hidden)
 
 - No execution-outcome persistence yet — `ExecutionResult`/
   `ExecutionBatch` are in-memory only this phase (see architecture.md
-  §21 "History updates").
+  §23 "History updates").
 - `signal_provider` (the entry/stop-loss/take-profit source
   `ExecutionOrchestrator` depends on) has no multi-symbol-capable
   implementation yet — `execution/strategy.py`'s existing
@@ -186,4 +242,3 @@ Additive to existing files: `test_execution_coordinator.py` (+2),
   yet.
 
 See `MIGRATION.md` for upgrade/rollback notes.
->>>>>>> origin/feature/phase2e-execution-wiring
