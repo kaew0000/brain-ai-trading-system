@@ -194,12 +194,18 @@ class BinanceDataProvider:
     # ─────────────────────────────────────────────────────────────────────
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_ohlcv(self, timeframe: str, limit: int | None = None) -> pd.DataFrame:
-        """Fetch OHLCV candlestick data for a single timeframe."""
+    def get_ohlcv(self, timeframe: str, limit: int | None = None, symbol: Optional[str] = None) -> pd.DataFrame:
+        """Fetch OHLCV candlestick data for a single timeframe.
+
+        symbol: V16 Phase 2F — explicit override for multi-symbol callers
+        (execution/portfolio_signal_provider.py). Omit for the existing
+        single-symbol behavior (uses self.symbol), unchanged.
+        """
         limit = limit or settings.KLINE_LIMIT
+        target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
-                raw = self.market_client.klines(symbol=self.symbol, interval=timeframe, limit=limit)
+                raw = self.market_client.klines(symbol=target_symbol, interval=timeframe, limit=limit)
             df = self._klines_to_df(raw)
             logger.debug(f"OHLCV | tf={timeframe} | bars={len(df)}")
             return df
@@ -211,11 +217,12 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_mark_price(self) -> float:
+    def get_mark_price(self, symbol: Optional[str] = None) -> float:
         """Return current mark price."""
+        target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
-                result = self.market_client.mark_price(symbol=self.symbol)
+                result = self.market_client.mark_price(symbol=target_symbol)
             mark = float(result["markPrice"])
             logger.debug(f"Mark price: {mark:.2f}")
             return mark
@@ -227,11 +234,12 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_current_open_interest(self) -> float:
+    def get_current_open_interest(self, symbol: Optional[str] = None) -> float:
         """Return current open interest (contracts)."""
+        target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
-                result = self.market_client.open_interest(symbol=self.symbol)
+                result = self.market_client.open_interest(symbol=target_symbol)
             oi = float(result["openInterest"])
             logger.debug(f"Open Interest: {oi:.2f}")
             return oi
@@ -243,11 +251,12 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_oi_history(self, period: str = "5m", limit: int = 30) -> list:
+    def get_oi_history(self, period: str = "5m", limit: int = 30, symbol: Optional[str] = None) -> list:
+        target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
                 raw = self.market_client.open_interest_hist(
-                    symbol=self.symbol, period=period, limit=limit
+                    symbol=target_symbol, period=period, limit=limit
                 )
             return raw if isinstance(raw, list) else []
         except CircuitBreakerOpen:
@@ -257,10 +266,11 @@ class BinanceDataProvider:
             return []
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_funding_rate(self) -> float:
+    def get_funding_rate(self, symbol: Optional[str] = None) -> float:
+        target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
-                result = self.market_client.mark_price(symbol=self.symbol)
+                result = self.market_client.mark_price(symbol=target_symbol)
             rate = float(result.get("lastFundingRate", 0.0))
             logger.debug(f"Funding rate: {rate:.6f}")
             return rate
@@ -271,11 +281,12 @@ class BinanceDataProvider:
             return 0.0
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_long_short_ratio(self) -> dict:
+    def get_long_short_ratio(self, symbol: Optional[str] = None) -> dict:
+        target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
                 raw = self.market_client.top_long_short_account_ratio(
-                    symbol=self.symbol, period="5m", limit=1
+                    symbol=target_symbol, period="5m", limit=1
                 )
             if raw:
                 return raw[0] if isinstance(raw, list) else raw
@@ -285,11 +296,12 @@ class BinanceDataProvider:
             return {}
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_taker_ratio(self) -> dict:
+    def get_taker_ratio(self, symbol: Optional[str] = None) -> dict:
+        target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
                 raw = self.market_client.taker_long_short_ratio(
-                    symbol=self.symbol, period="5m", limit=1
+                    symbol=target_symbol, period="5m", limit=1
                 )
             if raw:
                 return raw[0] if isinstance(raw, list) else raw
@@ -386,6 +398,65 @@ class BinanceDataProvider:
 
         # Delta OI %
         oi_hist = self.get_oi_history(limit=2)
+        oi_delta = 0.0
+        if len(oi_hist) >= 2:
+            try:
+                prev = float(oi_hist[-2].get("sumOpenInterest", open_interest))
+                oi_delta = (open_interest - prev) / prev if prev != 0 else 0.0
+            except Exception:
+                pass
+
+        return {
+            "ohlcv":          ohlcv,
+            "mark_price":     mark_price,
+            "open_interest":  open_interest,
+            "funding_rate":   funding_rate,
+            "ls_ratio":       ls_ratio,
+            "taker_ratio":    taker_ratio,
+            "oi_delta":       oi_delta,
+            "oi_history":     oi_hist,
+        }
+
+    def get_market_data_for(self, symbol: str) -> dict:
+        """V16 Phase 2F: identical to get_all_market_data() above — same
+        shape, same fields, same fetch order — but for an explicit
+        arbitrary `symbol` instead of self.symbol. Exists so
+        execution/portfolio_signal_provider.py can reuse this class's
+        already-configured market_client (mainnet, shared circuit
+        breaker) for any of the Portfolio Manager's selected symbols,
+        without a second BinanceDataProvider instance per symbol (that
+        would also stand up a redundant trade_client / testnet
+        connection per symbol for no reason — this only ever reads
+        market data).
+
+        Intentionally a separate method rather than making
+        get_all_market_data() itself take a symbol= parameter: every
+        existing call site (main.py's single-symbol loop) calls it with
+        zero arguments every cycle, and this keeps that call site's
+        contract (and this method's own docstring/behavior) completely
+        unchanged rather than threading a new optional parameter through
+        code that doesn't need it.
+        """
+        ohlcv = {}
+        for tf_key, tf_val in [("h4", settings.H4_TIMEFRAME), ("h1", settings.H1_TIMEFRAME), ("m15", settings.M15_TIMEFRAME)]:
+            try:
+                df = self.get_ohlcv(tf_val, symbol=symbol)
+                is_valid, reasons = validate_ohlcv(df)
+                if not is_valid:
+                    logger.warning(f"OHLCV validation issues [{symbol}/{tf_val}]: {reasons} — cleaning anyway")
+                df = clean_ohlcv(df)
+                ohlcv[tf_key] = df
+            except Exception as exc:
+                logger.error(f"OHLCV fetch failed for {symbol}/{tf_val}: {exc}")
+                raise
+
+        mark_price    = self.get_mark_price(symbol=symbol)
+        open_interest = self.get_current_open_interest(symbol=symbol)
+        funding_rate  = self.get_funding_rate(symbol=symbol)
+        ls_ratio      = self.get_long_short_ratio(symbol=symbol)
+        taker_ratio   = self.get_taker_ratio(symbol=symbol)
+
+        oi_hist = self.get_oi_history(limit=2, symbol=symbol)
         oi_delta = 0.0
         if len(oi_hist) >= 2:
             try:

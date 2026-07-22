@@ -59,17 +59,19 @@ npm run dev
 pytest tests/ -q
 ```
 
-1478 tests, all passing as of the Bundle Manager + V16 Phase 2E merge
-(1380 from Phase 2E — see `docs/architecture.md` §23 — plus 98 more
-from Bundle Manager, §21) — see `TEST_REPORT.md` for the earlier
-V16.5.0 merge baseline this count has since grown from.
+1512 tests, all passing as of V16 Phase 2F (see `docs/architecture.md`
+§24) — grown from 1478 after the Bundle Manager + Phase 2E merge (§21,
+§23), which itself grew from the earlier V16.5.0 merge baseline in
+`TEST_REPORT.md`.
 
 ## Repository layout
 
 Key backend packages: `agents/`, `api/` (incl. `portfolio_api.py`/`portfolio_ws.py`
 from V16 Phase 2C and `execution_api.py` from V16 Phase 2E), `commander/`, `config/`, `data/`,
 `decision/`, `execution/` (incl. `execution_orchestrator.py`/`execution_state.py`/
-`execution_events.py`/`execution_metrics.py`, V16 Phase 2E), `features/`, `intelligence/`, `journal/`,
+`execution_events.py`/`execution_metrics.py` from V16 Phase 2E, and
+`execution_scheduler.py`/`portfolio_signal_provider.py` from V16 Phase 2F),
+`features/`, `intelligence/`, `journal/`,
 `ml/`, `paper/`, `pipeline/`, `portfolio/` (V16 Phase 2A/2B), `ranking/`
 (V16 Phase 2), `regime/`, `risk/`, `scanner/` (V16 Phase 2),
 `system_health/`, `telemetry/`, `trend/`, `utils/`.

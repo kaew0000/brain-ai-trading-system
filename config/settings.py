@@ -227,6 +227,19 @@ class Settings(BaseSettings):
     EXECUTION_MAX_RETRIES:              int   = Field(default=2,   alias="EXECUTION_MAX_RETRIES")
     EXECUTION_RETRY_DELAY_SECONDS:      float = Field(default=0.0, alias="EXECUTION_RETRY_DELAY_SECONDS")
 
+    # ── V16 Phase 2F: Execution Scheduler + Multi-Symbol Signals ────────
+    # Off by default — same reasoning as SCANNER_ENABLED above: this is a
+    # new background thread that calls decide()+execute() (i.e. can place
+    # real orders) on a timer. It must never auto-start just because
+    # main.py or a test imports build_system(). Requires SCANNER_ENABLED
+    # (feeds it candidates) to produce any real allocations.
+    SCHEDULER_ENABLED: bool = Field(default=False, alias="SCHEDULER_ENABLED")
+    SCHEDULER_INTERVAL_SECONDS: int = Field(default=60, alias="SCHEDULER_INTERVAL_SECONDS")
+    # Ranker candidates considered per cycle — separate knob from
+    # RANKER_TOP_N (the ranker's own persisted top-N) so the scheduler can
+    # deliberately look at fewer/more without changing what gets logged.
+    SCHEDULER_CANDIDATE_LIMIT: int = Field(default=20, alias="SCHEDULER_CANDIDATE_LIMIT")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
