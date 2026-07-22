@@ -1526,3 +1526,171 @@ development, fixed before this count).
   sector-cap capital redistribution, Dashboard Portfolio page,
   reconciliation alert escalation, `dashboard_api`/`websocket`
   heartbeat gaps.
+
+---
+
+## 24. Execution Scheduler + Multi-Symbol Signals — V16 Phase 2F (2026-07-22)
+
+§23's own "Next up" named this piece: "Execution Scheduler — the timer
+loop that actually calls `PortfolioManager.decide()` then
+`ExecutionOrchestrator.execute()` in production" and "Per-symbol signal
+generation for the portfolio — the `signal_provider` this phase depends
+on as an injected dependency still needs a real, multi-symbol-capable
+implementation." Both are built here. `CLAUDE.md`'s own priority list
+independently names the same next step ("Execution Scheduler", directly
+after Portfolio Manager/Capital Allocation/Correlation/Sector Engine,
+all already done) — two independent sources agreeing on what's next.
+
+### The pipeline-choice correction (the actual hard part of this phase)
+
+Before writing any code, this phase's design assumed
+`execution/strategy.py`'s `SMC_OI_Regime_Strategy` (wrapping
+`decision/brain_decision_engine.py`'s `BrainDecisionEngine`) was the
+decision logic to make multi-symbol — it's the only existing
+per-symbol-shaped signal adapter in the codebase, and the design
+started there. Reading `main.py`'s actual `run_trading_cycle()` before
+writing anything else showed this was wrong: the live single-symbol
+loop never instantiates `SMC_OI_Regime_Strategy` or
+`BrainDecisionEngine` anywhere. It uses a different pipeline —
+`RegimeEngine` -> `SMCEngine` -> `VolumeEngine` ->
+`MarketContextBuilder` (which internally also runs `TrendEngine` and
+`FuturesIntelEngine`) -> `ConfidenceEngine` — confirmed by reading the
+actual call sequence in `main.py`, not by inference.
+`BrainDecisionEngine` exists in this codebase for compatibility with an
+external conor19w-style bot framework (per that module's own
+docstring) and is otherwise unused in production. Building this
+phase's multi-symbol signal provider on the wrong pipeline would have
+produced signals that don't match what the live bot actually does —
+caught before any of that code was written, not after.
+
+### Why this pipeline could be reused unmodified
+
+Every one of the 6 classes in the real pipeline is stateless — a pure
+function of the data passed to each call, confirmed by reading each
+one's `__init__` and call signature rather than assumed:
+- `RegimeEngine.classify(df)`, `SMCEngine.analyze_mtf(ohlcv)`,
+  `VolumeEngine.analyze(df)`, `TrendEngine.analyse(df, ...)`,
+  `FuturesIntelEngine.analyse(market_data)`: no symbol reference
+  anywhere in any of them.
+- `ConfidenceEngine.score(...)`: pure function of a `market_context`
+  dict.
+- `MarketContextBuilder.build(...)` was the ONE place a symbol leaked
+  in — it hardcoded `settings.SYMBOL` into its output dict. Fixed
+  additively: `build()` now takes an optional `symbol` parameter,
+  defaulting to `settings.SYMBOL` when omitted, so the existing
+  single-symbol caller (`main.py`) is completely unaffected.
+
+Because none of them hold per-symbol state, this phase reuses ONE
+shared instance of each — the SAME instances `main.py`'s own
+`build_system()` already constructs — rather than building
+per-symbol duplicates. This is a different shape from
+`ExecutionCoordinator`'s per-symbol `TradeManager` cache (§Phase 1),
+which exists specifically because `TradeManager` DOES hold per-symbol
+state (open orders, position tracking); there's no equivalent state
+to isolate here.
+
+### New modules
+
+| File | Purpose |
+|---|---|
+| `execution/portfolio_signal_provider.py` | `PortfolioSignalProvider` — the real `signal_provider` `ExecutionOrchestrator` (§23) was designed to accept as an injected dependency. Runs the pipeline above for an arbitrary symbol; never raises (one bad symbol must not poison a multi-symbol batch). |
+| `execution/execution_scheduler.py` | `ExecutionScheduler` — the timer loop. One cycle: rank -> limit -> fetch balance -> `decide()` -> `execute()`. Threading model mirrors `scanner/market_scanner.py`'s `MarketScanner` exactly (daemon thread + `threading.Event`, same `start()`/`stop()`/`is_running()` shape) — not a new idiom. |
+
+### Changes to existing modules
+
+| File | Change |
+|---|---|
+| `data/binance_provider.py` | `+symbol: Optional[str] = None` on 7 methods (`get_ohlcv`, `get_mark_price`, `get_current_open_interest`, `get_oi_history`, `get_funding_rate`, `get_long_short_ratio`, `get_taker_ratio`), defaulting to `self.symbol` — every existing call site is unaffected. `+get_market_data_for(symbol)`, mirroring `get_all_market_data()` exactly for an explicit symbol, reusing the same shared `market_client`/circuit breaker rather than a second `BinanceDataProvider` instance (which would also stand up a redundant `trade_client`/testnet connection per symbol for no reason). |
+| `intelligence/market_context_builder.py` | `+symbol: Optional[str] = None` on `build()` — see "pipeline reuse" above. |
+| `config/settings.py` | `+SCHEDULER_ENABLED` (default `False`, same posture as `SCANNER_ENABLED`), `+SCHEDULER_INTERVAL_SECONDS` (default 60), `+SCHEDULER_CANDIDATE_LIMIT` (default 20). |
+| `main.py` | New guarded bootstrap block, same shape as the existing `MarketScanner` block right above it: `if settings.SCHEDULER_ENABLED: try: ... except Exception: log, don't crash`. Requires `SCANNER_ENABLED` (logged, not a hard error, if missing). Reuses `trade_manager` (already built) as the execution engine rather than calling `build_execution_engine()` a second time — see "A real bug caught before merge" below for why that distinction mattered. `+execution_scheduler` key in the returned bootstrap dict, alongside the existing `market_scanner` key. |
+
+**Nothing was removed or had its public signature changed.** Every
+existing single-symbol call site in `main.py` — `run_trading_cycle()`,
+`monitor_open_trades()`, every `dp.get_ohlcv()`/`get_mark_price()`/etc.
+call, `context_builder.build()` — is byte-for-byte unchanged in
+behavior (same defaults produce the same results as before this
+phase).
+
+### Two real bugs caught before merge, not written around
+
+1. **A Python scoping bug that would have broken the EXISTING
+   single-symbol execution path.** The first draft added
+   `from execution.execution_factory import build_execution_engine`
+   as a local import inside the new scheduler block — but
+   `build_execution_engine` is already imported at module level in
+   `main.py` and used earlier in the *same function*
+   (`trade_manager = build_execution_engine(data_provider)`, pre-dating
+   this phase). Python treats a name assigned anywhere in a function
+   body as local to the *entire* function — so that earlier, unrelated,
+   already-working call would have started reading an unassigned local
+   variable instead of the module-level import, at runtime, only when
+   `SCHEDULER_ENABLED=true`. `ruff check .` caught this
+   (`F823 local variable referenced before assignment`) before it ever
+   ran. Fixed by removing the redundant local import — the name was
+   already in scope.
+2. **A design bug in the same block**: the first draft called
+   `build_execution_engine()` again to get an execution engine for the
+   new `ExecutionOrchestrator`, rather than reusing `trade_manager`
+   (already built, a few lines above, by that same function). In paper
+   mode this would have created a second, independent
+   `PaperExecutionEngine` with its own separate balance; in
+   testnet/live mode, a second `ExecutionCoordinator` with its own
+   separate per-symbol `TradeManager` cache — silently splitting
+   execution state into two disconnected halves. Fixed by passing the
+   existing `trade_manager` through instead.
+
+### Scope boundary
+
+This does NOT solve reading real exchange/journal state into the
+`PortfolioState` `ExecutionScheduler` owns. Reading
+`system_health/reconciliation.py`'s actual code (not assuming) confirms
+it is a mismatch-*detection* engine (exchange vs. bot vs. journal
+views) — not a "construct a `PortfolioState` from real positions"
+utility — so this genuinely isn't solved elsewhere either. The
+`PortfolioState` this phase's `ExecutionScheduler` owns starts empty
+each time the process starts and is built up ONLY from that
+scheduler's own executions. A position opened before the scheduler
+started, by the legacy single-symbol loop, or manually on the
+exchange, will NOT be reflected until reconciliation-fed
+`PortfolioState` construction is built (listed below, not silently
+assumed solved).
+
+### Testing
+
+34 new tests (`test_portfolio_signal_provider.py` 12,
+`test_execution_scheduler.py` 22) — no Binance, no network, no real
+threading beyond `ExecutionScheduler`'s own `start()`/`stop()` lifecycle
+tests (which use short real sleeps against a fake ranker/data
+provider, same convention `scanner/market_scanner.py`'s own tests
+already established). `main.py`'s new bootstrap block itself is
+deliberately NOT directly unit-tested — matching the existing,
+already-accepted precedent that `MarketScanner`'s identical bootstrap
+block isn't either (`tests/test_market_scanner.py` only verifies
+`SCANNER_ENABLED` defaults `False`; the wiring itself needs real
+Binance clients to exercise meaningfully). This phase's own
+`SCHEDULER_ENABLED`/`SCHEDULER_INTERVAL_SECONDS`/
+`SCHEDULER_CANDIDATE_LIMIT` defaults get the same level of coverage.
+
+**Verified: `pytest tests/ -q` → 1512 passed, 0 failed** (1478 baseline
++ 34). `ruff check .` → clean (one real `F823` and one design bug — see
+above — plus two unused-import findings, all fixed before this count).
+
+### Next up
+
+- **Reconciliation-fed `PortfolioState`** — `ExecutionScheduler`'s
+  `PortfolioState` needs to be seeded from real exchange/journal state
+  at startup and kept in sync, not just built up from its own
+  executions. `system_health/reconciliation.py` detects mismatches
+  today but doesn't construct state; this is genuinely new work, not a
+  simple wire-up.
+- **Execution-outcome persistence** — carried forward from §23,
+  unchanged: no fills/slippage/actual-vs-planned entry price is
+  recorded anywhere durable yet.
+- **Dashboard execution + scheduler panel** — `/api/execution/*` (§23)
+  and this phase's `ExecutionScheduler.to_dict()` have no REST exposure
+  or UI yet.
+- Everything §23 already carried forward and this phase didn't touch:
+  RiskEngine's single account-level gate, real correlation tracking,
+  sector-cap capital redistribution, reconciliation alert escalation,
+  `dashboard_api`/`websocket` heartbeat gaps.

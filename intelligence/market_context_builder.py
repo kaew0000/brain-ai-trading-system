@@ -94,6 +94,11 @@ class MarketContextBuilder:
         ohlcv_h4=None,                              # pd.DataFrame (for trend analysis)
         ohlcv_h1=None,
         intelligence:   Optional[dict] = None,      # Layer 2 output (optional)
+        symbol:         Optional[str] = None,       # V16 Phase 2F: explicit symbol for
+                                                      # multi-symbol callers; defaults to
+                                                      # settings.SYMBOL (the single-symbol
+                                                      # legacy caller's implicit behavior,
+                                                      # unchanged) when omitted.
     ) -> dict:
         """
         Assemble the full market context.
@@ -107,6 +112,14 @@ class MarketContextBuilder:
         ohlcv_h4      : H4 DataFrame (used for trend analysis; H1 if None)
         ohlcv_h1      : H1 DataFrame (fallback if H4 not provided)
         intelligence  : Layer 2 market intelligence dict (optional)
+        symbol        : symbol this context is for. Omit for the existing
+                         single-symbol caller (main.py) — defaults to
+                         settings.SYMBOL, identical to the pre-Phase-2F
+                         behavior. Multi-symbol callers (execution/
+                         portfolio_signal_provider.py) must pass this
+                         explicitly or every context would silently claim
+                         to be for settings.SYMBOL regardless of which
+                         symbol's data was actually analyzed.
         """
 
         # ── Trend (Layer 4) ───────────────────────────────────────────────────
@@ -133,7 +146,7 @@ class MarketContextBuilder:
         intel = intelligence or {}
 
         ctx: dict = {
-            "symbol":     settings.SYMBOL,
+            "symbol":     symbol if symbol is not None else settings.SYMBOL,
             "timestamp":  datetime.now(timezone.utc).isoformat(),
             "mark_price": mark_price,
 

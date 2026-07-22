@@ -213,6 +213,68 @@ def build_system() -> dict:
             logger.error(f"MarketScanner failed to start (non-fatal): {exc}")
             market_scanner = None
 
+    # V16 Phase 2F (Execution Scheduler + Multi-Symbol Signals) — off by
+    # default (see config/settings.py SCHEDULER_ENABLED). Same guarded,
+    # best-effort pattern as MarketScanner just above: any failure here
+    # is logged and never aborts startup or touches the single-symbol
+    # trading loop below, which this phase does not modify.
+    #
+    # Requires market_scanner (built just above) — the Scheduler's
+    # OpportunityRanker needs it for candidates. If SCANNER_ENABLED is
+    # False, SCHEDULER_ENABLED is silently a no-op rather than a hard
+    # startup error, since a person could reasonably flip SCHEDULER_
+    # ENABLED on without realizing the dependency; this logs why instead
+    # of failing confusingly.
+    execution_scheduler = None
+    if settings.SCHEDULER_ENABLED:
+        if market_scanner is None:
+            logger.error(
+                "SCHEDULER_ENABLED=true but SCANNER_ENABLED=false — "
+                "ExecutionScheduler needs the Market Scanner for candidates. "
+                "Not starting."
+            )
+        else:
+            try:
+                from execution.execution_orchestrator import ExecutionOrchestrator
+                from execution.execution_scheduler import ExecutionScheduler
+                from execution.portfolio_signal_provider import PortfolioSignalProvider
+                from portfolio.portfolio_manager import PortfolioManager
+                from ranking.opportunity_ranker import OpportunityRanker
+
+                signal_provider = PortfolioSignalProvider(
+                    data_provider=data_provider,
+                    regime_engine=regime_engine,
+                    smc_engine=smc_engine,
+                    volume_engine=volume_engine,
+                    context_builder=context_builder,
+                    confidence_engine=confidence_engine,
+                )
+                portfolio_manager = PortfolioManager()
+                # Reuse the SAME execution engine the single-symbol loop
+                # already built above (trade_manager) rather than calling
+                # build_execution_engine() a second time — that would spin
+                # up a second, independent PaperExecutionEngine (its own
+                # separate balance) or a second ExecutionCoordinator (its
+                # own separate per-symbol TradeManager cache) alongside the
+                # one already in use, silently splitting execution state
+                # in two.
+                execution_orchestrator = ExecutionOrchestrator(
+                    execution_engine=trade_manager,
+                    portfolio_manager=portfolio_manager,
+                    signal_provider=signal_provider,
+                )
+                execution_scheduler = ExecutionScheduler(
+                    opportunity_ranker=OpportunityRanker(market_scanner),
+                    portfolio_manager=portfolio_manager,
+                    risk_engine=risk_engine,
+                    execution_orchestrator=execution_orchestrator,
+                    data_provider=data_provider,
+                )
+                execution_scheduler.start()
+            except Exception as exc:
+                logger.error(f"ExecutionScheduler failed to start (non-fatal): {exc}")
+                execution_scheduler = None
+
     logger.info("[9/9] All components ready.")
 
     # ── Agent Layer ───────────────────────────────────────────────────────────
@@ -251,6 +313,7 @@ def build_system() -> dict:
         "mission_tracker":       mission_tracker,
         "reconciliation_engine": reconciliation_engine,
         "market_scanner":        market_scanner,
+        "execution_scheduler":   execution_scheduler,
         "current_mission_id":    None,
     }
 

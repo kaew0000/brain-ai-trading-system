@@ -1,244 +1,130 @@
-# PATCH NOTES — V16 Phase 2C + feat(world-performance-v1) + Phase 2E: Execution Wiring & Live Orchestrator
+# PATCH NOTES — V16 Phase 2F: Execution Scheduler + Multi-Symbol Signals
 
-*(This file's own merge conflict was left unresolved by a previous
-import — raw `<<<<<<</=======/>>>>>>>` markers were committed to main.
-Reconstructed here from `git show a3d9b4c:PATCH_NOTES.md` (the true
-pre-conflict state) plus the original Phase 2E content. One note below
-marks the single spot where the recovered source itself was already
-truncated mid-sentence before this conflict ever happened — not
-something this fix could recover, so it's flagged rather than
-invented.)*
+Branch: `feature/execution-scheduler-multi-symbol-signals`
+Base: `main` (post Bundle Manager + Phase 2E merge, 1478 passing)
 
-## Backend: Phase 2C — Portfolio API
+## Summary
 
-Branch: `feature/phase2c-portfolio-api`
-Base: `main` @ `6dd7f21` (Phase 2B merged)
+Completes the connection Phase 2E built but didn't wire up: a timer
+loop that actually calls `PortfolioManager.decide()` then
+`ExecutionOrchestrator.execute()` in production, fed by a real
+multi-symbol signal generator. Both were named as "Next up" in
+`docs/architecture.md` §23 and independently confirmed by `CLAUDE.md`'s
+own priority list (Priority 5, directly after Portfolio Manager/Capital
+Allocation/Correlation/Sector Engine — all already done).
 
-### Summary
+**The hard part of this phase happened before writing any code.** The
+design started from `execution/strategy.py`'s `SMC_OI_Regime_Strategy`
+(the only existing per-symbol-shaped signal adapter) — but reading
+`main.py`'s actual `run_trading_cycle()` showed the live single-symbol
+bot never instantiates that class or the `BrainDecisionEngine` it
+wraps. It uses a different pipeline: `RegimeEngine` -> `SMCEngine` ->
+`VolumeEngine` -> `MarketContextBuilder` -> `ConfidenceEngine`. Building
+this phase on the wrong pipeline would have produced signals that don't
+match what the live bot actually does — caught by reading the real
+code first, not assumed. See `docs/architecture.md` §24 for the full
+writeup.
 
-Adds a REST + WebSocket read layer over `portfolio_history` (Phase 2B's
-persistence table). Decision-only boundary preserved one layer further:
-this phase never calls `PortfolioManager`/`CapitalManager`, never touches
-`execution/`/`data/`, never places an order.
-
-**Architecture conflict found and resolved before building (flagged,
-not silently overridden):** Phase 2B's own architecture.md §19 "Next up"
-said REST/WebSocket should wait for real orchestrator wiring — verified
-that's still literally true (`PortfolioManager` is never instantiated
-outside tests, so `portfolio_history` is empty in production today) —
-but resolved it by building the API as a genuine read layer that is
-honest about that emptiness rather than waiting. See architecture.md
-§19 for the full writeup.
-
-### New modules
+## New modules
 
 | File | Purpose |
 |---|---|
-| `api/portfolio_api.py` | REST endpoints (`APIRouter`, included into the existing `api/app.py` singleton) |
-| `api/portfolio_ws.py` | `/ws/portfolio` — hooks into `api/app.py`'s existing `_broadcast_loop()`, no new poll loop |
-| `api/portfolio_serializers.py` | Pure row-dict → JSON shaping, `source`/`live` marker on every payload |
+| `execution/portfolio_signal_provider.py` | `PortfolioSignalProvider` — the real `signal_provider` `ExecutionOrchestrator` (§23) was built to accept. Reuses the verified-live pipeline for an arbitrary symbol. Never raises. |
+| `execution/execution_scheduler.py` | `ExecutionScheduler` — rank -> limit -> balance -> decide -> execute, on a timer. Threading mirrors `MarketScanner` exactly. |
 
-### Changes to existing modules
-
-| File | Change |
-|---|---|
-| `portfolio/portfolio_history.py` | + `query_decisions()`, `count_decisions()`. `get_latest_decisions()` untouched — same signature, same one existing caller. |
-| `api/app.py` | + 3 import lines, + `app.include_router()` x2, + one `await _portfolio_ws_check()` call inside the existing broadcast loop, + module docstring endpoint list update. No existing route/behavior changed. |
-| `docs/architecture.md` | New §19 (design + the conflict above); old §19 "Next up" renumbered to §20, with one stale bullet updated to reflect this phase now existing. |
-| `CHANGELOG.md` | New entry. |
-
-**Nothing was removed or had its public signature changed.** Every Phase
-2A/2B module (`CapitalManager`, `CorrelationEngine`, `PortfolioState`,
-`PortfolioManager`, `SectorEngine`, `portfolio_history`) is untouched.
-
-### Test results
-
-- 92 new tests added. Full suite: 1188 → **1280 passed, 0 failed**.
-- `test_portfolio_serializers.py` 33, `test_portfolio_history_query.py` 14,
-  `test_portfolio_api.py` 27, `test_portfolio_ws.py` 18.
-
----
-
-## Frontend: feat(world-performance-v1)
-
-Branch: `feature/world-performance-v1`
-Base: `main` @ `fc9afa1` (Phase 2C merged)
-
-### Summary
-
-Frontend performance and UX pass for Brain Bot V16 Dashboard. Introduces
-React.lazy code-splitting, Zustand store equality guards, World HQ Minimap
-v2, and a new Portfolio Dashboard backed by MockDataProvider adapters.
-
-### Changes
-
-#### Architecture
-- **Code Splitting**: All routes converted to `React.lazy()` with `<Suspense>`
-  fallback (`PageLoader`). Initial bundle no longer eagerly loads every page.
-- **Error Boundary**: Global `ErrorBoundary` in `main.tsx` prevents white-screen
-  crashes and offers a branded recovery UI.
-- **Store Equality**: All Zustand stores now use shallow / semantic equality
-  guards, eliminating re-render storms caused by 1 Hz WS heartbeats with
-  unchanged payloads.
-
-#### World HQ
-- **WorldPage**: Wrapped in `React.memo`; NPC position updates throttled to
-  200 ms; event listeners use named `off()` cleanup instead of
-  `removeAllListeners()`.
-- **Minimap v2**: Offscreen canvas caches static terrain; room label tooltips on
-  hover; CSS `backdrop-blur` overlay; `willReadFrequently` canvas hint.
-- **Asset Pipeline**: New `AssetPipeline.ts` utility for priority-based asset
-  preloading (critical / deferred / on-demand).
-
-#### Portfolio Dashboard
-- **MockDataProvider**: `MockPortfolioProvider` delivers realistic mock portfolio
-  data wrapped **[recovered source truncates mid-sentence here — see note
-  at top of this file; not recoverable from git history available to this
-  fix]**.
-
-**Note relevant to "why does `/world` show the old V13 dashboard"
-(reported separately in this conversation):** this branch's changes are
-all in `dashboard_src/` (source) — none of them touch, add, or automate
-building `dashboard/dist/`. `dashboard/dist/` is `.gitignore`'d and
-nothing in `setup.bat`/`install.py` runs `npm run build` for it. A fresh
-checkout — including one with this branch's improvements already
-merged — will still fall back to the legacy static `dashboard/index.html`
-until someone runs `cd dashboard_src && npm install && npm run build`
-manually.
-
----
-
-## Backend: Phase 2E — Execution Wiring & Live Orchestrator
-
-Branch: `feature/phase2e-execution-wiring`
-Base: `main` @ `fc9afa1` (Phase 2C merged)
-
-### Summary
-
-Connects the completed Portfolio system (Phase 2A-2C) to the existing
-execution layer. `docs/architecture.md` §20 ("Next up") named this piece
-before it existed — this phase builds the "calling ExecutionCoordinator's
-per-symbol TradeManager with an OrchestratedDecision's allocations" and
-"acting on (or discarding) a ReplacementProposal" work it described,
-using the phase name (§20/portfolio_manager.py's own docstrings both
-call it "Phase 2E", not "Phase 2D") the repository itself already uses.
-
-**Two things intentionally NOT built, despite being named in the same
-breath by §20** (documented, not silently dropped — see
-architecture.md §23 "Scope boundary" for the full reasoning):
-
-- Reading real exchange/journal state into a `PortfolioState` each cycle
-  — that's reconciliation (`system_health/reconciliation.py` already
-  exists for this). `ExecutionOrchestrator` is handed a `PortfolioState`
-  and updates it as executions complete; it doesn't construct one.
-- A scheduler calling `PortfolioManager.decide()` then
-  `ExecutionOrchestrator.execute()` on a timer — `CLAUDE.md`'s own
-  priority list has "Execution Scheduler" as a distinct, later priority;
-  building it here would be starting a future phase early.
-
-### New modules
-
-| File | Purpose |
-|---|---|
-| `execution/execution_orchestrator.py` | `ExecutionOrchestrator.execute()` — the core connection this phase builds |
-| `execution/execution_state.py` | In-memory execution lifecycle tracking (PENDING→RUNNING→COMPLETED/FAILED/CANCELLED), idempotency ledger |
-| `execution/execution_metrics.py` | Pure computation over `ExecutionState` — success/failure/retry rate, latency, per-symbol counts |
-| `execution/execution_events.py` | Execution event vocabulary over the existing `EventBus` — no second pub/sub mechanism |
-| `api/execution_api.py` | `GET /api/execution/metrics`, `/status`, `/executions[?status=]`, `/executions/{id}` |
-
-### Changes to existing modules
+## Changes to existing modules
 
 | File | Change |
 |---|---|
-| `execution/execution_coordinator.py` | `+close_position()` — routes to the correct per-symbol `TradeManager`; needed because the existing `__getattr__` fallback only delegates to the *default* symbol's manager |
-| `config/settings.py` | `+EXECUTION_MAX_RETRIES` (default 2), `+EXECUTION_RETRY_DELAY_SECONDS` (default 0.0) |
-| `api/portfolio_ws.py` | `+_relay_execution_events()`, called from the existing `check_and_broadcast()` tick — dedup by `EventBus` seq, same shape as the existing dedup-by-row-id decision relay. **A real placement bug was caught and fixed during testing** (see below) |
-| `api/app.py` | + 1 import line, + `app.include_router(_execution_router)`. No existing route/behavior changed |
-| `docs/architecture.md` | New §23 (design rationale, scope boundary, the placement bug). §20 "Next up" **byte-for-byte untouched** — verified with `diff`, not just asserted |
-| `README.md` | Updated repo layout/test count (also corrected an already-stale count unrelated to this phase, since the file was already being touched) |
-| `CHANGELOG.md` | New entry at the top, previous entries unchanged |
+| `data/binance_provider.py` | `+symbol=` optional param on 7 methods (all default to `self.symbol` — zero behavior change for existing callers), `+get_market_data_for(symbol)`. |
+| `intelligence/market_context_builder.py` | `+symbol=` optional param on `build()` — the one place a symbol was implicitly hardcoded in an otherwise fully stateless pipeline. |
+| `config/settings.py` | `+SCHEDULER_ENABLED` (default `False`), `+SCHEDULER_INTERVAL_SECONDS` (60), `+SCHEDULER_CANDIDATE_LIMIT` (20). |
+| `main.py` | New guarded bootstrap block (same shape as the existing `MarketScanner` block): builds `PortfolioSignalProvider`/`PortfolioManager`/`ExecutionOrchestrator`/`ExecutionScheduler` and starts it, only if `SCHEDULER_ENABLED=true` (requires `SCANNER_ENABLED` too — logged, not a hard error, if missing). Reuses the already-built `trade_manager`. `+execution_scheduler` key in the returned bootstrap dict. |
+| `docs/architecture.md` | New §24. §1-23 byte-for-byte untouched (verified with `diff`, not asserted). |
 
 **Nothing was removed or had its public signature changed.** Every
-Phase 2A/2B/2C module (`CapitalManager`, `PortfolioManager`,
-`PortfolioState`, `SectorEngine`, `portfolio_api.py`, `portfolio_ws.py`,
-every existing dataclass) is byte-for-byte unchanged.
+existing single-symbol call site — `run_trading_cycle()`,
+`monitor_open_trades()`, every direct `dp.get_ohlcv()`/`get_mark_price()`
+call, `context_builder.build()` without a `symbol=` argument — is
+byte-for-byte unchanged in behavior.
 
-### A real bug caught by testing, not just written around
+## Two real bugs caught before merge, not written around
 
-Building test coverage for "cancel a pending execution" surfaced that
-`_execute_allocation`'s original `enqueue()` call unconditionally
-overwrote any pre-existing record for that `execution_id` — including
-one an external caller had *already cancelled*. Fixed with an
-`_already_cancelled()` guard checked before `enqueue()` runs; see
-`tests/test_execution_orchestrator.py::TestCancellation::
-test_preemptive_cancel_of_predicted_execution_id_is_respected`.
+1. **A Python scoping bug that would have broken the pre-existing
+   single-symbol execution path.** The first draft locally re-imported
+   `build_execution_engine` inside the new bootstrap block — but that
+   name is already imported at module level and used earlier in the
+   *same function* (`build_system()`). Python treats any name assigned
+   anywhere in a function body as local to the whole function, so the
+   earlier, unrelated, already-working call would have silently started
+   reading an unassigned local variable — but only once
+   `SCHEDULER_ENABLED=true` was actually set, making it exactly the kind
+   of bug that hides until someone flips a flag in production.
+   `ruff check .`'s `F823` caught it before this was ever run. Fixed by
+   removing the redundant local import.
+2. **A design bug in the same block.** The first draft called
+   `build_execution_engine()` a second time to get an execution engine
+   for the new `ExecutionOrchestrator`, instead of reusing
+   `trade_manager` (already built a few lines above in that same
+   function). In paper mode this would have created a second,
+   independent `PaperExecutionEngine` with its own separate balance; in
+   testnet/live mode, a second `ExecutionCoordinator` with its own
+   separate per-symbol `TradeManager` cache — silently splitting
+   execution state into two disconnected halves of the same process.
+   Fixed by passing the existing `trade_manager` through.
 
-Separately, the first draft of the WebSocket relay nested its call
-*inside* the decision-broadcast's own early-returns — meaning it would
-only ever run in the one tick a portfolio decision also happened to
-change in. Since a decision changes far less often than a batch
-executes, this would have meant execution events almost never actually
-reached clients in practice. Fixed by making the relay call independent
-of the decision-broadcast path; see
-`tests/test_portfolio_ws.py::TestExecutionEventRelay::
-test_execution_event_relayed_when_decision_row_unchanged`, which fails
-against the original placement and passes against the fix.
+## Scope boundary
 
-### Endpoints
+Does NOT build reconciliation-fed `PortfolioState` construction.
+`system_health/reconciliation.py`'s actual code is a mismatch-detection
+engine (exchange vs. bot vs. journal views), not a "build a
+`PortfolioState` from real positions" utility — reading it confirmed
+this rather than assuming it was already solved. `ExecutionScheduler`'s
+`PortfolioState` starts empty each process start and is built up ONLY
+from its own executions; a position opened before it started, by the
+legacy single-symbol loop, or manually on the exchange, is NOT
+reflected. This is real, scoped-out follow-up work, not a hidden gap —
+see `docs/architecture.md` §24 "Next up".
 
-REST (all under `/api/execution`, existing VIEWER-role auth applies
-automatically — no `api/auth.py` change needed):
+Also does not: persist execution outcomes anywhere durable (carried
+forward from §23, unchanged), build a dashboard panel for the new
+scheduler/signal-provider, or change `RiskEngine`/`CapitalManager`/
+`PortfolioManager`/`SectorEngine`/`ExecutionOrchestrator`/
+`ExecutionCoordinator` — every one of those is called exactly as
+already built and tested, never modified.
 
-| Method | Path | Returns |
-|---|---|---|
-| GET | `/metrics` | Process-wide cumulative `ExecutionMetricsSnapshot` |
-| GET | `/status` | Current pending/running/completed/failed/cancelled counts |
-| GET | `/executions` | Recent execution records, newest-first; `?status=`, `&limit=` |
-| GET | `/executions/{id}` | Single record, or `200 {"data": null}` if not found (not a 404) |
-
-WebSocket: existing `/ws/portfolio` connection now also emits
-`execution_started`/`_completed`/`_failed`/`_cancelled`/
-`_metrics_updated` frames — no new route, no protocol change to the
-existing `decision`/`state`/`sectors`/`allocations`/
-`replacement_proposal`/`heartbeat` frames.
-
-### Test results
+## Test results
 
 ```
 pytest tests/ -q
-1380 passed, 0 failed   (1280 baseline + 100 new)
+1512 passed, 0 failed   (1478 baseline + 34 new)
 
 ruff check .
-All checks passed!   (one F401 unused-import finding during
-                       development, fixed before this count)
+All checks passed!   (one real F823 scoping bug + one design bug
+                       (duplicate execution engine) + two unused-import
+                       findings during development, all fixed before
+                       this count)
 ```
 
-New test files: `tests/test_execution_state.py` (25),
-`test_execution_metrics.py` (9), `test_execution_events.py` (9),
-`test_execution_orchestrator.py` (34), `test_execution_api.py` (14).
-Additive to existing files: `test_execution_coordinator.py` (+2),
-`test_portfolio_ws.py` (+7).
+New test files: `tests/test_portfolio_signal_provider.py` (12),
+`tests/test_execution_scheduler.py` (22). `main.py`'s own new bootstrap
+block is deliberately not directly unit-tested — matching the existing,
+already-accepted precedent that `MarketScanner`'s identical bootstrap
+block isn't either (needs real Binance clients to exercise
+meaningfully; the safe-by-default posture is what's tested instead).
 
-### Known limitations / follow-up (documented, not hidden)
+## Known limitations / follow-up (documented, not hidden)
 
-- No execution-outcome persistence yet — `ExecutionResult`/
-  `ExecutionBatch` are in-memory only this phase (see architecture.md
-  §23 "History updates").
-- `signal_provider` (the entry/stop-loss/take-profit source
-  `ExecutionOrchestrator` depends on) has no multi-symbol-capable
-  implementation yet — `execution/strategy.py`'s existing
-  `SMC_OI_Regime_Strategy` remains single-symbol-only and unmodified;
-  this phase only defines and consumes the interface.
-- Replacement handling closes the outgoing position only — it does not
-  (and structurally cannot, without inventing sizing data) open the
-  incoming side. That happens naturally on a later `decide()` cycle
-  once capacity is freed.
-- Paper-mode execution engines don't support targeted per-symbol close
-  (a pre-existing, documented limitation of `execution_factory.py`, not
-  something this phase changes) — `ExecutionOrchestrator` detects this
-  via `hasattr(engine, "close_position")` and skips gracefully with a
-  `CANCELLED` result rather than crashing.
-- No dashboard panel consumes `/api/execution/*` or the new WS events
-  yet.
+- `ExecutionScheduler`'s `PortfolioState` is not reconciliation-fed (see
+  "Scope boundary" above) — restarting the process loses track of
+  positions it opened in a prior run until real reconciliation-fed
+  state construction is built.
+- No execution-outcome persistence yet (carried forward from §23).
+- No dashboard panel for `ExecutionScheduler.to_dict()` or the
+  already-existing `/api/execution/*` endpoints (§23).
+- `SCHEDULER_ENABLED=true` with `SCANNER_ENABLED=false` is logged and
+  silently skipped rather than started — by design (the Scheduler has
+  nothing to rank without the scanner), but worth knowing if the
+  scheduler doesn't seem to start.
 
 See `MIGRATION.md` for upgrade/rollback notes.

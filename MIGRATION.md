@@ -1,154 +1,137 @@
-# MIGRATION — V16 Phase 2C + feat(world-performance-v1) + Phase 2E: Execution Wiring & Live Orchestrator
+# MIGRATION — V16 Phase 2F: Execution Scheduler + Multi-Symbol Signals
 
-## Backend: Phase 2C — Portfolio API
+## Do you need to do anything?
 
-### Do you need to do anything?
+**No code changes required for existing callers.** Every existing
+single-symbol call site is unaffected:
 
-**No code changes required for existing callers.** Nothing in Phase 2A
-or Phase 2B (`CapitalManager`, `CorrelationEngine`, `PortfolioState`,
-`PortfolioManager`, `SectorEngine`, `portfolio_history.save_decision()`/
-`get_latest_decisions()`, every existing dataclass) changed signature,
-behavior, or default. This phase only adds new files plus new,
-additive functions — nothing existing was touched in a way that affects
-any current caller.
+- `data/binance_provider.py`'s 7 modified methods all default the new
+  `symbol=` parameter to `self.symbol` — call them exactly as before
+  and nothing changes.
+- `intelligence/market_context_builder.py`'s `build()` defaults the new
+  `symbol=` parameter to `settings.SYMBOL` — same.
+- `main.py`'s single-symbol trading loop (`run_trading_cycle()`,
+  `monitor_open_trades()`, etc.) is byte-for-byte unchanged.
+- `config/settings.py`'s three new `SCHEDULER_*` settings all default
+  to off/safe values — no `.env` change required to deploy.
 
-### If you want to start using the API
+## If you want to turn the Scheduler on
 
-It's already live once this branch is deployed — `api/app.py` includes
-both routers unconditionally, no feature flag or config change needed.
+It's off by default. To enable it:
 
 ```bash
-curl http://localhost:8000/api/portfolio/state
-# {"ok": true, "data": {"positions": [], "total_capital_allocated": 0.0,
-#   "blocked": null, "source": "latest_persisted_decision", "live": false,
-#   "as_of": null, "note": "No portfolio decision has ever been persisted yet..."}}
+# .env
+SCANNER_ENABLED=true      # required — the Scheduler needs the Market
+                           # Scanner for candidates; if this is false,
+                           # SCHEDULER_ENABLED is logged and skipped,
+                           # not a hard startup error
+SCHEDULER_ENABLED=true
+SCHEDULER_INTERVAL_SECONDS=60      # optional, default shown
+SCHEDULER_CANDIDATE_LIMIT=20       # optional, default shown
 ```
 
-## Backend: Phase 2E — Execution Wiring & Live Orchestrator
+Restart the bot. On startup you should see:
 
-### Do you need to do anything?
+```
+ExecutionScheduler ready | interval=60s candidate_limit=20
+ExecutionScheduler started | interval=60s
+```
 
-**No code changes required for existing callers.** Nothing in Phase 2A,
-2B, or 2C (`CapitalManager`, `PortfolioManager`, `PortfolioState`,
-`SectorEngine`, `portfolio_api.py`, `portfolio_ws.py`,
-`portfolio_history.py`, every existing dataclass) changed signature,
-behavior, or default. `execution/execution_coordinator.py` gained one
-new method (`close_position()`) — every existing method on it
-(`execute_trade()`, health/shutdown, `__getattr__` passthrough) is
-unchanged. This phase only adds new files plus additive changes —
-nothing existing was touched in a way that affects any current caller.
+If you instead see `SCHEDULER_ENABLED=true but SCANNER_ENABLED=false —
+... Not starting.`, set `SCANNER_ENABLED=true` too.
 
-### If you want to start using ExecutionOrchestrator
+**Read the scope boundary before relying on this in production**: the
+Scheduler's `PortfolioState` starts empty every time the process
+starts and is built up only from its own executions this run — it does
+not yet know about positions opened before it started, by the legacy
+single-symbol loop, or manually on the exchange. See
+`docs/architecture.md` §24 and `PATCH_NOTES.md`'s "Scope boundary"
+section for the full explanation. This is real, documented follow-up
+work, not a hidden gap — treat the Scheduler as additive/experimental
+until reconciliation-fed state construction lands.
 
-It is **not** wired into any running loop yet — no scheduler calls it
-in production (see PATCH_NOTES.md's "explicitly not built" list). To
-use it today, a caller constructs one directly:
+## If you want to use `PortfolioSignalProvider` or `ExecutionScheduler`
+directly (outside main.py's bootstrap)
 
 ```python
+from data.binance_provider import BinanceDataProvider
+from execution.execution_orchestrator import ExecutionOrchestrator
 from execution.execution_factory import build_execution_engine
-from execution.execution_orchestrator import ExecutionOrchestrator, ExecutionSignal
-from portfolio.portfolio_manager import PortfolioManager  # or your existing instance
+from execution.execution_scheduler import ExecutionScheduler
+from execution.portfolio_signal_provider import PortfolioSignalProvider
+from portfolio.portfolio_manager import PortfolioManager
+from ranking.opportunity_ranker import OpportunityRanker
+from risk.risk_engine import RiskEngine
+# ... plus a MarketScanner and a journal for RiskEngine — see main.py's
+# build_system() for the exact construction this all mirrors.
 
-engine = build_execution_engine()  # paper/testnet/live per settings, unchanged
-
-def my_signal_provider(symbol: str):
-    # Wire up whatever produces entry/stop-loss/take-profit for `symbol`
-    # today — this phase defines the interface, not an implementation.
-    ...
-    return ExecutionSignal(direction=1, entry_price=..., stop_loss=..., take_profit=...)
-
+data_provider = BinanceDataProvider()
+signal_provider = PortfolioSignalProvider(data_provider=data_provider)
+portfolio_manager = PortfolioManager()
 orchestrator = ExecutionOrchestrator(
-    execution_engine=engine,
+    execution_engine=build_execution_engine(data_provider=data_provider),
     portfolio_manager=portfolio_manager,
-    signal_provider=my_signal_provider,
+    signal_provider=signal_provider,
 )
-
-decision = portfolio_manager.decide(candidates, risk_engine, state, balance)
-batch = orchestrator.execute(decision, state, balance)
+scheduler = ExecutionScheduler(
+    opportunity_ranker=OpportunityRanker(market_scanner),
+    portfolio_manager=portfolio_manager,
+    risk_engine=risk_engine,
+    execution_orchestrator=orchestrator,
+    data_provider=data_provider,
+)
+scheduler.start()   # or scheduler.run_once() for a single synchronous cycle
 ```
 
-## If you want to start using the new API/WebSocket surface
+`run_once()` is public specifically so it can be driven synchronously
+(e.g. from a script, a test, or a manual "run one cycle now" button)
+without touching threading at all.
 
-Already live once this branch is deployed — `api/app.py` includes the
-new router unconditionally, no feature flag or config change needed.
+## Data fetching: new capability, not a new requirement
 
-```bash
-curl http://localhost:8000/api/execution/metrics
-# {"ok": true, "data": {"total": 0, "completed": 0, "failed": 0,
-#   "cancelled": 0, "pending": 0, "running": 0, "success_rate": 0.0,
-#   "failure_rate": 0.0, "retry_rate": 0.0,
-#   "average_latency_seconds": 0.0, "per_symbol_counts": {}}}
-```
-
-That all-zeros response is **expected and correct** until something
-actually constructs an `ExecutionOrchestrator` and calls `execute()` —
-see PATCH_NOTES.md's limitations section. It updates automatically,
-with no further deploy, the moment that happens.
-
-```javascript
-const ws = new WebSocket("ws://localhost:8000/ws/portfolio");  // same connection as Phase 2C
-ws.onmessage = (e) => {
-  const msg = JSON.parse(e.data);
-  // msg.type now also includes: "execution_started" | "execution_completed"
-  //   | "execution_failed" | "execution_cancelled" | "execution_metrics_updated"
-  // alongside the existing "decision" | "state" | "sectors" | "allocations"
-  //   | "replacement_proposal" | "heartbeat" | "init"
-};
-```
+`BinanceDataProvider.get_market_data_for(symbol)` reuses the SAME
+`market_client`/circuit breaker your existing single `BinanceDataProvider`
+instance already has — it does not open a second connection or need
+separate credentials. If you're calling it directly for a symbol not in
+`settings.symbol_list`, it will still work (Binance's API takes the
+symbol per-request, not per-client) but won't be pre-warmed the way
+`ExecutionCoordinator.initialize()` pre-warms leverage/margin for
+`settings.symbol_list` at boot.
 
 ## Configuration
 
-Two new optional settings, both with defaults — no `.env` change
-required to deploy:
-
 | Setting | Default | Meaning |
 |---|---|---|
-| `EXECUTION_MAX_RETRIES` | `2` | Orchestration-level retries for recoverable failures (layered above `trade_manager.py`'s own API-level retries) |
-| `EXECUTION_RETRY_DELAY_SECONDS` | `0.0` | Pause between orchestration-level retry attempts |
+| `SCHEDULER_ENABLED` | `false` | Turns the Execution Scheduler on. Requires `SCANNER_ENABLED=true`. |
+| `SCHEDULER_INTERVAL_SECONDS` | `60` | Seconds between scheduler cycles. |
+| `SCHEDULER_CANDIDATE_LIMIT` | `20` | Max candidates considered per cycle (separate from `RANKER_TOP_N`, which controls what the ranker persists/logs). |
 
 ## Database
 
-No schema change. This phase does not persist anything new —
-`ExecutionState` is in-memory only (see PATCH_NOTES.md's limitations
-list for why execution-outcome persistence is explicitly future work).
-
-## Auth
-
-No change to `api/auth.py`. `/api/execution/*` already falls under
-`_auth_middleware`'s existing default (any `/api/*` path not explicitly
-public requires at least VIEWER role) — identical reasoning to
-`/api/portfolio/*` in Phase 2C. If `API_AUTH_ENABLED=false` (the
-current default per the startup warning), these routes are open like
-everything else already is — this phase doesn't change that posture
-either way.
+No schema change. Nothing in this phase persists anything new.
 
 ## What is explicitly NOT part of this migration
 
-- No scheduler/orchestrator wiring into `main.py`'s live trading loop —
-  `ExecutionOrchestrator` exists and is fully tested, but nothing calls
-  it in production yet.
-- No execution-outcome persistence (fills/slippage) into
-  `portfolio_history` or any new table.
-- No multi-symbol signal-generation implementation — only the
-  `signal_provider` interface `ExecutionOrchestrator` depends on.
-- No dashboard panel. Nothing in `dashboard_src/`/`dashboard/` was
-  touched.
+- No reconciliation-fed `PortfolioState` (see scope boundary above).
+- No execution-outcome persistence.
+- No dashboard panel for the Scheduler or the existing
+  `/api/execution/*` endpoints.
 - No changes to `RiskEngine`, `CapitalManager`, `PortfolioManager`,
-  `SectorEngine`, `portfolio_api.py`, `portfolio_ws.py`'s existing
-  decision-broadcast behavior, or any Phase 2A/2B/2C dataclass.
+  `SectorEngine`, `ExecutionOrchestrator`, `ExecutionCoordinator`, or
+  any Phase 2A-2E dataclass — every one of these is called exactly as
+  already built and tested.
 
 ## Rollback (code)
 
-This entire phase lives in five new files
-(`execution/execution_orchestrator.py`, `execution_state.py`,
-`execution_metrics.py`, `execution_events.py`, `api/execution_api.py`)
-plus additive-only edits to four existing ones
-(`execution/execution_coordinator.py`: one new method appended;
-`config/settings.py`: two new fields appended;
-`api/portfolio_ws.py`: one new function plus one call site added to the
-existing tick, dedup state added alongside the existing dedup state;
-`api/app.py`: one import line, one `include_router()` call).
-Reverting the single commit on `feature/phase2e-execution-wiring` — or
-simply not merging the branch — fully removes it with zero impact on
-Phase 2A/2B/2C functionality, since nothing they already shipped was
-modified. No database rollback needed (no schema change this phase).
+This entire phase lives in two new files
+(`execution/portfolio_signal_provider.py`,
+`execution/execution_scheduler.py`) plus additive-only edits to three
+existing ones (`data/binance_provider.py`: 7 methods gained an optional
+parameter + one new method appended; `intelligence/market_context_builder.py`:
+one method gained an optional parameter; `config/settings.py`: three
+new fields appended) and one new guarded block in `main.py` (fully
+inert unless `SCHEDULER_ENABLED=true`). Reverting the single commit on
+`feature/execution-scheduler-multi-symbol-signals` — or simply not
+merging the branch, or leaving `SCHEDULER_ENABLED=false` — fully
+removes/disables it with zero impact on any earlier phase's
+functionality, since nothing they already shipped was modified.

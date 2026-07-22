@@ -1,5 +1,72 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 2F: Execution Scheduler + Multi-Symbol Signals
+
+### Added
+- **`execution/portfolio_signal_provider.py`** (`PortfolioSignalProvider`):
+  the real `signal_provider` `ExecutionOrchestrator` (§23) was designed
+  to accept as an injected dependency. Reuses the exact pipeline
+  `main.py`'s live single-symbol loop already uses — `RegimeEngine` ->
+  `SMCEngine` -> `VolumeEngine` -> `MarketContextBuilder` ->
+  `ConfidenceEngine` — confirmed by reading `main.py`'s actual
+  `run_trading_cycle()`, not `execution/strategy.py`'s
+  `SMC_OI_Regime_Strategy`/`BrainDecisionEngine` (a parallel pipeline
+  that exists for external-bot-framework compatibility but is never
+  instantiated in production). Never raises — one bad symbol can't
+  poison a multi-symbol batch.
+- **`execution/execution_scheduler.py`** (`ExecutionScheduler`): the
+  timer loop — rank -> limit -> balance -> `decide()` -> `execute()`.
+  Threading mirrors `scanner/market_scanner.py`'s `MarketScanner`
+  exactly (daemon thread, `start()`/`stop()`/`is_running()`).
+  `run_once()` is public so it can be driven synchronously without
+  threading at all.
+- **`data/binance_provider.py`**: `+symbol=` param on 7 methods
+  (defaults to `self.symbol`, every existing call site unaffected),
+  `+get_market_data_for(symbol)` for an explicit arbitrary symbol.
+- **`intelligence/market_context_builder.py`**: `+symbol=` param on
+  `build()` — the one place a symbol was implicitly hardcoded
+  (`settings.SYMBOL`) in an otherwise fully stateless pipeline.
+- **`config/settings.py`**: `+SCHEDULER_ENABLED` (default `False`),
+  `+SCHEDULER_INTERVAL_SECONDS` (default 60),
+  `+SCHEDULER_CANDIDATE_LIMIT` (default 20).
+- **`main.py`**: new guarded bootstrap block, same shape as the
+  existing `MarketScanner` block — `if SCHEDULER_ENABLED: try: ...
+  except: log, don't crash`. Requires `SCANNER_ENABLED` (logged, not a
+  hard error, if missing). Reuses the already-built `trade_manager`
+  rather than constructing a second execution engine.
+- 34 new tests (`test_portfolio_signal_provider.py` 12,
+  `test_execution_scheduler.py` 22). Full suite: 1478 → 1512 passed, 0
+  failed. `ruff check .` clean.
+- `docs/architecture.md` §24 (the pipeline-choice correction, why the
+  pipeline could be reused unmodified, two real bugs caught before
+  merge, scope boundary). §1-23 byte-for-byte untouched — verified with
+  `diff` against the pre-phase file, not just asserted.
+
+### Two real bugs caught before merge (see architecture.md §24 for detail)
+- A local re-import of `build_execution_engine` inside the new
+  bootstrap block shadowed the existing module-level import for the
+  *entire* `build_system()` function — breaking an unrelated, already-
+  working call earlier in that same function the moment
+  `SCHEDULER_ENABLED=true`. Caught by `ruff check .`'s `F823` before
+  ever running.
+- The first draft called `build_execution_engine()` a second time
+  instead of reusing the already-built `trade_manager` — would have
+  silently split execution state into two disconnected engines (two
+  separate paper balances, or two separate `ExecutionCoordinator`
+  per-symbol caches) in the same process.
+
+### Not included (explicitly out of scope for this phase)
+- No reconciliation-fed `PortfolioState` — `ExecutionScheduler`'s state
+  starts empty each process start and is built up only from its own
+  executions; a position opened before it started, by the legacy loop,
+  or manually on the exchange is not reflected yet.
+- No execution-outcome persistence (carried forward from §23, still
+  unchanged).
+- No dashboard panel for `ExecutionScheduler.to_dict()` or the existing
+  `/api/execution/*` endpoints.
+
+---
+
 ## [Unreleased] — V16 Phase 2E: Execution Wiring & Live Orchestrator
 
 ### Added
