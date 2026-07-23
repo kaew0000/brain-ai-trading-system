@@ -1694,3 +1694,104 @@ above — plus two unused-import findings, all fixed before this count).
   RiskEngine's single account-level gate, real correlation tracking,
   sector-cap capital redistribution, reconciliation alert escalation,
   `dashboard_api`/`websocket` heartbeat gaps.
+
+---
+
+## 25. Strategy Plugin System — V16 Phase 3A (2026-07-23)
+
+Formalises the plug point `execution/execution_orchestrator.py` (§23)
+already documented but never made selectable: `ExecutionOrchestrator`
+takes a `signal_provider: Callable[[str], Optional[ExecutionSignal]]`
+constructor dependency and "does not know or care how it is
+implemented" — but `main.py`'s bootstrap hardcoded exactly one
+implementation (`PortfolioSignalProvider`) at that call site. This
+phase adds a registry so that choice is config-driven instead.
+
+**Before writing any code**, a broader "6 new frameworks" redesign was
+scoped against the actual codebase rather than built from the pillar
+names alone. Reading `agents/`, `graph/agent_graph.py`, `commander/`,
+`decision/`, `ranking/confidence_fusion.py`, `research/`, and
+`ml/learning_mode.py` showed 4 of the 6 requested pillars (Ensemble
+Decision Engine, Multi-Agent Framework, Quant Research Pipeline, AI
+Self-Improvement) already have substantial, production-wired
+implementations under different names — building new ones from scratch
+would have created duplicate modules. Only Strategy Plugin System had
+no existing formal interface (`execution/strategy.py`'s
+`SMC_OI_Regime_Strategy` is a single hardcoded class, not a
+registry/interface), so it was chosen as the lowest-risk first phase of
+a re-scoped, one-phase-at-a-time roadmap. The other 5 pillars are
+follow-up phases, each to be scoped the same way against their specific
+existing module before any code is written.
+
+### New module
+
+| File | Purpose |
+|---|---|
+| `execution/strategy_registry.py` | `StrategyRegistry` — name → factory lookup for `signal_provider` implementations, plus `SMCOIRegimeStrategyAdapter` (wraps `SMC_OI_Regime_Strategy`'s tuple return in an `ExecutionSignal`, reading `entry_price` off its `.last_decision`). Two strategies pre-registered: `"portfolio_signal_provider"` (default) and `"smc_oi_regime"` (legacy). |
+
+### Changes to existing modules
+
+| File | Change |
+|---|---|
+| `config/settings.py` | `+STRATEGY_NAME` (default `"portfolio_signal_provider"` — identical to the class Phase 2F hardcoded). |
+| `main.py` | The one `signal_provider = PortfolioSignalProvider(...)` construction (§2F's addition) now reads `signal_provider = build_strategy(settings.STRATEGY_NAME, ...)` with the same kwargs. No other line in `main.py` changed. |
+
+Neither `execution/strategy.py`, `execution/portfolio_signal_provider.py`,
+nor `execution/execution_orchestrator.py` were modified — this phase is
+a selection layer in front of them, not a rewrite of either.
+
+### Scope boundary — `smc_oi_regime` is registered but not symbol-aware
+
+`SMC_OI_Regime_Strategy.generate_signal()` reads one global
+`data_provider` with no `symbol` parameter (confirmed by reading
+`execution/strategy.py` directly — this is the same limitation
+§24/`portfolio_signal_provider.py`'s own docstring already noted when
+explaining why that phase was built on a different pipeline instead).
+`SMCOIRegimeStrategyAdapter` therefore always reflects the single
+globally-configured symbol regardless of what `symbol` string
+`ExecutionScheduler` passes it. Documented on the class and in
+`execution/strategy_registry.py`'s module docstring rather than
+silently papered over: selecting `STRATEGY_NAME=smc_oi_regime` for the
+multi-symbol scheduler path would silently make every symbol resolve
+to the same one signal. It's registered for plugin-system completeness
+and any future single-symbol standalone use, not as an interchangeable
+drop-in today.
+
+### Testing
+
+21 new tests (`test_strategy_registry.py`) — registry mechanics
+(register/get/build/list, duplicate-registration and unknown-name error
+paths) against fresh `StrategyRegistry()` instances so they can't bleed
+state into each other, plus the two built-in factories, plus
+`SMCOIRegimeStrategyAdapter`'s tuple→`ExecutionSignal` conversion tested
+against a fake underlying strategy (no `BrainDecisionEngine` construction
+needed).
+
+**Verified: `pytest tests/ -q` → 1533 passed, 0 failed** (1512 baseline
++ 21 new). `ruff check .` → clean.
+
+### Next up
+
+- **Ensemble Decision Engine** — extend `agents/ceo_agent.py` /
+  `decision/confidence_engine.py` / `ranking/confidence_fusion.py`
+  (already the closest thing to an ensemble this codebase has); not a
+  new module.
+- **Multi-Agent Framework enhancements** — extend `agents/` +
+  `graph/agent_graph.py` + `commander/`; confirm with the project owner
+  whether "MCP" means the Anthropic Model Context Protocol specifically
+  before any interface changes.
+- **Quant Research Pipeline / Research-Optimization Framework** —
+  extend `research/` + `ml/trainer.py` + `ml/model_registry.py`; needs
+  its own scoping pass to draw a clean boundary between these two
+  overlapping pillar names before coding either.
+- **AI Self-Improvement (human-approved only)** — `ml/learning_mode.py`
+  already does nightly retrain + safe promotion, but promotion is
+  automatic (gated on win-rate/profit-factor/drawdown, not a human
+  approval step). Adding a human-approval gate on top of the existing
+  promotion logic is additive; replacing it is not needed.
+- Everything §24 already carried forward and this phase didn't touch:
+  reconciliation-fed `PortfolioState`, execution-outcome persistence,
+  dashboard execution + scheduler panel, RiskEngine's single
+  account-level gate, real correlation tracking, sector-cap capital
+  redistribution, reconciliation alert escalation, `dashboard_api`/
+  `websocket` heartbeat gaps.

@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 3A: Strategy Plugin System
+
+### Added
+- **`execution/strategy_registry.py`** (`StrategyRegistry`): name →
+  factory lookup for `signal_provider` implementations, formalising the
+  plug point `execution/execution_orchestrator.py` (§23) already
+  documented but never made selectable. Duplicate registration under
+  an existing name raises unless `override=True`. Pre-registers:
+  - `"portfolio_signal_provider"` (default) — wraps the existing
+    `PortfolioSignalProvider` unmodified.
+  - `"smc_oi_regime"` — wraps `execution/strategy.py`'s
+    `SMC_OI_Regime_Strategy` via the new `SMCOIRegimeStrategyAdapter`,
+    which converts its bare `(direction, stop_loss, take_profit)`
+    tuple into a full `ExecutionSignal` using `.last_decision.entry_price`.
+    Documented as **not symbol-aware** — see PATCH_NOTES.md.
+- **`config/settings.py`**: `+STRATEGY_NAME` (default
+  `"portfolio_signal_provider"`, byte-for-byte the class already
+  hardcoded before this phase — no behavior change unless explicitly
+  configured).
+
+### Changed
+- **`main.py`**: the `ExecutionScheduler` bootstrap's
+  `signal_provider = PortfolioSignalProvider(...)` construction now
+  reads `signal_provider = build_strategy(settings.STRATEGY_NAME, ...)`
+  with identical keyword arguments. No other line changed.
+
+### Testing
+`pytest tests/ -q` → 1533 passed, 0 failed (1512 baseline + 21 new in
+`tests/test_strategy_registry.py`). `ruff check .` → clean.
+
 ## [Unreleased] — V16 Phase 2F: Execution Scheduler + Multi-Symbol Signals
 
 ### Added

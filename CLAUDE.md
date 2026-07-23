@@ -30,20 +30,37 @@ Completed
 - Multi Symbol Foundation
 - Market Scanner
 - Opportunity Ranker
+- Portfolio Manager (Intelligence Core + Orchestrator + API — see architecture.md §17-19)
+- Bundle Manager
+- Execution Wiring & Live Orchestrator
+- Execution Scheduler + Multi-Symbol Signals
+- Strategy Plugin System (architecture.md §25 — `execution/strategy_registry.py`)
 
 In Progress
 
-- Portfolio Manager
-- Capital Allocation
-- Correlation Engine
+- (none — see Current Priorities below for the next scoped phase)
 
-Planned
+Planned — re-scoped 2026-07-23 around a production AI trading platform
+direction (each pillar below is its own future phase, scoped against
+existing code before implementation — see architecture.md §25 "Next up"
+for what already exists under each pillar):
 
-- Adaptive AI
-- Learning Engine
-- Portfolio Dashboard
-- Strategy Evolution
-- Self Optimization
+- Ensemble Decision Engine (extends `agents/ceo_agent.py` + `decision/`
+  + `ranking/confidence_fusion.py` — already substantially exists)
+- Multi-Agent Framework enhancements (extends `agents/` +
+  `graph/agent_graph.py` + `commander/` — already substantially exists;
+  NOT the Anthropic MCP protocol unless later specified otherwise)
+- Quant Research Pipeline (extends `research/`)
+- Research/Optimization Framework (extends `ml/trainer.py` +
+  `ml/model_registry.py` — needs a scoping pass to separate from the
+  pillar above)
+- AI Self-Improvement, human-approved only (adds an approval gate on
+  top of `ml/learning_mode.py`'s existing auto-promotion logic)
+- Correlation Engine / Sector Engine (real correlation tracking,
+  sector-cap capital redistribution — carried forward from earlier
+  phases, still open)
+- Portfolio Dashboard (execution + scheduler panel — carried forward,
+  still open)
 
 ---
 
@@ -159,37 +176,36 @@ Summarize changes
 
 # Current Priorities
 
+(Portfolio Manager, Capital Allocation, and Execution Scheduler are
+done — see Completed above. Priorities below re-scoped 2026-07-23.)
+
 Priority 1
 
-Portfolio Manager
+Strategy Plugin System — DONE (architecture.md §25)
 
 Priority 2
 
-Capital Allocation
+Ensemble Decision Engine (extend, don't duplicate, `agents/ceo_agent.py`)
 
 Priority 3
 
-Correlation Engine
+Multi-Agent Framework enhancements (extend `agents/` + `graph/` + `commander/`)
 
 Priority 4
 
-Sector Engine
+Quant Research Pipeline / Research-Optimization Framework (extend `research/` + `ml/`)
 
 Priority 5
 
-Execution Scheduler
+AI Self-Improvement, human-approved only (gate on top of `ml/learning_mode.py`)
 
 Priority 6
 
-Portfolio Dashboard
+Correlation Engine / Sector Engine
 
 Priority 7
 
-Adaptive AI
-
-Priority 8
-
-Learning Engine
+Portfolio Dashboard
 
 ---
 
