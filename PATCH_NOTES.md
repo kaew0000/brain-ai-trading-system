@@ -1,72 +1,56 @@
-# PATCH NOTES — V16 Phase 4A: Ensemble Decision Engine (ConfidenceEngine Fusion)
+# PATCH NOTES — V16 Phase 4B Step 1: Per-Agent Outcome Attribution
 
-Branch: `feature/ensemble-decision-engine-4a`
-Base: `main` (post Phase 3A merge, "feat(execution): Phase 3A Strategy
-Plugin System", 1533 passing)
+Base: `main` (post Phase 4A merge, "feat(agents): Phase 4A Ensemble
+Decision Engine", 1539 passing)
 
 ## Summary
 
-`agents/ceo_agent.py`'s `CEOAgent.decide()` previously took two separate
-code paths: when a `confidence_result` was passed in, it **overrode**
-the action/direction/confidence outright, and the agent layer's own
-votes (`smc`, `futures`, `regime`, `risk`, `journal`) only appeared in
-the `reasons` text — they never influenced the actual decision. Since
-`main.py`'s live pipeline and `execution/portfolio_signal_provider.py`
-both always pass a `confidence_result`, the "ensemble" vote was
-effectively dead code in production outside the risk veto.
-
-This phase fuses `ConfidenceEngine`'s opinion into the same weighted vote
-as every other agent instead of letting it override the agent layer, and
-adds an `agreement_score` that damps confidence when the agent layer is
-split on direction. Per §25's "Next up" and CLAUDE.md's Priority 2, this
-extends `agents/ceo_agent.py` rather than building a new module.
-
-**Scoped in two sub-phases before writing code.** The original ask was
-just "Ensemble Decision Engine." Reading `agents/ceo_agent.py`,
-`decision/confidence_engine.py`, `ranking/confidence_fusion.py`, and
-`journal/journal_v2.py` first split the work into: (A) fuse
-ConfidenceEngine + add disagreement scoring — no new data dependency,
-touches one file — and (B) weight agents by their real historical
-win-rate — blocked on per-agent outcome attribution that doesn't exist
-yet in the journal. Building (B) without (A)'s data would have been a
-static placeholder with no real signal behind it. This phase is (A)
-only; (B) is scoped as a follow-up in `docs/architecture.md` §26 "Next
-up".
+architecture.md §26 "Next up" scoped Phase 4B's first step as adding
+per-agent outcome attribution at trade close. Inspecting the code first
+(per CLAUDE.md workflow) found the schema already supported this
+(`agent_decisions.signal_id`, `trades.signal_id`, `save_trade(signal_id=)`
+all already existed) — it was simply never wired up. It also found a
+bigger, previously undocumented gap: `execution/execution_orchestrator.py`
+(V16's multi-symbol path) never writes to the journal at all, so this
+phase's attribution only covers the legacy single-symbol `main.py`
+pipeline, which is the only one that currently records real trade
+outcomes. See `docs/architecture.md §27` for the full discovery writeup.
 
 ## Changes to existing modules
 
 | File | Change |
 |---|---|
-| `agents/ceo_agent.py` | `WEIGHTS` gains `confidence_engine: 0.15`, rebalanced from `{smc:.30 futures:.25 regime:.20 risk:.15 journal:.10}` to `{smc:.25 futures:.20 regime:.15 risk:.15 journal:.10 confidence_engine:.15}`. `confidence_result` is now wrapped as an `AgentReport` and folded into the existing weighted vote loop instead of overriding it in a separate branch. New `agreement_score` field on `CEODecision` (weighted fraction of directional votes agreeing with the winning action), used to damp `confidence` when the agent layer disagrees. `score_breakdown` gains `journal` and `confidence_engine` keys (previously omitted). A ConfidenceEngine hard block (`blocked=True` / `action=="BLOCKED"`) still short-circuits to `BLOCKED` unconditionally, same precedence as the risk veto. |
-| `docs/architecture.md` | +§26 (this phase). |
-| `CLAUDE.md` | "Current Development Status" / "Current Priorities" updated — Phase 4A moved to Completed under Priority 2; Phase 4B recorded as the next scoped step. |
+| `journal/journal_v2.py` | New `get_agent_performance(limit=500)` — joins `agent_decisions` to `trades` via the existing `signal_id` link. Counts a vote toward its agent only when that agent's vote direction matches the direction actually traded; dissenting agents are attributed neither the win nor the loss. Returns raw `{agent, total_trades, wins, losses, win_rate, total_pnl}` — not a weight recommendation. |
+| `main.py` | `ceo_decision` now initialised to `None` before the agent-layer block (previously only defined inside a nested `if`, unsafe to reference afterward). `save_signal()`'s return value is now captured as `sig_id` (previously discarded). Each agent in `ceo_decision.agent_reports` is now persisted via `save_agent_decision(..., signal_id=sig_id)`. `save_trade(rec)` → `save_trade(rec, signal_id=sig_id)`. |
+| `docs/architecture.md` | +§27 (this phase). |
+| `CLAUDE.md` | Phase 4B Step 1 moved to Completed; Priority 2 updated with the execution_orchestrator.py journal gap noted as a separate, still-open item. |
 
-Neither `execution/strategy.py`, `execution/portfolio_signal_provider.py`,
-`decision/confidence_engine.py`, nor `ranking/confidence_fusion.py` were
-modified — this phase changes how `CEOAgent` consumes their output, not
-the outputs themselves.
+`execution/execution_orchestrator.py`, `agents/ceo_agent.py`,
+`decision/confidence_engine.py`, and `database/schema_v13.sql` were **not**
+modified — no schema change was needed (see architecture.md §27
+"Discovery"), and the execution layer was deliberately left untouched per
+CLAUDE.md's "never modify Execution Layer blindly" rule.
 
 ## Known limitation (documented, not hidden)
 
-Confidence damping from `agreement_score` is applied once, using the
-action/scores already computed from the undamped vote — it does not
-re-run action selection after damping. A vote that just barely cleared
-the 40-point action threshold can end up reported at a damped confidence
-below 40 (e.g. 39.38 in the test suite). This is intentional: it reflects
-"the agent layer is split, treat this as a weaker signal" rather than
-flip-flopping the action itself based on its own after-the-fact damping.
+Only the legacy single-symbol `main.py` pipeline is wired. Trades taken
+through `execution/execution_orchestrator.py` (V16 multi-symbol path)
+never call `save_trade`/`update_trade_result` at all today, so
+`get_agent_performance()` cannot see them — it will only ever reflect
+single-symbol history until that separate gap is closed. This was a
+deliberate scope decision, not an oversight; see architecture.md §27
+"Next up".
 
 ## Testing
 
 ```
-pytest tests/ -q   → 1539 passed, 0 failed  (1533 baseline + 6 new)
+pytest tests/ -q   → 1546 passed, 0 failed  (1539 baseline + 7 new)
 ruff check .        → clean
 ```
 
-6 new tests in `tests/test_ceo_ensemble_fusion.py`, using hand-built
-`FakeAgent` stubs (not `build_agent_layer`'s real engines) for
-deterministic weighted-vote math: agent layer outvoting ConfidenceEngine,
-agents and ConfidenceEngine agreeing, agreement-score + damping math
-checked to 2 decimal places, unanimous vote has zero damping, hard-block
-passthrough regardless of agent votes, and risk veto still winning over a
-directional fused result.
+7 new tests in `tests/test_agent_outcome_attribution.py`: agreeing agent
+credited with a win, dissenting agent attributed nothing, win-rate across
+multiple trades, open trades excluded, `signal_id=None` rows safely
+ignored, and the `limit` parameter. Uses a `tmp_path` temp-file DB per
+test (not `db_path=":memory:"`, which is a process-wide shared connection
+in `database/db.py` — see the test file's fixture docstring).

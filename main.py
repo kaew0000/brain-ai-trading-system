@@ -594,6 +594,10 @@ def run_trading_cycle(sys: dict) -> None:
 
         # ── 10a. Run AI Agent Layer (CEO + all employees) ────────────────────────
         agents = sys.get("agent_layer", {})
+        # Phase 4B Step 1: initialised here (not just inside the `if agents:`
+        # branch below) so the persist block in 10c can safely check it even
+        # on a cycle where the agent layer didn't run.
+        ceo_decision = None
         if agents:
             # Build augmented context with position + CEO decision
             pos_info = market_ctx.copy()
@@ -625,15 +629,40 @@ def run_trading_cycle(sys: dict) -> None:
         # ── 10c. Persist history rows for /api/signals, /api/regime, /api/futures ─
         # These were previously never written, so dashboard charts/history were
         # always empty even though the pipeline computed everything correctly.
+        sig_id = None
         try:
             sig_dict = decision.to_dict()
             sig_dict["score"] = decision.raw_score  # to_dict() uses raw_score key
-            jrn.save_signal(
+            sig_id = jrn.save_signal(
                 sig_dict,
                 symbol               = settings.SYMBOL,
                 confidence_breakdown = decision.breakdown,
                 raw_features         = market_ctx,
             )
+            # Phase 4B Step 1 (architecture.md §27): persist each sub-agent's
+            # vote for this decision cycle, tagged with this signal's id.
+            # agent_decisions.signal_id / trades.signal_id already existed in
+            # the V13 schema for exactly this join, but the live pipeline
+            # never wrote either side. Passing signal_id into save_trade()
+            # below (once a trade actually opens) is what lets a later query
+            # join a closed trade back to which agents voted for its
+            # direction — no new tables/columns needed.
+            if ceo_decision is not None:
+                _ceo_ref = agents.get("ceo") if agents else None
+                _weights = getattr(_ceo_ref, "WEIGHTS", {}) if _ceo_ref else {}
+                for agent_key, report in ceo_decision.agent_reports.items():
+                    try:
+                        jrn.save_agent_decision(
+                            agent     = report.get("agent", agent_key.upper()),
+                            decision  = report.get("signal", "NEUTRAL"),
+                            symbol    = settings.SYMBOL,
+                            score     = float(report.get("confidence", 0.0)),
+                            weight    = float(_weights.get(agent_key, 0.0)),
+                            details   = report.get("raw"),
+                            signal_id = sig_id,
+                        )
+                    except Exception as exc:
+                        logger.debug(f"Agent decision persist skipped for {agent_key}: {exc}")
             jrn.save_market_regime(regime.to_dict(), symbol=settings.SYMBOL)
             jrn.save_funding(
                 funding_rate = market.get("funding_rate", 0.0),
@@ -815,7 +844,10 @@ def run_trading_cycle(sys: dict) -> None:
             volume    = vol_signals,
             execution = exec_result if exec_result["success"] else None,
         )
-        tid = jrn.save_trade(rec)
+        # Phase 4B Step 1: carries this cycle's signal_id onto the trade row
+        # so get_agent_performance() can join back to which agents voted for
+        # the direction that was actually traded.
+        tid = jrn.save_trade(rec, signal_id=sig_id)
 
         if exec_result["success"]:
             logger.info(f"Trade #{tid} executed successfully")

@@ -1871,3 +1871,104 @@ winning over a directional fused result.
 - Multi-Agent Framework enhancements, Quant Research Pipeline /
   Research-Optimization Framework, AI Self-Improvement (human-approved
   gate) — unchanged from §25 "Next up", still open.
+
+## 27. Ensemble Decision Engine — Phase 4B Step 1: Per-Agent Outcome Attribution (2026-07-23)
+
+§26 "Next up" scoped 4B's first actual step as "adding per-agent outcome
+attribution at trade close (`execution/execution_orchestrator.py` closing
+path + `journal_v2.py` schema)". Inspecting both files before writing any
+code changed the shape of the work in two ways described below — this
+section documents what was actually built and why it differs from that
+original phrasing.
+
+### Discovery — the assumed schema gap didn't exist; a bigger one did
+
+`journal/journal_v2.py`'s `agent_decisions` table already carried a
+`signal_id` column (FK to `signals.id`), and `save_trade()` already
+accepted an optional `signal_id` parameter — the V13 schema was already
+shaped for exactly this join. Neither side was ever populated by the live
+pipeline: `save_agent_decision()` had zero call sites outside one test,
+and `main.py`'s `save_signal()` return value was discarded rather than
+threaded through to `save_trade()`. So no schema change was needed at
+all — the "gap" was a wiring gap, not a schema gap.
+
+Separately, and not assumed by §26: `execution/execution_orchestrator.py`
+(the V16 multi-symbol path) does not call `save_trade()` or
+`update_trade_result()` anywhere — opening a position only calls
+`PortfolioState.add_position()`, closing only calls
+`PortfolioState.remove_position()` + `PortfolioManager.
+notify_position_closed()`. Grepping `execution/` and `portfolio/` for any
+journal usage returns nothing. Only `main.py`'s legacy single-symbol
+pipeline actually persists trades to the journal today. This phase
+therefore only wires the pipeline that has something to attribute to;
+see "Next up" below.
+
+### Change
+
+`journal/journal_v2.py`:
+- New `get_agent_performance(limit=500)` — joins `agent_decisions` to
+  `trades` on `signal_id`, counting a vote toward its agent's win/loss
+  record only when `agent_decisions.decision` matches the direction that
+  was actually traded (`trades.direction`). A dissenting agent (voted the
+  opposite side of what was traded) is attributed neither the win nor the
+  loss — it didn't get the trade it voted for. Returns raw
+  `{agent, total_trades, wins, losses, win_rate, total_pnl}` rows, not a
+  weight recommendation — deciding how (and above what minimum sample
+  size) to let this influence `CEOAgent.WEIGHTS` is Phase 4B proper, not
+  this step.
+
+`main.py` (single-symbol pipeline only — see "Next up"):
+- `ceo_decision` initialised to `None` before the agent-layer block so
+  it's always safely checkable later, even on a cycle where the agent
+  layer didn't run.
+- `save_signal()`'s return value is now captured (`sig_id`, previously
+  discarded).
+- Each entry in `ceo_decision.agent_reports` is now persisted via
+  `save_agent_decision(agent, decision=signal, score=confidence,
+  weight=CEOAgent.WEIGHTS[key], details=raw, signal_id=sig_id)`,
+  wrapped in its own try/except per agent so one malformed report can't
+  drop the rest.
+- `save_trade(rec, signal_id=sig_id)` — previously called with no
+  `signal_id`, silently leaving `trades.signal_id` null for every trade.
+
+No changes to `execution/execution_orchestrator.py`, `agents/ceo_agent.py`,
+`decision/confidence_engine.py`, or the schema file — purely additive
+wiring plus one new read method.
+
+### Testing
+
+7 new tests (`tests/test_agent_outcome_attribution.py`), covering: an
+agreeing agent credited with a win, a dissenting agent attributed
+nothing either way, win-rate aggregation across multiple closed trades,
+open (unclosed) trades excluded, agent_decisions rows with no
+`signal_id` safely ignored (not a crash), and the `limit` parameter.
+Uses a `tmp_path`-backed temp-file DB per test rather than
+`db_path=":memory:"` — `database/db.py` caches one shared connection per
+the literal path `":memory:"` for the whole process, so every
+`":memory:"` journal in the suite is actually the same database; this
+method's cross-table join needed real per-test isolation, matching the
+existing `tmp_journal` pattern in `tests/test_execution.py`.
+
+**Verified: `pytest tests/ -q` → 1546 passed, 0 failed** (1539 baseline +
+7 new). `ruff check .` → clean.
+
+### Next up
+
+- **Phase 4B proper — actually using `get_agent_performance()` to adjust
+  `CEOAgent.WEIGHTS`.** This step only exposes the data; a follow-up
+  phase decides the update rule (e.g. blend toward measured win-rate
+  once an agent has N closed, direction-matching trades, static weight
+  below that floor) and where it's applied (`CEOAgent.__init__` reading a
+  refreshed weight table, vs. a periodic recompute job).
+- **Wire `execution/execution_orchestrator.py` to the journal at all.**
+  Until it calls something equivalent to `save_trade`/
+  `update_trade_result`, every trade taken through the V16 multi-symbol
+  path is invisible to `get_agent_performance()` — Phase 4B proper would
+  only ever see legacy single-symbol history. This is Execution-Layer
+  work (open + close paths, idempotency under retries, interaction with
+  `ReplacementProposal` closes) and needs its own scoping pass rather
+  than folding into a journal/reporting phase; not started here per the
+  "never modify Execution Layer blindly" rule.
+- Multi-Agent Framework enhancements, Quant Research Pipeline /
+  Research-Optimization Framework, AI Self-Improvement (human-approved
+  gate) — unchanged from §26 "Next up", still open.

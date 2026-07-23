@@ -37,6 +37,8 @@ Completed
 - Strategy Plugin System (architecture.md §25 — `execution/strategy_registry.py`)
 - Ensemble Decision Engine Phase 4A — ConfidenceEngine fusion + agreement
   scoring (architecture.md §26 — `agents/ceo_agent.py`)
+- Ensemble Decision Engine Phase 4B Step 1 — per-agent outcome attribution
+  (architecture.md §27 — `journal/journal_v2.py` + `main.py`)
 
 In Progress
 
@@ -189,10 +191,20 @@ Priority 2
 
 Ensemble Decision Engine — Phase 4A DONE (architecture.md §26:
 ConfidenceEngine fused into `agents/ceo_agent.py`'s weighted vote instead
-of overriding it, plus agreement/disagreement scoring). Phase 4B
-(dynamic per-agent weighting from real journal win-rate) still open —
-blocked on per-agent outcome attribution not existing yet in
-`journal/journal_v2.py` (see architecture.md §26 "Next up").
+of overriding it, plus agreement/disagreement scoring). Phase 4B Step 1
+DONE (architecture.md §27: `journal/journal_v2.py`'s
+`get_agent_performance()` + `main.py` wiring — per-agent win/loss now
+attributable via the existing `agent_decisions.signal_id` /
+`trades.signal_id` linkage). Phase 4B proper (actually using these
+win-rates to adjust `CEOAgent.WEIGHTS`) still open, and **only covers the
+legacy single-symbol `main.py` pipeline** — `execution/
+execution_orchestrator.py` (V16 multi-symbol path) does not write to the
+journal at all yet (no `save_trade`/`update_trade_result` calls
+anywhere in `execution/` or `portfolio/`), discovered while scoping this
+phase. Wiring journal persistence into the multi-symbol path is a
+separate, larger, Execution-Layer-touching gap — see architecture.md §27
+"Next up" — not folded into this phase per the "never modify Execution
+Layer blindly" rule.
 
 Priority 3
 

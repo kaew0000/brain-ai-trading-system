@@ -530,6 +530,56 @@ class TradeJournalV2:
             rows = c.execute(sql, args).fetchall()
         return [_row_to_dict(r, json_cols=("details",)) for r in rows]
 
+    def get_agent_performance(self, limit: int = 500) -> List[dict]:
+        """
+        Per-agent win-rate — Phase 4B Step 1 (architecture.md §27).
+
+        Joins agent_decisions back to trades via the signal_id both tables
+        already carried in the V13 schema (agent_decisions.signal_id,
+        trades.signal_id) — no new tables or columns. Only counts a vote
+        toward its agent's record when ad.decision matches the direction
+        that was actually traded (t.direction): a dissenting agent didn't
+        get the trade it voted for, so it is neither credited with the win
+        nor blamed for the loss.
+
+        Returns one row per agent with raw win/loss counts and total_pnl —
+        deliberately NOT a weight recommendation. A future phase (4B proper)
+        decides how/when to trust this (e.g. a minimum-sample-size floor
+        before letting it influence CEOAgent.WEIGHTS) — this method only
+        answers "what actually happened per agent so far".
+        """
+        sql = """
+        SELECT ad.agent AS agent,
+               COUNT(*) AS total,
+               SUM(CASE WHEN t.result = 'WIN'  THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN t.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+               SUM(t.pnl) AS total_pnl
+        FROM agent_decisions ad
+        JOIN trades t ON t.signal_id = ad.signal_id
+        WHERE t.result IN ('WIN', 'LOSS')
+          AND ad.signal_id IS NOT NULL
+          AND ad.decision = t.direction
+        GROUP BY ad.agent
+        ORDER BY wins DESC
+        LIMIT ?
+        """
+        with self._conn() as c:
+            rows = c.execute(sql, (limit,)).fetchall()
+
+        out = []
+        for r in rows:
+            total = r["total"] or 0
+            wins  = r["wins"] or 0
+            out.append({
+                "agent":        r["agent"],
+                "total_trades": total,
+                "wins":         wins,
+                "losses":       r["losses"] or 0,
+                "win_rate":     round(wins / total, 4) if total else 0.0,
+                "total_pnl":    round(float(r["total_pnl"] or 0.0), 2),
+            })
+        return out
+
     def save_agent_message(
         self,
         agent: str,
