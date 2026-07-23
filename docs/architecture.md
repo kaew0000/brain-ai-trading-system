@@ -1955,20 +1955,100 @@ existing `tmp_journal` pattern in `tests/test_execution.py`.
 ### Next up
 
 - **Phase 4B proper — actually using `get_agent_performance()` to adjust
-  `CEOAgent.WEIGHTS`.** This step only exposes the data; a follow-up
-  phase decides the update rule (e.g. blend toward measured win-rate
-  once an agent has N closed, direction-matching trades, static weight
-  below that floor) and where it's applied (`CEOAgent.__init__` reading a
-  refreshed weight table, vs. a periodic recompute job).
+  `CEOAgent.WEIGHTS`.** DONE — see §28.
 - **Wire `execution/execution_orchestrator.py` to the journal at all.**
   Until it calls something equivalent to `save_trade`/
   `update_trade_result`, every trade taken through the V16 multi-symbol
-  path is invisible to `get_agent_performance()` — Phase 4B proper would
-  only ever see legacy single-symbol history. This is Execution-Layer
+  path is invisible to `get_agent_performance()` — Phase 4B proper only
+  ever sees legacy single-symbol history. This is Execution-Layer
   work (open + close paths, idempotency under retries, interaction with
   `ReplacementProposal` closes) and needs its own scoping pass rather
-  than folding into a journal/reporting phase; not started here per the
-  "never modify Execution Layer blindly" rule.
+  than folding into a journal/reporting phase; still not started, per the
+  "never modify Execution Layer blindly" rule. **Still open.**
 - Multi-Agent Framework enhancements, Quant Research Pipeline /
   Research-Optimization Framework, AI Self-Improvement (human-approved
   gate) — unchanged from §26 "Next up", still open.
+
+## 28. Ensemble Decision Engine — Phase 4B Proper: Dynamic Per-Agent Weighting (2026-07-23)
+
+Consumes §27's `get_agent_performance()` to actually adjust the vote:
+`CEOAgent.WEIGHTS` can now be blended toward each agent's measured
+win-rate instead of staying fixed forever.
+
+### Change
+
+`config/settings.py` — four new flags, all off/inert by default (same
+reasoning as `SCANNER_ENABLED`):
+- `DYNAMIC_AGENT_WEIGHTS_ENABLED` (bool, default `False`)
+- `DYNAMIC_WEIGHT_MIN_SAMPLES` (int, default `20`) — an agent needs this
+  many closed, direction-matching trades before its win-rate is trusted;
+  below it, that agent's static weight is used unchanged.
+- `DYNAMIC_WEIGHT_BLEND` (float, default `0.3`) — 0 = fully static, 1 =
+  fully performance-driven. Default kept low so one agent's streak can't
+  swing the vote alone.
+- `DYNAMIC_WEIGHT_REFRESH_SECONDS` (int, default `300`) — TTL cache so
+  dynamic weighting doesn't add a DB query to every decision cycle.
+
+`agents/ceo_agent.py`:
+- `CEOAgent.__init__` gains an optional `journal=None` param (a
+  `TradeJournalV2`-compatible object). `None` (unchanged default)
+  means dynamic weighting is inert regardless of the settings flag.
+- New `_get_agent_performance_cached()` — TTL-wraps
+  `journal.get_agent_performance()`, keyed by agent display name.
+- New `_effective_weights(reports)` — for each `WEIGHTS` key, if the
+  corresponding agent has `>= DYNAMIC_WEIGHT_MIN_SAMPLES` closed trades,
+  blends its static weight toward a `[0.5, 1.5]`-bounded multiplier
+  derived from `win_rate` (`0.5 + win_rate`), scaled by
+  `DYNAMIC_WEIGHT_BLEND`; otherwise keeps the static weight. Always
+  renormalizes so the returned weights sum to 1.0 — this preserves the
+  meaning of the existing `long_score`/`short_score >= 40` action
+  threshold and the uncapped WAIT-branch confidence regardless of whether
+  blending is active. Falls back to `self.WEIGHTS` unchanged on: disabled
+  flag, no journal configured, or **any** exception fetching performance
+  — dynamic weighting must never be able to break a decision cycle.
+- `decide()` now computes `weights = self._effective_weights(reports)`
+  once per cycle and uses it (instead of `self.WEIGHTS` directly) in the
+  long/short aggregation loop, `agreement_score`, and `score_breakdown` —
+  so every number in a given `CEODecision` reflects one consistent set of
+  weights, whichever mode produced it.
+- `CEODecision` gains a `weights_used: dict` field (also in `to_dict()`)
+  — the exact weights (static or blended) that drove this cycle's vote,
+  for dashboard/audit visibility.
+
+`agents/__init__.py` — `build_agent_layer()` already received a `journal`
+param (used by `RiskManagerAgent`/`JournalAnalyst`); now also passes it to
+`CEOAgent(agents={...}, journal=journal)`.
+
+No changes to `journal/journal_v2.py`, `execution/execution_orchestrator.py`,
+`decision/confidence_engine.py`, or any schema — this phase only reads
+`get_agent_performance()` (§27) and adjusts in-memory weights.
+
+### Testing
+
+10 new tests (`tests/test_dynamic_agent_weights.py`): disabled-by-default
+uses static weights (and never even queries the journal), no-journal
+fallback, exception-during-fetch fallback, below-sample-floor keeps that
+agent's static weight, weights always renormalize to sum to 1.0, a
+100%-vs-0%-win-rate pair widens their weight ratio by exactly the
+expected 3x at full blend (`rel=1e-2` tolerance for the intentional
+4-decimal rounding on `weights_used`), a 0% win-rate agent is never
+zeroed out, the TTL cache avoids re-querying the journal across repeated
+`decide()` calls within the refresh window, and `weights_used` appears in
+`to_dict()`.
+
+**Verified: `pytest tests/ -q` → 1556 passed, 0 failed** (1546 after §27 +
+10 new). `ruff check .` → clean.
+
+### Next up
+
+- **Wire `execution/execution_orchestrator.py` to the journal.** Still the
+  single biggest gap standing between this phase and it actually
+  mattering for V16's primary multi-symbol path — see §27 "Next up".
+  Needs its own scoping pass; deliberately not started.
+- Consider surfacing `weights_used` / `get_agent_performance()` on a
+  dashboard panel once the Phase 2+ consolidated dashboard delivery
+  happens (per CLAUDE.md, REST/WebSocket endpoints for Phase 2+ modules
+  are intentionally batched into one delivery, not shipped per-phase).
+- Multi-Agent Framework enhancements, Quant Research Pipeline /
+  Research-Optimization Framework, AI Self-Improvement (human-approved
+  gate) — unchanged, still open.

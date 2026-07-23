@@ -112,6 +112,27 @@ class Settings(BaseSettings):
     JWT_SECRET: str = Field(default="", alias="JWT_SECRET")
     JWT_EXPIRY_MINUTES: int = Field(default=60, alias="JWT_EXPIRY_MINUTES")
 
+    # ── Ensemble Decision Engine — Phase 4B proper (architecture.md §28) ───
+    # Off by default: CEOAgent.WEIGHTS stays static until explicitly opted
+    # in, same reasoning as SCANNER_ENABLED above. When enabled, blends each
+    # agent's static weight toward its measured win-rate (from
+    # journal_v2.get_agent_performance(), Phase 4B Step 1) — but only once
+    # that agent has at least DYNAMIC_WEIGHT_MIN_SAMPLES closed,
+    # direction-matching trades; below that floor its static weight is used
+    # unchanged, so a quiet or brand-new agent is never blended off noise.
+    DYNAMIC_AGENT_WEIGHTS_ENABLED: bool = Field(default=False, alias="DYNAMIC_AGENT_WEIGHTS_ENABLED")
+    # Minimum closed, direction-matching trades before an agent's win-rate
+    # is trusted enough to influence its weight at all.
+    DYNAMIC_WEIGHT_MIN_SAMPLES: int = Field(default=20, alias="DYNAMIC_WEIGHT_MIN_SAMPLES")
+    # 0.0 = fully static (dynamic weighting has no effect even if enabled),
+    # 1.0 = fully performance-driven. Kept well below 1.0 by default so one
+    # agent's recent streak can't swing the fused vote on its own.
+    DYNAMIC_WEIGHT_BLEND: float = Field(default=0.3, alias="DYNAMIC_WEIGHT_BLEND")
+    # How long a fetched performance snapshot is reused before CEOAgent
+    # queries journal_v2.get_agent_performance() again — avoids a DB query
+    # on every single decision cycle.
+    DYNAMIC_WEIGHT_REFRESH_SECONDS: int = Field(default=300, alias="DYNAMIC_WEIGHT_REFRESH_SECONDS")
+
     # ── Market Scanner (V16 Phase 2, Part 1) ───────────────
     # Off by default: (1) this is a brand-new background thread making live
     # exchange calls — it must never auto-start just because main.py or a

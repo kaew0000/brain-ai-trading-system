@@ -1,56 +1,67 @@
-# PATCH NOTES — V16 Phase 4B Step 1: Per-Agent Outcome Attribution
+# PATCH NOTES — V16 Phase 4B Proper: Dynamic Per-Agent Weighting
 
-Base: `main` (post Phase 4A merge, "feat(agents): Phase 4A Ensemble
-Decision Engine", 1539 passing)
+Base: `main` + Phase 4B Step 1 (per-agent outcome attribution, this same
+session — see `docs/architecture.md §27`)
 
 ## Summary
 
-architecture.md §26 "Next up" scoped Phase 4B's first step as adding
-per-agent outcome attribution at trade close. Inspecting the code first
-(per CLAUDE.md workflow) found the schema already supported this
-(`agent_decisions.signal_id`, `trades.signal_id`, `save_trade(signal_id=)`
-all already existed) — it was simply never wired up. It also found a
-bigger, previously undocumented gap: `execution/execution_orchestrator.py`
-(V16's multi-symbol path) never writes to the journal at all, so this
-phase's attribution only covers the legacy single-symbol `main.py`
-pipeline, which is the only one that currently records real trade
-outcomes. See `docs/architecture.md §27` for the full discovery writeup.
+architecture.md §27 "Next up" scoped this as: "actually using
+`get_agent_performance()` to adjust `CEOAgent.WEIGHTS`". `CEOAgent.decide()`
+can now blend each agent's static weight toward its measured win-rate —
+gated **off by default** via `DYNAMIC_AGENT_WEIGHTS_ENABLED`, so nothing
+changes for any existing deployment unless explicitly opted in.
 
 ## Changes to existing modules
 
 | File | Change |
 |---|---|
-| `journal/journal_v2.py` | New `get_agent_performance(limit=500)` — joins `agent_decisions` to `trades` via the existing `signal_id` link. Counts a vote toward its agent only when that agent's vote direction matches the direction actually traded; dissenting agents are attributed neither the win nor the loss. Returns raw `{agent, total_trades, wins, losses, win_rate, total_pnl}` — not a weight recommendation. |
-| `main.py` | `ceo_decision` now initialised to `None` before the agent-layer block (previously only defined inside a nested `if`, unsafe to reference afterward). `save_signal()`'s return value is now captured as `sig_id` (previously discarded). Each agent in `ceo_decision.agent_reports` is now persisted via `save_agent_decision(..., signal_id=sig_id)`. `save_trade(rec)` → `save_trade(rec, signal_id=sig_id)`. |
-| `docs/architecture.md` | +§27 (this phase). |
-| `CLAUDE.md` | Phase 4B Step 1 moved to Completed; Priority 2 updated with the execution_orchestrator.py journal gap noted as a separate, still-open item. |
+| `config/settings.py` | 4 new flags, all inert by default: `DYNAMIC_AGENT_WEIGHTS_ENABLED` (bool, `False`), `DYNAMIC_WEIGHT_MIN_SAMPLES` (int, `20`), `DYNAMIC_WEIGHT_BLEND` (float, `0.3`), `DYNAMIC_WEIGHT_REFRESH_SECONDS` (int, `300`). |
+| `agents/ceo_agent.py` | `CEOAgent.__init__` gains optional `journal=None`. New `_get_agent_performance_cached()` (TTL-cached `journal.get_agent_performance()`) and `_effective_weights(reports)` (blends toward `win_rate`, floor-gated by sample count, always renormalizes to sum 1.0, falls back to static `WEIGHTS` on any error). `decide()` now uses the effective weights consistently across the vote, `agreement_score`, and `score_breakdown`. `CEODecision` gains `weights_used: dict`. |
+| `agents/__init__.py` | `CEOAgent(...)` now also receives `journal=journal` (already threaded through `build_agent_layer()` for other agents). |
+| `docs/architecture.md` | +§28. |
+| `CLAUDE.md` | Phase 4B proper moved to Completed; Priority 2 rewritten — its only remaining open item is the execution_orchestrator.py journal gap. |
 
-`execution/execution_orchestrator.py`, `agents/ceo_agent.py`,
-`decision/confidence_engine.py`, and `database/schema_v13.sql` were **not**
-modified — no schema change was needed (see architecture.md §27
-"Discovery"), and the execution layer was deliberately left untouched per
-CLAUDE.md's "never modify Execution Layer blindly" rule.
+No changes to `journal/journal_v2.py`, `execution/execution_orchestrator.py`,
+`decision/confidence_engine.py`, `main.py`, or any schema in this delivery.
 
-## Known limitation (documented, not hidden)
+## Safety properties (why this is safe to ship even before enabling it)
 
-Only the legacy single-symbol `main.py` pipeline is wired. Trades taken
-through `execution/execution_orchestrator.py` (V16 multi-symbol path)
-never call `save_trade`/`update_trade_result` at all today, so
-`get_agent_performance()` cannot see them — it will only ever reflect
-single-symbol history until that separate gap is closed. This was a
-deliberate scope decision, not an oversight; see architecture.md §27
-"Next up".
+- **Off by default.** `DYNAMIC_AGENT_WEIGHTS_ENABLED=False` → `_effective_weights()`
+  returns `self.WEIGHTS` unchanged, and doesn't even call the journal.
+- **No journal configured** (`journal=None`, still the default anywhere
+  `CEOAgent(...)` is constructed without the kwarg, e.g. existing tests) →
+  same fallback.
+- **Any exception** fetching performance (journal down, bad data, etc.) →
+  same fallback, logged as a warning, decision cycle continues normally.
+- **Per-agent sample floor** — an agent with fewer than
+  `DYNAMIC_WEIGHT_MIN_SAMPLES` closed, direction-matching trades keeps its
+  static weight untouched, so a brand-new or rarely-triggered agent is
+  never blended off a handful of noisy trades.
+- **Bounded multiplier** — win-rate maps to a `[0.5, 1.5]` multiplier
+  scaled by `DYNAMIC_WEIGHT_BLEND`, so no agent can be zeroed out or made
+  to dominate the vote outright, even at 0% or 100% measured win-rate.
+- **Always renormalized to sum to 1.0** — preserves the existing
+  `long_score`/`short_score >= 40` action threshold's meaning regardless
+  of whether blending is active.
+
+## Known limitation (carried over from Phase 4B Step 1, still applies)
+
+Only reflects trades from the legacy single-symbol `main.py` pipeline —
+`execution/execution_orchestrator.py` (V16 multi-symbol path) still
+doesn't write to the journal at all, so enabling dynamic weighting today
+would only ever be informed by single-symbol history. See
+`docs/architecture.md §28` "Next up".
 
 ## Testing
 
 ```
-pytest tests/ -q   → 1546 passed, 0 failed  (1539 baseline + 7 new)
+pytest tests/ -q   → 1556 passed, 0 failed  (1546 after §27 + 10 new)
 ruff check .        → clean
 ```
 
-7 new tests in `tests/test_agent_outcome_attribution.py`: agreeing agent
-credited with a win, dissenting agent attributed nothing, win-rate across
-multiple trades, open trades excluded, `signal_id=None` rows safely
-ignored, and the `limit` parameter. Uses a `tmp_path` temp-file DB per
-test (not `db_path=":memory:"`, which is a process-wide shared connection
-in `database/db.py` — see the test file's fixture docstring).
+10 new tests in `tests/test_dynamic_agent_weights.py`: disabled-by-default
+(journal never even queried), no-journal fallback, exception-during-fetch
+fallback, below-sample-floor fallback for that agent, weights always sum
+to 1.0, win-rate blending widens the weight ratio by the expected factor,
+zero-win-rate agent never zeroed out, TTL cache avoids repeated journal
+queries, `weights_used` present in `to_dict()`.

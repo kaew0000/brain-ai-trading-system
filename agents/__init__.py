@@ -21,7 +21,7 @@ def build_agent_layer(risk_engine=None, journal=None) -> dict:
     ceo = CEOAgent(agents={
         "smc": smc, "futures": futures, "regime": regime,
         "risk": risk, "trader": trader, "journal": journal_agent,
-    })
+    }, journal=journal)
     return {"smc": smc, "futures": futures, "regime": regime,
             "risk": risk, "trader": trader, "journal": journal_agent, "ceo": ceo}
 
