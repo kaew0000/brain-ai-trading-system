@@ -35,6 +35,8 @@ Completed
 - Execution Wiring & Live Orchestrator
 - Execution Scheduler + Multi-Symbol Signals
 - Strategy Plugin System (architecture.md §25 — `execution/strategy_registry.py`)
+- Ensemble Decision Engine Phase 4A — ConfidenceEngine fusion + agreement
+  scoring (architecture.md §26 — `agents/ceo_agent.py`)
 
 In Progress
 
@@ -185,7 +187,12 @@ Strategy Plugin System — DONE (architecture.md §25)
 
 Priority 2
 
-Ensemble Decision Engine (extend, don't duplicate, `agents/ceo_agent.py`)
+Ensemble Decision Engine — Phase 4A DONE (architecture.md §26:
+ConfidenceEngine fused into `agents/ceo_agent.py`'s weighted vote instead
+of overriding it, plus agreement/disagreement scoring). Phase 4B
+(dynamic per-agent weighting from real journal win-rate) still open —
+blocked on per-agent outcome attribution not existing yet in
+`journal/journal_v2.py` (see architecture.md §26 "Next up").
 
 Priority 3
 
