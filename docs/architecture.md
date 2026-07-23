@@ -1795,3 +1795,79 @@ needed).
   account-level gate, real correlation tracking, sector-cap capital
   redistribution, reconciliation alert escalation, `dashboard_api`/
   `websocket` heartbeat gaps.
+
+## 26. Ensemble Decision Engine — Phase 4A: ConfidenceEngine Fusion (2026-07-23)
+
+Extends `agents/ceo_agent.py` (§25 "Next up" identified this as the
+closest thing to an ensemble already in the codebase — not a new
+module). Scoped into two sub-phases before writing code: 4A (this phase)
+fuses `ConfidenceEngine`'s opinion into the existing agent vote and adds
+agreement/disagreement scoring; 4B (dynamic per-agent weighting from real
+win-rate) is deferred — see "Next up" below for why.
+
+### Problem
+
+`CEOAgent.decide()` previously took two entirely separate code paths:
+when `confidence_result` was provided, it **overrode** the action/
+direction/confidence outright — the agent layer's own votes (`smc`,
+`futures`, `regime`, `risk`, `journal`) only ever showed up in the
+`reasons` text, never influencing the actual decision. `execution/
+strategy_registry.py`'s `PortfolioSignalProvider` and `main.py`'s live
+pipeline both always pass a `confidence_result`, so in production the
+"ensemble" vote was dead code outside the risk veto.
+
+### Change
+
+`agents/ceo_agent.py`:
+- `WEIGHTS` gains a `confidence_engine` key (0.15) and is rebalanced from
+  `{smc:.30 futures:.25 regime:.20 risk:.15 journal:.10}` to
+  `{smc:.25 futures:.20 regime:.15 risk:.15 journal:.10
+  confidence_engine:.15}` (still sums to 1.0).
+- `confidence_result` (if provided) is wrapped as one more `AgentReport`
+  under the `confidence_engine` key and folded into the same weighted
+  long/short vote loop as every other agent — no separate override
+  branch.
+- Exception: a genuine ConfidenceEngine **hard block**
+  (`blocked=True` / `action=="BLOCKED"`) still short-circuits straight to
+  `BLOCKED`, same precedence as the risk manager's circuit breaker —
+  that's a business-rule veto, not an opinion to be outvoted.
+- New `agreement_score` (0-1) on `CEODecision`: the weighted fraction of
+  directional (LONG/SHORT) votes agreeing with the winning action. 1.0 =
+  unanimous. When < 1.0, `confidence` is damped by
+  `0.5 + 0.5*agreement_score` (floor of 0.5x at zero agreement — a
+  winning vote that barely cleared the 40-point action threshold isn't
+  double-punished to 0). A `reasons` entry lists the dissenting agents.
+
+`execution/strategy.py`, `execution/portfolio_signal_provider.py`,
+`decision/confidence_engine.py`, and `ranking/confidence_fusion.py` were
+not modified — this phase only changes how `CEOAgent` consumes their
+output, not the outputs themselves.
+
+### Testing
+
+6 new tests (`tests/test_ceo_ensemble_fusion.py`), using hand-built
+`FakeAgent` stubs (not `build_agent_layer`'s real engines) for
+deterministic weighted-vote arithmetic: agent layer outvoting
+ConfidenceEngine, agreement with no votes present, agreement/damping math
+checked to 2 decimal places, hard-block passthrough, and risk veto still
+winning over a directional fused result.
+
+**Verified: `pytest tests/ -q` → 1539 passed, 0 failed** (1533 baseline +
+6 new). `ruff check .` → clean.
+
+### Next up
+
+- **Phase 4B — dynamic per-agent weighting from real win-rate.** Scoped
+  but deliberately not started this phase: `journal/journal_v2.py` /
+  `analytics/trade_journal.py` currently only persist aggregate
+  performance (`get_performance_summary()`), not which agent voted which
+  way on each closed trade. Building weight-adjustment on top of that gap
+  would just be a static placeholder with no real data behind it. 4B's
+  actual first step is adding per-agent outcome attribution at trade
+  close (`execution/execution_orchestrator.py` closing path +
+  `journal_v2.py` schema), then a follow-up phase can weight on it once
+  enough trades have accumulated per agent (with a static-weight fallback
+  below some minimum sample size).
+- Multi-Agent Framework enhancements, Quant Research Pipeline /
+  Research-Optimization Framework, AI Self-Improvement (human-approved
+  gate) — unchanged from §25 "Next up", still open.
