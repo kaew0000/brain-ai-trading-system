@@ -240,6 +240,16 @@ class Settings(BaseSettings):
     # deliberately look at fewer/more without changing what gets logged.
     SCHEDULER_CANDIDATE_LIMIT: int = Field(default=20, alias="SCHEDULER_CANDIDATE_LIMIT")
 
+    # ── V16 Phase 3A: Strategy Plugin System ─────────────────────────────
+    # Selects which execution/strategy_registry.py strategy main.py's
+    # ExecutionScheduler bootstrap resolves signal_provider to. Default
+    # is the exact class Phase 2F hardcoded at that call site
+    # (PortfolioSignalProvider) — every existing deployment is
+    # byte-for-byte unaffected until this is deliberately changed. See
+    # execution/strategy_registry.py module docstring for the full list
+    # of registered strategies and what each one requires.
+    STRATEGY_NAME: str = Field(default="portfolio_signal_provider", alias="STRATEGY_NAME")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

@@ -237,11 +237,18 @@ def build_system() -> dict:
             try:
                 from execution.execution_orchestrator import ExecutionOrchestrator
                 from execution.execution_scheduler import ExecutionScheduler
-                from execution.portfolio_signal_provider import PortfolioSignalProvider
+                from execution.strategy_registry import build_strategy
                 from portfolio.portfolio_manager import PortfolioManager
                 from ranking.opportunity_ranker import OpportunityRanker
 
-                signal_provider = PortfolioSignalProvider(
+                # V16 Phase 3A (Strategy Plugin System): resolves via
+                # config/settings.py STRATEGY_NAME. Default value
+                # "portfolio_signal_provider" builds the identical
+                # PortfolioSignalProvider(...) this line constructed
+                # directly before this phase — see
+                # execution/strategy_registry.py module docstring.
+                signal_provider = build_strategy(
+                    settings.STRATEGY_NAME,
                     data_provider=data_provider,
                     regime_engine=regime_engine,
                     smc_engine=smc_engine,
