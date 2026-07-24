@@ -6,6 +6,17 @@ ignore = [
     "E702",
     "E402",
     "F841",
+    # I001 ("Import block is un-sorted or un-formatted"): this repo has
+    # never enforced isort-style ordering, and a recent ruff release
+    # apparently added "I" to its DEFAULT rule set (this file never
+    # explicitly selected or excluded it either way). That surfaced 201
+    # pre-existing violations across the whole codebase overnight, with
+    # zero code changes on our end — confirmed via `ruff check . --select
+    # I001` on main itself. Ignoring here rather than reformatting ~50+
+    # unrelated files in an unrelated PR; a deliberate repo-wide import
+    # sort is a fine follow-up task on its own, just not bundled into
+    # whatever PR happens to get unlucky with a CI tool version bump.
+    "I001",
 ]
 
 exclude = [
