@@ -32,7 +32,7 @@ typically via `sector=SectorEngine.sector_of(symbol)`).
 """
 from __future__ import annotations
 
-from typing import Dict, Iterable
+from collections.abc import Iterable
 
 from config.sector_table import SECTORS, sector_of
 
@@ -81,7 +81,7 @@ class SectorEngine:
     # ── Exposure ─────────────────────────────────────────────────────────
 
     @classmethod
-    def exposure_by_sector(cls, positions: Iterable) -> Dict[str, float]:
+    def exposure_by_sector(cls, positions: Iterable) -> dict[str, float]:
         """
         Notional exposure (USDT) summed per sector, computed fresh from
         each position's symbol (see module docstring for why this never
@@ -100,14 +100,14 @@ class SectorEngine:
         _enforce_sector_limits(), which deliberately does NOT use this
         method for that reason.
         """
-        exposure: Dict[str, float] = {}
+        exposure: dict[str, float] = {}
         for p in positions:
             sector = cls.sector_of(p.symbol)
             exposure[sector] = exposure.get(sector, 0.0) + p.notional
         return exposure
 
     @classmethod
-    def capital_by_sector(cls, positions: Iterable) -> Dict[str, float]:
+    def capital_by_sector(cls, positions: Iterable) -> dict[str, float]:
         """
         Capital/margin (USDT) summed per sector — the leverage-independent
         counterpart to exposure_by_sector() above. Exists specifically for
@@ -120,7 +120,7 @@ class SectorEngine:
         multiple times account balance) — capital is the metric that's
         actually bounded by `balance` in the first place.
         """
-        capital: Dict[str, float] = {}
+        capital: dict[str, float] = {}
         for p in positions:
             sector = cls.sector_of(p.symbol)
             capital[sector] = capital.get(sector, 0.0) + p.margin_used
@@ -140,7 +140,7 @@ class SectorEngine:
     # ── Diversification ─────────────────────────────────────────────────
 
     @staticmethod
-    def diversification_score_from_exposure(exposure: Dict[str, float]) -> float:
+    def diversification_score_from_exposure(exposure: dict[str, float]) -> float:
         """
         0-100, higher = more spread across sectors, computed directly
         from a precomputed {sector: notional_usdt} map. Split out from
@@ -182,7 +182,7 @@ class SectorEngine:
         return cls.diversification_score_from_exposure(cls.exposure_by_sector(positions))
 
     @classmethod
-    def most_concentrated_sector(cls, positions: Iterable) -> "tuple[str, float] | None":
+    def most_concentrated_sector(cls, positions: Iterable) -> tuple[str, float] | None:
         """(sector, exposure_usdt) for the single largest sector
         exposure, or None if there are no positions. Convenience for
         callers (explanations, dashboards) that want the "why" behind a

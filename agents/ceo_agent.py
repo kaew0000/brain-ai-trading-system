@@ -27,6 +27,7 @@ CEODecision schema
   "reasons":    [str, ...],
   "agent_reports": { agent_name: AgentReport.to_dict() },
   "agreement_score": float 0-1,
+  "weights_used": { weight_key: float },   # Phase 4B — static or blended
   "timestamp":  str,
 }
 
@@ -41,12 +42,12 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Optional
 
 from events.event_bus import conf_pub
 from telemetry.agent_telemetry import get_telemetry_registry
 from reasoning.reasoning_stream import get_reasoning_stream
 from utils.logger import get_logger
+from config.settings import settings
 from .base_agent import BaseAgent, AgentReport
 
 logger = get_logger("agents.ceo_agent")
@@ -64,6 +65,11 @@ class CEODecision:
     # agree with `action`. 1.0 = unanimous. Only meaningful when action is
     # itself directional; stays at the default 1.0 for WAIT/BLOCKED.
     agreement_score: float = 1.0
+    # Phase 4B: the weights actually used this cycle — equal to
+    # CEOAgent.WEIGHTS unless DYNAMIC_AGENT_WEIGHTS_ENABLED blended them
+    # toward measured per-agent win-rate. Exposed for dashboard/audit
+    # visibility into which mode produced this decision.
+    weights_used:    dict  = field(default_factory=dict)
     timestamp:       str   = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict:
@@ -75,6 +81,7 @@ class CEODecision:
             "reasons":         self.reasons,
             "agent_reports":   self.agent_reports,
             "agreement_score": self.agreement_score,
+            "weights_used":    self.weights_used,
             "timestamp":       self.timestamp,
         }
 
@@ -116,13 +123,83 @@ class CEOAgent(BaseAgent):
     # the 40-point action threshold shouldn't be double-punished down to 0.
     AGREEMENT_FLOOR_MULTIPLIER = 0.5
 
-    def __init__(self, agents: Optional[dict] = None) -> None:
+    def __init__(self, agents: dict | None = None, journal=None) -> None:
         super().__init__()
         self._agents: dict = agents or {}
-        self._last_ceo:  Optional[CEODecision] = None
+        self._last_ceo:  CEODecision | None = None
+        # Phase 4B: optional TradeJournalV2 (or compatible) instance used
+        # for dynamic weighting. None (the default) means CEOAgent behaves
+        # exactly as before Phase 4B — _effective_weights() always falls
+        # back to the static WEIGHTS in that case regardless of the
+        # DYNAMIC_AGENT_WEIGHTS_ENABLED setting.
+        self._journal = journal
+        self._perf_cache:    dict | None = None
+        self._perf_cache_ts: float = 0.0
 
     def register_agent(self, name: str, agent: BaseAgent) -> None:
         self._agents[name] = agent
+
+    def _get_agent_performance_cached(self) -> dict:
+        """
+        TTL-cached wrapper around journal.get_agent_performance() — keyed
+        by agent display name (matches AgentReport.agent) for direct lookup
+        from _effective_weights(). Re-fetched at most once per
+        DYNAMIC_WEIGHT_REFRESH_SECONDS so dynamic weighting never adds a DB
+        round-trip to every single decision cycle.
+        """
+        now = time.time()
+        if (self._perf_cache is not None and
+                now - self._perf_cache_ts < settings.DYNAMIC_WEIGHT_REFRESH_SECONDS):
+            return self._perf_cache
+        rows = self._journal.get_agent_performance()
+        self._perf_cache    = {r["agent"]: r for r in rows}
+        self._perf_cache_ts = now
+        return self._perf_cache
+
+    def _effective_weights(self, reports: dict) -> dict:
+        """
+        Phase 4B: blend the static WEIGHTS toward each agent's measured
+        win-rate (journal_v2.get_agent_performance(), Phase 4B Step 1),
+        once that agent has at least DYNAMIC_WEIGHT_MIN_SAMPLES closed,
+        direction-matching trades. Always returns a dict summing to 1.0.
+
+        Deliberately defensive: returns self.WEIGHTS unchanged (b) when
+        disabled, (b) when no journal was configured, (c) for any agent
+        below the sample-size floor, and (d) on ANY exception fetching
+        performance — dynamic weighting must never be able to break a
+        decision cycle. Renormalizes after blending so the long/short
+        scoring and the >=40 action threshold keep meaning the same thing
+        they did before Phase 4B, regardless of whether blending is active.
+        """
+        if not settings.DYNAMIC_AGENT_WEIGHTS_ENABLED or self._journal is None:
+            return self.WEIGHTS
+
+        try:
+            perf_by_agent = self._get_agent_performance_cached()
+        except Exception as exc:
+            logger.warning(f"Dynamic weighting: performance fetch failed, using static WEIGHTS: {exc}")
+            return self.WEIGHTS
+
+        blend = settings.DYNAMIC_WEIGHT_BLEND
+        min_n = settings.DYNAMIC_WEIGHT_MIN_SAMPLES
+        blended: dict[str, float] = {}
+        for key, static_w in self.WEIGHTS.items():
+            rep  = reports.get(key)
+            perf = perf_by_agent.get(rep.agent) if rep is not None else None
+            if perf is None or perf.get("total_trades", 0) < min_n:
+                blended[key] = static_w
+                continue
+            # win_rate in [0,1] -> multiplier in [0.5, 1.5]: an agent that's
+            # never won still keeps half its static weight (blend-scaled),
+            # an agent that's never lost can at most 1.5x it — bounded so no
+            # single agent's streak can dominate or zero out the vote.
+            multiplier   = 0.5 + float(perf.get("win_rate", 0.5))
+            blended[key] = static_w * ((1 - blend) + blend * multiplier)
+
+        total = sum(blended.values())
+        if total <= 0:
+            return self.WEIGHTS
+        return {k: v / total for k, v in blended.items()}
 
     def decide(
         self,
@@ -185,12 +262,19 @@ class CEOAgent(BaseAgent):
             )
 
         # ── Aggregate signals (weighted vote across every WEIGHTS key) ──────
+        # Phase 4B: `weights` is either self.WEIGHTS unchanged, or a
+        # performance-blended variant — see _effective_weights(). Computed
+        # once per cycle and reused below for agreement_score and
+        # score_breakdown too, so every number in this decision reflects
+        # the same weights that actually drove long_score/short_score.
+        weights = self._effective_weights(reports)
+
         long_score  = 0.0
         short_score = 0.0
         reasons     = []
         directional_votes: list[tuple[str, str]] = []   # (weight_key, "LONG"|"SHORT")
 
-        for key, weight in self.WEIGHTS.items():
+        for key, weight in weights.items():
             rep = reports.get(key)
             if rep is None:
                 continue
@@ -233,8 +317,8 @@ class CEOAgent(BaseAgent):
         # directional action — WAIT/BLOCKED don't need one.
         agreement_score = 1.0
         if action in ("LONG", "SHORT") and directional_votes:
-            total_dir_w = sum(self.WEIGHTS[k] for k, _ in directional_votes)
-            agree_w     = sum(self.WEIGHTS[k] for k, s in directional_votes if s == action)
+            total_dir_w = sum(weights[k] for k, _ in directional_votes)
+            agree_w     = sum(weights[k] for k, s in directional_votes if s == action)
             agreement_score = round(agree_w / total_dir_w, 4) if total_dir_w > 0 else 1.0
 
             if agreement_score < 1.0:
@@ -270,16 +354,17 @@ class CEOAgent(BaseAgent):
             score_breakdown = {
                 "long_weighted":  round(long_score, 2),
                 "short_weighted": round(short_score, 2),
-                "smc":     round(reports.get("smc",    AgentReport("")).confidence * self.WEIGHTS.get("smc", 0), 2),
-                "futures": round(reports.get("futures",AgentReport("")).confidence * self.WEIGHTS.get("futures", 0), 2),
-                "regime":  round(reports.get("regime", AgentReport("")).confidence * self.WEIGHTS.get("regime", 0), 2),
-                "risk":    round(reports.get("risk",   AgentReport("")).confidence * self.WEIGHTS.get("risk", 0), 2),
-                "journal": round(reports.get("journal",AgentReport("")).confidence * self.WEIGHTS.get("journal", 0), 2),
-                "confidence_engine": round(reports.get("confidence_engine", AgentReport("")).confidence * self.WEIGHTS.get("confidence_engine", 0), 2),
+                "smc":     round(reports.get("smc",    AgentReport("")).confidence * weights.get("smc", 0), 2),
+                "futures": round(reports.get("futures",AgentReport("")).confidence * weights.get("futures", 0), 2),
+                "regime":  round(reports.get("regime", AgentReport("")).confidence * weights.get("regime", 0), 2),
+                "risk":    round(reports.get("risk",   AgentReport("")).confidence * weights.get("risk", 0), 2),
+                "journal": round(reports.get("journal",AgentReport("")).confidence * weights.get("journal", 0), 2),
+                "confidence_engine": round(reports.get("confidence_engine", AgentReport("")).confidence * weights.get("confidence_engine", 0), 2),
             },
             reasons         = reasons[:5],
             agent_reports   = {k: v.to_dict() for k, v in reports.items()},
             agreement_score = agreement_score,
+            weights_used    = {k: round(v, 4) for k, v in weights.items()},
         )
 
         self._last_ceo = dec
@@ -319,7 +404,7 @@ class CEOAgent(BaseAgent):
             raw        = dec.to_dict(),
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         """
         CEO answers by delegating to the appropriate agent.
         """
@@ -349,5 +434,5 @@ class CEOAgent(BaseAgent):
         return "CEO: No decision available yet. Waiting for first analysis cycle."
 
     @property
-    def last_decision(self) -> Optional[CEODecision]:
+    def last_decision(self) -> CEODecision | None:
         return self._last_ceo

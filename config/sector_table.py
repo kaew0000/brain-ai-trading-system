@@ -47,7 +47,6 @@ math assumes a roughly-stable sector universe from cycle to cycle.
 """
 from __future__ import annotations
 
-from typing import Dict
 
 # ── Fixed sector list ───────────────────────────────────────────────────────
 # Order matters only for documentation/iteration purposes below — lookups
@@ -77,7 +76,7 @@ UNKNOWN_SECTOR = "Unknown"
 # correlation_engine.py's _base_symbol() convention, so this table
 # doesn't have to be quote-asset-aware.
 
-SYMBOL_SECTORS: Dict[str, str] = {
+SYMBOL_SECTORS: dict[str, str] = {
     # -- Layer1 --
     "BTC": "Layer1", "ETH": "Layer1", "SOL": "Layer1", "BNB": "Layer1",
     "ADA": "Layer1", "AVAX": "Layer1", "DOT": "Layer1", "TON": "Layer1",

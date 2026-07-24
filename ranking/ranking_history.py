@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime, timezone
-from typing import List
 
 from config.settings import settings
 from database.db import ManagedConn
@@ -23,7 +22,7 @@ logger = get_logger(__name__)
 
 
 def save_ranking(
-    ranked: List[RankedOpportunity], symbol_count: int, duration_s: float
+    ranked: list[RankedOpportunity], symbol_count: int, duration_s: float
 ) -> None:
     """Persist one ranking cycle. Non-fatal on failure — mirrors
     MarketScanner._persist: a persistence failure must never take down
@@ -76,7 +75,7 @@ def _prune_old_rankings() -> None:
         logger.debug(f"ranking_history pruning failed (non-fatal): {exc}")
 
 
-def get_latest_ranking(limit: int = 1) -> List[dict]:
+def get_latest_ranking(limit: int = 1) -> list[dict]:
     """Most recent ranking cycle(s), newest first. Returns raw row dicts
     (id, timestamp, ranked_at, symbol_count, top_n, avg_coverage,
     duration_s, data) — `data` is the JSON-decoded list of ranked

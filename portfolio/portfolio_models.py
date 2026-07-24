@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import Dict, List, Optional
 
 
 class PositionState(str, Enum):
@@ -127,8 +126,8 @@ class PortfolioPosition:
     unrealized_pnl:         float
     state:                 PositionState
     opened_at:              float          # unix epoch
-    sector:                Optional[str] = None               # None until 2B's Sector Engine
-    correlation_cluster:    Optional[str] = None               # config/correlation_table.py cluster name
+    sector:                str | None = None               # None until 2B's Sector Engine
+    correlation_cluster:    str | None = None               # config/correlation_table.py cluster name
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -150,10 +149,10 @@ class PortfolioCandidate:
     coverage:               float          # 0-1, from RankedOpportunity (see ranking/ changes below)
     liquidity_score:         float          # 0-100, from breakdown.factors["liquidity"].score
     spread_score:            float          # 0-100, from breakdown.factors["spread"].score
-    atr_pct:                Optional[float] # from breakdown.factors["risk"].raw_value; None if UNAVAILABLE
+    atr_pct:                float | None # from breakdown.factors["risk"].raw_value; None if UNAVAILABLE
     correlation_tier:        CorrelationTier
     correlation_penalty:     float          # 1.0 / 0.75 / 0.5 / 0.25
-    correlation_against:     Optional[str]  # which held/selected symbol produced the worst-case tier, if any
+    correlation_against:     str | None  # which held/selected symbol produced the worst-case tier, if any
     final_score:             float          # composite_score * coverage_weight * correlation_penalty
 
 
@@ -162,7 +161,7 @@ class RejectedCandidate:
     symbol:  str
     rank:    int
     reason:  str
-    details: Dict[str, object] = field(default_factory=dict)
+    details: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -195,9 +194,9 @@ class PortfolioDecision:
     """
     generated_at:          float
     blocked:               bool                          # True if RiskEngine.can_trade() said no
-    block_reason:           Optional[str]
-    selected:               List[PortfolioAllocation] = field(default_factory=list)
-    rejected:                List[RejectedCandidate]    = field(default_factory=list)
+    block_reason:           str | None
+    selected:               list[PortfolioAllocation] = field(default_factory=list)
+    rejected:                list[RejectedCandidate]    = field(default_factory=list)
     total_capital_allocated: float = 0.0
     total_risk_allocated:    float = 0.0
     explanation:              str = ""
@@ -265,11 +264,11 @@ class OrchestratedDecision:
     """
     generated_at:             float
     blocked:                  bool
-    block_reason:             Optional[str]
-    selected:                 List[PortfolioAllocation]  = field(default_factory=list)
-    rejected:                 List[RejectedCandidate]     = field(default_factory=list)
-    replacements:              List[ReplacementProposal]   = field(default_factory=list)
-    sector_exposure:           Dict[str, float]            = field(default_factory=dict)
+    block_reason:             str | None
+    selected:                 list[PortfolioAllocation]  = field(default_factory=list)
+    rejected:                 list[RejectedCandidate]     = field(default_factory=list)
+    replacements:              list[ReplacementProposal]   = field(default_factory=list)
+    sector_exposure:           dict[str, float]            = field(default_factory=dict)
     diversification_score:     float = 100.0
     total_capital_allocated:   float = 0.0
     total_risk_allocated:      float = 0.0

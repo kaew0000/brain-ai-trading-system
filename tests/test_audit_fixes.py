@@ -569,11 +569,10 @@ class TestWSDecisionInitFrame:
         from api.app import app, set_state
         from fastapi.testclient import TestClient
         set_state("latest_decision", None)
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/decision") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert msg["decision"] is None
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/decision") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert msg["decision"] is None
 
     def test_ws_decision_sends_init_with_decision(self):
         from api.app import app, set_state
@@ -582,11 +581,10 @@ class TestWSDecisionInitFrame:
         dec = MagicMock()
         dec.to_dict.return_value = {"action": "LONG", "confidence": 82}
         set_state("latest_decision", dec)
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/decision") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert msg["decision"]["action"] == "LONG"
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/decision") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert msg["decision"]["action"] == "LONG"
         set_state("latest_decision", None)
 
 

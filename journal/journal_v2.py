@@ -40,14 +40,13 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, date, timezone
-from typing import List, Optional
 
 from config.settings import settings
 from utils.logger import get_logger
 from database.db import ManagedConn, get_db_path
 
 # Re-export v1 TradeRecord for backward compatibility
-from analytics.trade_journal import TradeRecord  # noqa: F401
+from analytics.trade_journal import TradeRecord
 
 logger = get_logger(__name__)
 
@@ -109,9 +108,9 @@ class TradeJournalV2:
     def save_trade(
         self,
         rec: TradeRecord,
-        confidence_breakdown: Optional[dict] = None,
-        signal_id: Optional[int] = None,
-        explanation_id: Optional[int] = None,
+        confidence_breakdown: dict | None = None,
+        signal_id: int | None = None,
+        explanation_id: int | None = None,
     ) -> int:
         """Insert a trade. Backward compatible with v1 TradeRecord."""
         data = rec.to_dict()
@@ -185,14 +184,14 @@ class TradeJournalV2:
             logger.error(f"update_trade_result error: {exc}")
             return False
 
-    def get_open_trades(self) -> List[dict]:
+    def get_open_trades(self) -> list[dict]:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT * FROM trades WHERE result='OPEN' ORDER BY timestamp DESC"
             ).fetchall()
         return [_row_to_dict(r, json_cols=("confidence_breakdown", "block_reasons")) for r in rows]
 
-    def get_trades(self, limit: int = 100) -> List[dict]:
+    def get_trades(self, limit: int = 100) -> list[dict]:
         """All trades, most recent first — backs /api/trades."""
         with self._conn() as c:
             rows = c.execute(
@@ -289,8 +288,8 @@ class TradeJournalV2:
         self,
         decision: dict,
         symbol: str | None = None,
-        confidence_breakdown: Optional[dict] = None,
-        raw_features: Optional[dict] = None,
+        confidence_breakdown: dict | None = None,
+        raw_features: dict | None = None,
     ) -> int:
         """
         Persist one decision-cycle output (DecisionResult.to_dict() or
@@ -333,7 +332,7 @@ class TradeJournalV2:
         logger.debug(f"Signal #{sid} saved | action={params['action']}")
         return sid
 
-    def get_signals(self, limit: int = 100, symbol: str | None = None) -> List[dict]:
+    def get_signals(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
         sql = "SELECT * FROM signals"
         args: tuple = ()
         if symbol:
@@ -348,7 +347,7 @@ class TradeJournalV2:
             for r in rows
         ]
 
-    def get_latest_signal(self, symbol: str | None = None) -> Optional[dict]:
+    def get_latest_signal(self, symbol: str | None = None) -> dict | None:
         rows = self.get_signals(limit=1, symbol=symbol)
         return rows[0] if rows else None
 
@@ -380,7 +379,7 @@ class TradeJournalV2:
             c.commit()
             return cur.lastrowid
 
-    def get_market_regimes(self, limit: int = 100, symbol: str | None = None) -> List[dict]:
+    def get_market_regimes(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
         sql = "SELECT * FROM market_regimes"
         args: tuple = ()
         if symbol:
@@ -392,7 +391,7 @@ class TradeJournalV2:
             rows = c.execute(sql, args).fetchall()
         return [_row_to_dict(r, json_cols=("probabilities",)) for r in rows]
 
-    def get_latest_regime(self, symbol: str | None = None) -> Optional[dict]:
+    def get_latest_regime(self, symbol: str | None = None) -> dict | None:
         rows = self.get_market_regimes(limit=1, symbol=symbol)
         return rows[0] if rows else None
 
@@ -433,7 +432,7 @@ class TradeJournalV2:
             c.commit()
             return cur.lastrowid
 
-    def get_market_snapshots(self, limit: int = 100, symbol: str | None = None) -> List[dict]:
+    def get_market_snapshots(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
         sql = "SELECT * FROM market_snapshots"
         args: tuple = ()
         if symbol:
@@ -459,7 +458,7 @@ class TradeJournalV2:
             c.commit()
             return cur.lastrowid
 
-    def get_funding_history(self, limit: int = 100, symbol: str | None = None) -> List[dict]:
+    def get_funding_history(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
         sql = "SELECT * FROM funding_history"
         args: tuple = ()
         if symbol:
@@ -481,7 +480,7 @@ class TradeJournalV2:
             c.commit()
             return cur.lastrowid
 
-    def get_oi_history(self, limit: int = 100, symbol: str | None = None) -> List[dict]:
+    def get_oi_history(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
         sql = "SELECT * FROM oi_history"
         args: tuple = ()
         if symbol:
@@ -504,8 +503,8 @@ class TradeJournalV2:
         symbol: str | None = None,
         score: float = 0.0,
         weight: float = 0.0,
-        details: Optional[dict] = None,
-        signal_id: Optional[int] = None,
+        details: dict | None = None,
+        signal_id: int | None = None,
     ) -> int:
         sql = """
         INSERT INTO agent_decisions (timestamp, agent, symbol, decision, score, weight, details, signal_id)
@@ -518,7 +517,7 @@ class TradeJournalV2:
             c.commit()
             return cur.lastrowid
 
-    def get_agent_decisions(self, limit: int = 100, agent: str | None = None) -> List[dict]:
+    def get_agent_decisions(self, limit: int = 100, agent: str | None = None) -> list[dict]:
         sql = "SELECT * FROM agent_decisions"
         args: tuple = ()
         if agent:
@@ -530,13 +529,63 @@ class TradeJournalV2:
             rows = c.execute(sql, args).fetchall()
         return [_row_to_dict(r, json_cols=("details",)) for r in rows]
 
+    def get_agent_performance(self, limit: int = 500) -> list[dict]:
+        """
+        Per-agent win-rate — Phase 4B Step 1 (architecture.md §27).
+
+        Joins agent_decisions back to trades via the signal_id both tables
+        already carried in the V13 schema (agent_decisions.signal_id,
+        trades.signal_id) — no new tables or columns. Only counts a vote
+        toward its agent's record when ad.decision matches the direction
+        that was actually traded (t.direction): a dissenting agent didn't
+        get the trade it voted for, so it is neither credited with the win
+        nor blamed for the loss.
+
+        Returns one row per agent with raw win/loss counts and total_pnl —
+        deliberately NOT a weight recommendation. A future phase (4B proper)
+        decides how/when to trust this (e.g. a minimum-sample-size floor
+        before letting it influence CEOAgent.WEIGHTS) — this method only
+        answers "what actually happened per agent so far".
+        """
+        sql = """
+        SELECT ad.agent AS agent,
+               COUNT(*) AS total,
+               SUM(CASE WHEN t.result = 'WIN'  THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN t.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+               SUM(t.pnl) AS total_pnl
+        FROM agent_decisions ad
+        JOIN trades t ON t.signal_id = ad.signal_id
+        WHERE t.result IN ('WIN', 'LOSS')
+          AND ad.signal_id IS NOT NULL
+          AND ad.decision = t.direction
+        GROUP BY ad.agent
+        ORDER BY wins DESC
+        LIMIT ?
+        """
+        with self._conn() as c:
+            rows = c.execute(sql, (limit,)).fetchall()
+
+        out = []
+        for r in rows:
+            total = r["total"] or 0
+            wins  = r["wins"] or 0
+            out.append({
+                "agent":        r["agent"],
+                "total_trades": total,
+                "wins":         wins,
+                "losses":       r["losses"] or 0,
+                "win_rate":     round(wins / total, 4) if total else 0.0,
+                "total_pnl":    round(float(r["total_pnl"] or 0.0), 2),
+            })
+        return out
+
     def save_agent_message(
         self,
         agent: str,
         event: str,
         message: str,
         severity: str = "info",
-        payload: Optional[dict] = None,
+        payload: dict | None = None,
     ) -> int:
         sql = """
         INSERT INTO agent_messages (timestamp, agent, event, message, severity, payload)
@@ -546,7 +595,7 @@ class TradeJournalV2:
             c.commit()
             return cur.lastrowid
 
-    def get_agent_messages(self, limit: int = 100, agent: str | None = None) -> List[dict]:
+    def get_agent_messages(self, limit: int = 100, agent: str | None = None) -> list[dict]:
         sql = "SELECT * FROM agent_messages"
         args: tuple = ()
         if agent:
@@ -566,7 +615,7 @@ class TradeJournalV2:
         self,
         reasoning: dict,
         symbol: str | None = None,
-        signal_id: Optional[int] = None,
+        signal_id: int | None = None,
         direction: str = "",
         confidence: float = 0.0,
         summary: str = "",
@@ -582,7 +631,7 @@ class TradeJournalV2:
             c.commit()
             return cur.lastrowid
 
-    def get_explanations(self, limit: int = 100, symbol: str | None = None) -> List[dict]:
+    def get_explanations(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
         sql = "SELECT * FROM ai_explanations"
         args: tuple = ()
         if symbol:
@@ -594,7 +643,7 @@ class TradeJournalV2:
             rows = c.execute(sql, args).fetchall()
         return [_row_to_dict(r, json_cols=("reasoning",)) for r in rows]
 
-    def get_latest_explanation(self, symbol: str | None = None) -> Optional[dict]:
+    def get_latest_explanation(self, symbol: str | None = None) -> dict | None:
         rows = self.get_explanations(limit=1, symbol=symbol)
         return rows[0] if rows else None
 
@@ -626,7 +675,7 @@ class TradeJournalV2:
             c.commit()
         return pid
 
-    def get_config_profile(self, name: str) -> Optional[dict]:
+    def get_config_profile(self, name: str) -> dict | None:
         with self._conn() as c:
             row = c.execute(
                 "SELECT * FROM config_profiles WHERE name=?", (name,)
@@ -635,7 +684,7 @@ class TradeJournalV2:
             return None
         return _row_to_dict(row, json_cols=("config_json",))
 
-    def get_active_config_profile(self) -> Optional[dict]:
+    def get_active_config_profile(self) -> dict | None:
         with self._conn() as c:
             row = c.execute(
                 "SELECT * FROM config_profiles WHERE active=1 LIMIT 1"
@@ -644,7 +693,7 @@ class TradeJournalV2:
             return None
         return _row_to_dict(row, json_cols=("config_json",))
 
-    def list_config_profiles(self) -> List[dict]:
+    def list_config_profiles(self) -> list[dict]:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT * FROM config_profiles ORDER BY name"

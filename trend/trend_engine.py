@@ -43,7 +43,6 @@ GET /api/regime  (market_context_builder includes TrendResult)
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -112,7 +111,7 @@ class TrendEngine:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def analyse(self, df: pd.DataFrame, current_price: Optional[float] = None) -> TrendResult:
+    def analyse(self, df: pd.DataFrame, current_price: float | None = None) -> TrendResult:
         """
         Run full trend analysis on df.
 
@@ -264,7 +263,7 @@ class TrendEngine:
         return float(np.clip(normalised, -1.0, 1.0))
 
     @staticmethod
-    def _ema_stack(ema20: float, ema50: Optional[float], ema200: Optional[float]) -> str:
+    def _ema_stack(ema20: float, ema50: float | None, ema200: float | None) -> str:
         """
         BULLISH : EMA20 > EMA50 > EMA200
         BEARISH : EMA20 < EMA50 < EMA200

@@ -47,14 +47,13 @@ universe before someone curates its entry is expected, not a bug.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
 
 # ── symbol → cluster ─────────────────────────────────────────────────────
 # Keys are base symbols without the USDT suffix (correlation_engine.py
 # strips "USDT"/"BUSD" before lookup) so this table doesn't have to be
 # quote-asset-aware.
 
-SYMBOL_CLUSTERS: Dict[str, str] = {
+SYMBOL_CLUSTERS: dict[str, str] = {
     # -- Majors (BTC + ETH explicitly, per the brief's own "BTC ETH = High" example) --
     "BTC": "MAJORS", "ETH": "MAJORS",
 
@@ -119,7 +118,7 @@ SYMBOL_CLUSTERS: Dict[str, str] = {
 
 # ── cluster → super-group ────────────────────────────────────────────────
 
-CLUSTER_SUPER_GROUP: Dict[str, str] = {
+CLUSTER_SUPER_GROUP: dict[str, str] = {
     "MAJORS":               "BLUE_CHIP",
     "LARGE_CAP_L1":         "BLUE_CHIP",
     "MID_CAP_L1":           "ALT_ECOSYSTEM",
@@ -136,10 +135,10 @@ CLUSTER_SUPER_GROUP: Dict[str, str] = {
 }
 
 
-def cluster_of(base_symbol: str) -> Optional[str]:
+def cluster_of(base_symbol: str) -> str | None:
     return SYMBOL_CLUSTERS.get(base_symbol.upper())
 
 
-def super_group_of(base_symbol: str) -> Optional[str]:
+def super_group_of(base_symbol: str) -> str | None:
     cluster = cluster_of(base_symbol)
     return CLUSTER_SUPER_GROUP.get(cluster) if cluster else None

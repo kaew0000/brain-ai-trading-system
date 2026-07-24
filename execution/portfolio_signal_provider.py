@@ -45,7 +45,6 @@ proof the import is safe: main.py's module-level code is guarded by
 """
 from __future__ import annotations
 
-from typing import Optional
 
 from data.binance_provider import BinanceDataProvider
 from decision.confidence_engine import ConfidenceEngine
@@ -70,11 +69,11 @@ class PortfolioSignalProvider:
     def __init__(
         self,
         data_provider: BinanceDataProvider,
-        regime_engine: Optional[RegimeEngine] = None,
-        smc_engine: Optional[SMCEngine] = None,
-        volume_engine: Optional[VolumeEngine] = None,
-        context_builder: Optional[MarketContextBuilder] = None,
-        confidence_engine: Optional[ConfidenceEngine] = None,
+        regime_engine: RegimeEngine | None = None,
+        smc_engine: SMCEngine | None = None,
+        volume_engine: VolumeEngine | None = None,
+        context_builder: MarketContextBuilder | None = None,
+        confidence_engine: ConfidenceEngine | None = None,
     ) -> None:
         # data_provider is required — no sensible default, it's the one
         # thing here that actually talks to Binance. Everything else
@@ -96,7 +95,7 @@ class PortfolioSignalProvider:
         self.confidence_engine = confidence_engine or ConfidenceEngine()
         logger.info("PortfolioSignalProvider ready")
 
-    def get_signal(self, symbol: str) -> Optional[ExecutionSignal]:
+    def get_signal(self, symbol: str) -> ExecutionSignal | None:
         """Compute a trading signal for `symbol` using the exact pipeline
         main.py's live single-symbol loop uses, pointed at an arbitrary
         symbol instead of settings.SYMBOL. Never raises — any failure
@@ -111,7 +110,7 @@ class PortfolioSignalProvider:
             logger.error(f"PortfolioSignalProvider: signal computation failed for {symbol}: {exc}")
             return None
 
-    def _compute_signal(self, symbol: str) -> Optional[ExecutionSignal]:
+    def _compute_signal(self, symbol: str) -> ExecutionSignal | None:
         from main import _derive_levels  # see module docstring
 
         market = self.data_provider.get_market_data_for(symbol)
@@ -160,5 +159,5 @@ class PortfolioSignalProvider:
         # to how main.py's own single-symbol loop treats these three outcomes.
         return None
 
-    def __call__(self, symbol: str) -> Optional[ExecutionSignal]:
+    def __call__(self, symbol: str) -> ExecutionSignal | None:
         return self.get_signal(symbol)

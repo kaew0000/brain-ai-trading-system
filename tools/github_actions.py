@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from tools import bundle_utils, git_utils
 from tools.history import BundleHistory
@@ -34,11 +33,11 @@ logger = get_logger(__name__)
 @dataclass(frozen=True)
 class ImportResult:
     bundle_path:  Path
-    branch:       Optional[str]
-    sha:          Optional[str]
+    branch:       str | None
+    sha:          str | None
     status:       str            # "applied" | "failed" | "skipped_duplicate" | "dry_run"
-    reason:       Optional[str]
-    final_path:   Optional[Path] = None   # where the bundle file ended up
+    reason:       str | None
+    final_path:   Path | None = None   # where the bundle file ended up
 
 
 def import_bundle(
@@ -143,7 +142,7 @@ def import_bundle(
 
 
 def _fail(
-    bundle_path: Path, branch: Optional[str], sha: Optional[str], reason: str,
+    bundle_path: Path, branch: str | None, sha: str | None, reason: str,
     history: BundleHistory, failed_dir: Path, dry_run: bool,
 ) -> ImportResult:
     logger.error("github_actions: %s failed: %s", bundle_path.name, reason)

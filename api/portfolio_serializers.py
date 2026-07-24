@@ -27,12 +27,11 @@ a continuously-updated live PortfolioState even without reading docs.
 """
 from __future__ import annotations
 
-from typing import List, Optional
 
 SOURCE_LABEL = "latest_persisted_decision"
 
 
-def _meta(as_of: Optional[str] = None, note: Optional[str] = None) -> dict:
+def _meta(as_of: str | None = None, note: str | None = None) -> dict:
     return {
         "source": SOURCE_LABEL,
         "live": False,
@@ -44,7 +43,7 @@ def _meta(as_of: Optional[str] = None, note: Optional[str] = None) -> dict:
     }
 
 
-def serialize_decision(row: Optional[dict]) -> dict:
+def serialize_decision(row: dict | None) -> dict:
     """GET /api/portfolio/decision/latest and the WS 'decision' event.
     row is one entry from portfolio_history.get_latest_decisions()/
     query_decisions(), or None if nothing has ever been persisted."""
@@ -59,7 +58,7 @@ def serialize_decision(row: Optional[dict]) -> dict:
     }
 
 
-def serialize_state(row: Optional[dict]) -> dict:
+def serialize_state(row: dict | None) -> dict:
     """GET /api/portfolio/state.
 
     Deliberately NOT a PortfolioState object and NOT named as one in the
@@ -91,7 +90,7 @@ def serialize_state(row: Optional[dict]) -> dict:
     }
 
 
-def serialize_allocations(row: Optional[dict]) -> dict:
+def serialize_allocations(row: dict | None) -> dict:
     """GET /api/portfolio/allocations — just the `selected` list, with
     its own meta so it's usable standalone (e.g. from the WS stream)
     without also shipping rejected/replacements."""
@@ -103,7 +102,7 @@ def serialize_allocations(row: Optional[dict]) -> dict:
     }
 
 
-def serialize_sectors(row: Optional[dict]) -> dict:
+def serialize_sectors(row: dict | None) -> dict:
     """GET /api/portfolio/sectors — sector_exposure + diversification_score
     from the latest persisted decision. sector_exposure here is
     SectorEngine.exposure_by_sector() (notional-based), exactly as
@@ -145,8 +144,8 @@ def serialize_history_entry(row: dict) -> dict:
 
 
 def serialize_history_page(
-    rows: List[dict],
-    total: Optional[int],
+    rows: list[dict],
+    total: int | None,
     limit: int,
     offset: int,
 ) -> dict:

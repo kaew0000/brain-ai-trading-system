@@ -37,6 +37,11 @@ Completed
 - Strategy Plugin System (architecture.md §25 — `execution/strategy_registry.py`)
 - Ensemble Decision Engine Phase 4A — ConfidenceEngine fusion + agreement
   scoring (architecture.md §26 — `agents/ceo_agent.py`)
+- Ensemble Decision Engine Phase 4B Step 1 — per-agent outcome attribution
+  (architecture.md §27 — `journal/journal_v2.py` + `main.py`)
+- Ensemble Decision Engine Phase 4B proper — dynamic per-agent weighting
+  (architecture.md §28 — `agents/ceo_agent.py`, off by default via
+  `DYNAMIC_AGENT_WEIGHTS_ENABLED`)
 
 In Progress
 
@@ -187,12 +192,21 @@ Strategy Plugin System — DONE (architecture.md §25)
 
 Priority 2
 
-Ensemble Decision Engine — Phase 4A DONE (architecture.md §26:
-ConfidenceEngine fused into `agents/ceo_agent.py`'s weighted vote instead
-of overriding it, plus agreement/disagreement scoring). Phase 4B
-(dynamic per-agent weighting from real journal win-rate) still open —
-blocked on per-agent outcome attribution not existing yet in
-`journal/journal_v2.py` (see architecture.md §26 "Next up").
+Ensemble Decision Engine — Phase 4A DONE (architecture.md §26). Phase 4B
+Step 1 DONE (architecture.md §27: per-agent outcome attribution via
+`journal_v2.get_agent_performance()`). Phase 4B proper DONE (architecture.md
+§28: `CEOAgent` can now blend `WEIGHTS` toward measured win-rate, gated
+off by default via `DYNAMIC_AGENT_WEIGHTS_ENABLED`). The Ensemble
+Decision Engine pillar's **only remaining open item** is:
+`execution/execution_orchestrator.py` (V16 multi-symbol path) still does
+not write to the journal at all — no `save_trade`/`update_trade_result`
+calls anywhere in `execution/` or `portfolio/`, confirmed by inspection
+while scoping §27. Until that's wired, `get_agent_performance()` (and
+therefore dynamic weighting, once enabled) only ever reflects legacy
+single-symbol history — trades taken through the multi-symbol path are
+invisible to it. This is Execution-Layer work and needs its own scoping
+pass; deliberately not started, per the "never modify Execution Layer
+blindly" rule.
 
 Priority 3
 

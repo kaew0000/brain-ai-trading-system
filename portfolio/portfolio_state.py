@@ -13,7 +13,6 @@ tests constructing it directly, and by CapitalManager reading from it.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
 
 from portfolio.portfolio_models import PortfolioPosition
 
@@ -24,9 +23,9 @@ class PortfolioState:
         self,
         daily_pnl: float = 0.0,
         floating_pnl: float = 0.0,
-        peak_balance: Optional[float] = None,
+        peak_balance: float | None = None,
     ) -> None:
-        self._positions: Dict[str, PortfolioPosition] = {}
+        self._positions: dict[str, PortfolioPosition] = {}
         self.daily_pnl     = daily_pnl
         self.floating_pnl  = floating_pnl
         self._peak_balance = peak_balance
@@ -39,17 +38,17 @@ class PortfolioState:
         (e.g. a PARTIAL → OPEN state transition), it does not stack."""
         self._positions[position.symbol] = position
 
-    def remove_position(self, symbol: str) -> Optional[PortfolioPosition]:
+    def remove_position(self, symbol: str) -> PortfolioPosition | None:
         return self._positions.pop(symbol, None)
 
-    def get_position(self, symbol: str) -> Optional[PortfolioPosition]:
+    def get_position(self, symbol: str) -> PortfolioPosition | None:
         return self._positions.get(symbol)
 
     def has_position(self, symbol: str) -> bool:
         return symbol in self._positions
 
     @property
-    def active_positions(self) -> List[PortfolioPosition]:
+    def active_positions(self) -> list[PortfolioPosition]:
         """Positions in any non-terminal state. CLOSED/ARCHIVED positions
         should be removed via remove_position() rather than left in here —
         this property doesn't filter them out, by design, so a caller that
@@ -62,7 +61,7 @@ class PortfolioState:
         return len(self._positions)
 
     @property
-    def held_symbols(self) -> List[str]:
+    def held_symbols(self) -> list[str]:
         return list(self._positions.keys())
 
     # ── Capital / exposure ──────────────────────────────────────────────
@@ -124,10 +123,10 @@ class PortfolioState:
             self._peak_balance = balance
 
     @property
-    def peak_balance(self) -> Optional[float]:
+    def peak_balance(self) -> float | None:
         return self._peak_balance
 
-    def to_dict(self, balance: Optional[float] = None) -> dict:
+    def to_dict(self, balance: float | None = None) -> dict:
         return {
             "positions":        {s: p.to_dict() for s, p in self._positions.items()},
             "position_count":   self.position_count,

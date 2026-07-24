@@ -7,7 +7,6 @@ Drives the JOURNAL NPC in the Pixel Office.
 """
 
 from __future__ import annotations
-from typing import Optional
 from .base_agent import BaseAgent, AgentReport
 
 
@@ -74,7 +73,7 @@ class JournalAnalyst(BaseAgent):
                           "today_pnl": today_pnl, "wins": wins, "losses": losses},
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         last = self._last
         if last is None: return "No journal data yet."
         r = last.raw; q = question.lower()

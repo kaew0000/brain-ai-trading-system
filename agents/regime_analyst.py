@@ -6,7 +6,6 @@ Publishes regime change events and trend bias signals.
 """
 
 from __future__ import annotations
-from typing import Optional
 from events.event_bus import regime_pub
 from .base_agent import BaseAgent, AgentReport
 
@@ -98,7 +97,7 @@ class RegimeAnalyst(BaseAgent):
                           "adx": adx_val, "rsi": rsi_val, "mtf_aligned": mtf_aligned},
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         last = self._last
         if last is None: return "No regime analysis available yet."
         r = last.raw; q = question.lower()

@@ -34,7 +34,6 @@ from __future__ import annotations
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Optional
 
 from events.event_bus import AgentPublisher
 from telemetry.agent_telemetry import get_telemetry_registry
@@ -45,8 +44,16 @@ from utils.logger import get_logger
 class AgentReport:
     """Structured output from any AI agent."""
 
-    __slots__ = ("agent", "timestamp", "signal", "confidence",
-                 "summary", "factors", "raw", "event_name")
+    __slots__ = (
+        "agent",
+        "confidence",
+        "event_name",
+        "factors",
+        "raw",
+        "signal",
+        "summary",
+        "timestamp",
+    )
 
     def __init__(
         self,
@@ -54,9 +61,9 @@ class AgentReport:
         signal:     str  = "NEUTRAL",
         confidence: float = 0.0,
         summary:    str  = "",
-        factors:    Optional[list] = None,
-        raw:        Optional[dict] = None,
-        event_name: Optional[str] = None,
+        factors:    list | None = None,
+        raw:        dict | None = None,
+        event_name: str | None = None,
     ) -> None:
         self.agent      = agent
         self.timestamp  = datetime.now(timezone.utc).isoformat()
@@ -105,7 +112,7 @@ class BaseAgent:
     def __init__(self) -> None:
         self._pub    = AgentPublisher(self.AGENT_NAME)
         self._memory: deque[AgentReport] = deque(maxlen=self.MEMORY_SIZE)
-        self._last:   Optional[AgentReport] = None
+        self._last:   AgentReport | None = None
         self._logger = get_logger(f"agents.{self.AGENT_NAME.lower()}")
 
     # ── Public interface ───────────────────────────────────────────────────
@@ -199,7 +206,7 @@ class BaseAgent:
         """Override in subclass."""
         raise NotImplementedError(f"{self.AGENT_NAME}.analyse() not implemented")
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         """
         Answer a user question about the current market state.
         Uses last known report + market_context if provided.
@@ -229,7 +236,7 @@ class BaseAgent:
         return f"[{self.AGENT_NAME}] Signal: {last.signal} | {last.summary}"
 
     @property
-    def last_report(self) -> Optional[AgentReport]:
+    def last_report(self) -> AgentReport | None:
         return self._last
 
     def get_memory(self, n: int = 10) -> list[dict]:

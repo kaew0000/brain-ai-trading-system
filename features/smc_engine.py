@@ -33,13 +33,24 @@ class SMCSignals:
     """All SMC signals extracted from one timeframe's OHLCV."""
 
     __slots__ = (
-        "bos", "bos_direction",
-        "choch", "choch_direction",
-        "fvg", "fvg_direction", "fvg_top", "fvg_bottom",
-        "ob", "ob_direction", "ob_top", "ob_bottom",
-        "liquidity_high", "liquidity_low",
-        "prev_high", "prev_low",
-        "swing_highs", "swing_lows",
+        "bos",
+        "bos_direction",
+        "choch",
+        "choch_direction",
+        "fvg",
+        "fvg_bottom",
+        "fvg_direction",
+        "fvg_top",
+        "liquidity_high",
+        "liquidity_low",
+        "ob",
+        "ob_bottom",
+        "ob_direction",
+        "ob_top",
+        "prev_high",
+        "prev_low",
+        "swing_highs",
+        "swing_lows",
         "trend_bias",
     )
 

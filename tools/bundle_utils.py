@@ -21,7 +21,6 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
 
 from tools import git_utils
 from utils.logger import get_logger
@@ -45,7 +44,7 @@ class BundleInfo:
     sha: str
 
 
-def find_incoming_bundles(incoming_dir: Path) -> List[Path]:
+def find_incoming_bundles(incoming_dir: Path) -> list[Path]:
     """Every *.bundle / *.bundle.txt file directly in incoming_dir,
     oldest-modified first (processed in arrival order). Does not
     recurse — subdirectories under update/incoming/ are not scanned, so

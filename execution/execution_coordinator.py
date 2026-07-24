@@ -37,7 +37,6 @@ Design constraints (see docs/architecture.md §13 for the full writeup):
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Optional
 
 from execution.trade_manager import TradeManager
 from config.settings import settings
@@ -48,7 +47,7 @@ logger = get_logger(__name__)
 
 class ExecutionCoordinator:
 
-    def __init__(self, data_provider, symbols: Optional[List[str]] = None) -> None:
+    def __init__(self, data_provider, symbols: list[str] | None = None) -> None:
         """
         Parameters
         ----------
@@ -63,12 +62,12 @@ class ExecutionCoordinator:
             behaves exactly like today's single-symbol setup.
         """
         self._data_provider = data_provider
-        self._symbols: List[str] = list(symbols) if symbols else list(settings.symbol_list)
+        self._symbols: list[str] = list(symbols) if symbols else list(settings.symbol_list)
         if not self._symbols:
             raise ValueError("ExecutionCoordinator requires at least one symbol")
 
         self._default_symbol: str = self._symbols[0]
-        self._managers: Dict[str, TradeManager] = {}
+        self._managers: dict[str, TradeManager] = {}
         # Guards _managers. main.py's trading loop and api/app.py's dashboard
         # thread can both reach a coordinator instance (e.g. via a future
         # health/status endpoint) — cheap insurance against two threads
@@ -83,7 +82,7 @@ class ExecutionCoordinator:
 
     # ── Manager lifecycle ────────────────────────────────────────────────
 
-    def get_manager(self, symbol: Optional[str] = None) -> TradeManager:
+    def get_manager(self, symbol: str | None = None) -> TradeManager:
         """
         Return the TradeManager for `symbol` (default symbol if omitted),
         creating and caching it on first use. O(1) dict lookup on the
@@ -113,8 +112,8 @@ class ExecutionCoordinator:
         return manager
 
     def initialize(
-        self, leverage: Optional[int] = None, margin_type: str = "ISOLATED"
-    ) -> Dict[str, bool]:
+        self, leverage: int | None = None, margin_type: str = "ISOLATED"
+    ) -> dict[str, bool]:
         """
         Pre-warm every configured symbol: create its TradeManager and set
         leverage + margin mode once at startup. Purely additive — existing
@@ -124,7 +123,7 @@ class ExecutionCoordinator:
         Returns {symbol: ok} so main.py can log/alert on partial failure
         without this method raising and aborting the other symbols.
         """
-        results: Dict[str, bool] = {}
+        results: dict[str, bool] = {}
         for symbol in self._symbols:
             try:
                 mgr = self.get_manager(symbol)
@@ -152,7 +151,7 @@ class ExecutionCoordinator:
 
     # ── Health ───────────────────────────────────────────────────────────
 
-    def health_check(self) -> Dict[str, dict]:
+    def health_check(self) -> dict[str, dict]:
         """
         Per-symbol status snapshot. Does not make any network calls (that
         would belong to a monitoring/reconciliation layer, not here) —
@@ -179,7 +178,7 @@ class ExecutionCoordinator:
         balance: float,
         risk_pct: float = None,
         leverage: float = None,
-        symbol: Optional[str] = None,
+        symbol: str | None = None,
     ) -> dict:
         """
         Route to the TradeManager for `symbol` (default symbol if
@@ -201,9 +200,9 @@ class ExecutionCoordinator:
         self,
         direction: str,
         quantity: float,
-        symbol: Optional[str] = None,
-        client_order_id: Optional[str] = None,
-    ) -> Optional[dict]:
+        symbol: str | None = None,
+        client_order_id: str | None = None,
+    ) -> dict | None:
         """Route to the TradeManager for `symbol` (default symbol if
         omitted) — added in V16 Phase 2E for ExecutionOrchestrator's
         replacement-close path. Deliberately NOT left to __getattr__'s
@@ -221,7 +220,7 @@ class ExecutionCoordinator:
     # ── Properties ───────────────────────────────────────────────────────
 
     @property
-    def symbols(self) -> List[str]:
+    def symbols(self) -> list[str]:
         return list(self._symbols)
 
     @property

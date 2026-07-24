@@ -737,37 +737,33 @@ class TestWebSockets:
 
     def test_ws_events_connects_and_receives_init(self):
         from fastapi.testclient import TestClient
-        with TestClient(self._app) as client:
-            with client.websocket_connect("/ws/events") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert "events" in msg
+        with TestClient(self._app) as client, client.websocket_connect("/ws/events") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert "events" in msg
 
     def test_ws_signals_connects_and_receives_init(self):
         from fastapi.testclient import TestClient
-        with TestClient(self._app) as client:
-            with client.websocket_connect("/ws/signals") as ws:
-                msg = ws.receive_json()
-                # May be init with or without signal
-                assert msg["type"] == "init"
+        with TestClient(self._app) as client, client.websocket_connect("/ws/signals") as ws:
+            msg = ws.receive_json()
+            # May be init with or without signal
+            assert msg["type"] == "init"
 
     def test_ws_decision_no_state_gets_init_on_connection(self):
         from fastapi.testclient import TestClient
-        with TestClient(self._app) as client:
-            with client.websocket_connect("/ws/decision") as ws:
-                # No decision set → connection stays open but nothing sent yet;
-                # do a minimal ping to confirm it doesn't crash
-                ws.send_text("ping")
+        with TestClient(self._app) as client, client.websocket_connect("/ws/decision") as ws:
+            # No decision set → connection stays open but nothing sent yet;
+            # do a minimal ping to confirm it doesn't crash
+            ws.send_text("ping")
 
     def test_ws_decision_sends_init_when_decision_set(self):
         from fastapi.testclient import TestClient
         self._set("latest_decision", _make_decision())
-        with TestClient(self._app) as client:
-            with client.websocket_connect("/ws/decision") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert "decision" in msg
-                assert msg["decision"]["action"] == "LONG"
+        with TestClient(self._app) as client, client.websocket_connect("/ws/decision") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert "decision" in msg
+            assert msg["decision"]["action"] == "LONG"
 
 
 # ════════════════════════════════════════════════════════════════════════════

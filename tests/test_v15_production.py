@@ -18,7 +18,6 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
-from typing import List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -157,7 +156,7 @@ class TestRetryDecorator:
     def test_exponential_backoff(self):
         """BUG-V15-RETRY-01: Retry delays must grow exponentially."""
         from utils.retry import retry_api_call
-        sleep_calls: List[float] = []
+        sleep_calls: list[float] = []
 
         call_count = 0
 
@@ -193,7 +192,7 @@ class TestRetryDecorator:
     def test_max_delay_cap(self):
         """BUG-V15-RETRY-03: Sleep time must not exceed max_delay."""
         from utils.retry import retry_api_call
-        sleep_calls: List[float] = []
+        sleep_calls: list[float] = []
 
         @retry_api_call(retries=4, delay=10.0, backoff=10.0, max_delay=20.0, jitter=False)
         def failing_fn():
@@ -221,9 +220,8 @@ class TestRetryDecorator:
                 error_message="Invalid API key", header={}
             )
 
-        with patch("utils.retry.time.sleep"):
-            with pytest.raises(ClientError):
-                bad_key_fn()
+        with patch("utils.retry.time.sleep"), pytest.raises(ClientError):
+            bad_key_fn()
 
         assert call_count == 1, "Non-retryable error consumed retries"
 
@@ -239,7 +237,7 @@ class TestRetryDecorator:
         from utils.retry import retry_api_call
 
         cb = CircuitBreaker("test_fast_fail_v2", failure_threshold=1, recovery_timeout=60)
-        sleep_calls: List[float] = []
+        sleep_calls: list[float] = []
 
         @retry_api_call(retries=3, delay=1.0, breaker=cb)
         def failing_fn():
@@ -277,9 +275,8 @@ class TestCircuitBreaker:
                 pass
 
         assert cb.state == "OPEN"
-        with pytest.raises(CircuitBreakerOpen):
-            with cb:
-                pass
+        with pytest.raises(CircuitBreakerOpen), cb:
+            pass
 
     def test_open_to_half_open_after_timeout(self):
         from system_health.circuit_breaker import CircuitBreaker
@@ -365,7 +362,7 @@ class TestEventBus:
         """BUG-V15-EB-02: A crashing subscriber must not affect other subscribers."""
         from events.event_bus import reset_event_bus
         bus = reset_event_bus(persist=False)
-        good_calls: List[str] = []
+        good_calls: list[str] = []
 
         def bad_cb(evt):
             raise RuntimeError("subscriber crash")
@@ -383,8 +380,8 @@ class TestEventBus:
     def test_subscriber_filter(self):
         from events.event_bus import reset_event_bus
         bus = reset_event_bus(persist=False)
-        received_agent1: List[str] = []
-        received_agent2: List[str] = []
+        received_agent1: list[str] = []
+        received_agent2: list[str] = []
 
         bus.subscribe("AGENT_1", lambda e: received_agent1.append(e.message))
         bus.subscribe("AGENT_2", lambda e: received_agent2.append(e.message))
@@ -398,7 +395,7 @@ class TestEventBus:
     def test_wildcard_subscriber(self):
         from events.event_bus import reset_event_bus
         bus = reset_event_bus(persist=False)
-        all_msgs: List[str] = []
+        all_msgs: list[str] = []
         bus.subscribe("*", lambda e: all_msgs.append(e.message))
 
         bus.publish("A", "E", "one")
@@ -410,7 +407,7 @@ class TestEventBus:
     def test_unsubscribe(self):
         from events.event_bus import reset_event_bus
         bus = reset_event_bus(persist=False)
-        calls: List[int] = []
+        calls: list[int] = []
 
         def cb(e):
             calls.append(1)
@@ -438,7 +435,7 @@ class TestEventBus:
         """BUG-V15-EB-04: Concurrent publishes must not corrupt the ring buffer."""
         from events.event_bus import reset_event_bus
         bus = reset_event_bus(persist=False)
-        errors: List[str] = []
+        errors: list[str] = []
 
         def publish_many():
             for i in range(100):
@@ -490,9 +487,8 @@ class TestBinanceProvider:
                 pass
 
         assert cb.state == "OPEN"
-        with pytest.raises(CircuitBreakerOpen):
-            with cb:
-                pass
+        with pytest.raises(CircuitBreakerOpen), cb:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +518,7 @@ class TestLongRunBehavior:
             db_path = f.name
         _initialized_paths.discard(db_path)
 
-        errors: List[str] = []
+        errors: list[str] = []
         completed = []
 
         def write_row(idx: int):
@@ -596,7 +592,7 @@ class TestLongRunBehavior:
 
         cb = CircuitBreaker("integration_test_v2", failure_threshold=2, recovery_timeout=999)
         cb.reset()
-        sleep_calls: List[float] = []
+        sleep_calls: list[float] = []
         call_count = 0
 
         @retry_api_call(retries=5, delay=0.01, backoff=2.0, jitter=False, breaker=cb)

@@ -68,7 +68,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 from execution.execution_events import (
     ExecutionEventType,
@@ -108,7 +108,7 @@ _NON_RECOVERABLE_MARKERS = (
 )
 
 
-def _is_recoverable_error(error: Optional[str]) -> bool:
+def _is_recoverable_error(error: str | None) -> bool:
     if not error:
         return True  # e.g. close_position() returning None with no message — no
                       # evidence it's a permanent rejection; treat as retryable.
@@ -130,7 +130,7 @@ class ExecutionSignal:
     take_profit:  float
 
 
-SignalProvider = Callable[[str], Optional[ExecutionSignal]]
+SignalProvider = Callable[[str], ExecutionSignal | None]
 
 
 @dataclass
@@ -143,8 +143,8 @@ class ExecutionResult:
     status:         ExecutionStatus
     success:        bool
     retries:        int
-    error:          Optional[str]
-    order_result:   Optional[dict]
+    error:          str | None
+    order_result:   dict | None
     is_replacement: bool = False
 
     def to_dict(self) -> dict:
@@ -166,7 +166,7 @@ class ExecutionBatch:
 
     batch_id:             str
     decision_generated_at: float
-    results:               List[ExecutionResult] = field(default_factory=list)
+    results:               list[ExecutionResult] = field(default_factory=list)
     started_at:             float = 0.0
     finished_at:            float = 0.0
 
@@ -174,7 +174,7 @@ class ExecutionBatch:
     def duration_seconds(self) -> float:
         return max(0.0, self.finished_at - self.started_at)
 
-    def summary(self) -> "ExecutionSummary":
+    def summary(self) -> ExecutionSummary:
         completed = [r for r in self.results if r.status == ExecutionStatus.COMPLETED]
         failed    = [r for r in self.results if r.status == ExecutionStatus.FAILED]
         cancelled = [r for r in self.results if r.status == ExecutionStatus.CANCELLED]
@@ -232,9 +232,9 @@ class ExecutionOrchestrator:
         execution_engine,           # whatever execution.execution_factory.build_execution_engine() returned
         portfolio_manager,          # portfolio.portfolio_manager.PortfolioManager
         signal_provider: SignalProvider,
-        state: Optional[ExecutionState] = None,
-        max_retries: Optional[int] = None,
-        retry_delay_seconds: Optional[float] = None,
+        state: ExecutionState | None = None,
+        max_retries: int | None = None,
+        retry_delay_seconds: float | None = None,
     ) -> None:
         from config.settings import settings
 
@@ -261,7 +261,7 @@ class ExecutionOrchestrator:
         decision: OrchestratedDecision,
         portfolio_state: PortfolioState,
         balance: float,
-        batch_id: Optional[str] = None,
+        batch_id: str | None = None,
     ) -> ExecutionBatch:
         """Act on one OrchestratedDecision. Idempotent across repeated
         calls with the SAME decision object (default batch_id is derived
@@ -274,7 +274,7 @@ class ExecutionOrchestrator:
         across a restart."""
         batch_id = batch_id or f"decision-{decision.generated_at}"
         started_at = time.time()
-        results: List[ExecutionResult] = []
+        results: list[ExecutionResult] = []
 
         if decision.blocked:
             logger.info(f"ExecutionOrchestrator: decision blocked ({decision.block_reason}); nothing to execute")
@@ -492,8 +492,8 @@ class ExecutionOrchestrator:
         )
 
         attempts = 0
-        order: Optional[dict] = None
-        error: Optional[str] = None
+        order: dict | None = None
+        error: str | None = None
         while True:
             order = self.execution_engine.close_position(
                 direction=position.direction, quantity=position.quantity, symbol=symbol,

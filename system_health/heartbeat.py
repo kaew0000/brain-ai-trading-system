@@ -2,16 +2,15 @@
 from __future__ import annotations
 import threading
 from datetime import datetime, timezone
-from typing import Dict, Optional
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
 class Heartbeat:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._beats: Dict[str, dict] = {}
+        self._beats: dict[str, dict] = {}
 
-    def beat(self, name: str, meta: Optional[dict] = None) -> None:
+    def beat(self, name: str, meta: dict | None = None) -> None:
         try:
             with self._lock:
                 self._beats[name] = {
@@ -21,12 +20,12 @@ class Heartbeat:
         except Exception as exc:
             logger.debug(f"Heartbeat.beat({name}) failed: {exc}")
 
-    def get(self, name: str) -> Optional[dict]:
+    def get(self, name: str) -> dict | None:
         with self._lock:
             b = self._beats.get(name)
             return dict(b) if b else None
 
-    def get_all(self) -> Dict[str, dict]:
+    def get_all(self) -> dict[str, dict]:
         with self._lock:
             return {k: dict(v) for k, v in self._beats.items()}
 
@@ -34,7 +33,7 @@ class Heartbeat:
         with self._lock:
             self._beats.clear()
 
-_hb: Optional[Heartbeat] = None
+_hb: Heartbeat | None = None
 _hb_lock = threading.Lock()
 
 def get_heartbeat() -> Heartbeat:

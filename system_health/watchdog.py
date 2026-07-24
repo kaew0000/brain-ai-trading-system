@@ -4,11 +4,10 @@ import os as _os
 import threading
 import time as _time
 from datetime import datetime, timezone
-from typing import Dict, Optional
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
-DEFAULT_SUBSYSTEMS: Dict[str, float] = {
+DEFAULT_SUBSYSTEMS: dict[str, float] = {
     "main_loop": 90.0,
     "monitor_loop": 60.0,
     "dashboard_api": 30.0,
@@ -21,16 +20,16 @@ _ALIVE_MUL = 2.0
 _STALE_MUL = 5.0
 
 class Watchdog:
-    def __init__(self, subsystems: Optional[Dict[str, float]] = None) -> None:
+    def __init__(self, subsystems: dict[str, float] | None = None) -> None:
         self._lock = threading.Lock()
-        self._intervals: Dict[str, float] = dict(subsystems or DEFAULT_SUBSYSTEMS)
+        self._intervals: dict[str, float] = dict(subsystems or DEFAULT_SUBSYSTEMS)
         logger.info(f"Watchdog ready | subsystems={list(self._intervals.keys())}")
 
     def register_subsystem(self, name: str, interval_s: float) -> None:
         with self._lock:
             self._intervals[name] = interval_s
 
-    def _classify(self, age_s: Optional[float], interval_s: float) -> str:
+    def _classify(self, age_s: float | None, interval_s: float) -> str:
         if age_s is None:
             return "DEAD"
         if age_s <= interval_s * _ALIVE_MUL:
@@ -48,7 +47,7 @@ class Watchdog:
             beats = {}
 
         now = datetime.now(timezone.utc)
-        result: Dict[str, dict] = {}
+        result: dict[str, dict] = {}
         worst = "ALIVE"
 
         with self._lock:
@@ -56,8 +55,8 @@ class Watchdog:
 
         for name, interval_s in intervals.items():
             beat = beats.get(name)
-            age_s: Optional[float] = None
-            last_beat_iso: Optional[str] = None
+            age_s: float | None = None
+            last_beat_iso: str | None = None
             if beat:
                 try:
                     dt = datetime.fromisoformat(beat["timestamp"])
@@ -83,7 +82,7 @@ class Watchdog:
     def is_healthy(self) -> bool:
         return self.snapshot()["overall_status"] == "ALIVE"
 
-_wd: Optional[Watchdog] = None
+_wd: Watchdog | None = None
 _wd_lock = threading.Lock()
 
 def get_watchdog() -> Watchdog:
@@ -94,7 +93,7 @@ def get_watchdog() -> Watchdog:
                 _wd = Watchdog()
     return _wd
 
-def reset_watchdog(subsystems: Optional[Dict[str, float]] = None) -> Watchdog:
+def reset_watchdog(subsystems: dict[str, float] | None = None) -> Watchdog:
     global _wd
     with _wd_lock:
         _wd = Watchdog(subsystems=subsystems)
@@ -168,7 +167,7 @@ class WatchdogSupervisor:
         sys_components: dict,
         poll_interval_s: float = 5.0,
         grace_period_s: float = 120.0,
-        watchdog: Optional["Watchdog"] = None,
+        watchdog: Watchdog | None = None,
         exit_fn=None,
     ) -> None:
         self._sys = sys_components
@@ -177,7 +176,7 @@ class WatchdogSupervisor:
         self._wd = watchdog or get_watchdog()
         self._exit_fn = exit_fn or (lambda code: _os._exit(code))
         self._stop_evt = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._tick_count = 0  # exposed for tests/introspection
         self._started_at = _time.monotonic()
 

@@ -36,7 +36,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
 
 from utils.logger import get_logger
 
@@ -91,7 +91,7 @@ class EventBus:
         self._persist  = persist and journal is not None
         self._lock     = threading.Lock()
         self._buffer: deque[BusEvent] = deque(maxlen=_RING_BUFFER_SIZE)
-        self._subs: Dict[str, List[Callable[[BusEvent], None]]] = {}
+        self._subs: dict[str, list[Callable[[BusEvent], None]]] = {}
 
         logger.info(f"EventBus V15 ready | persist={self._persist}")
 
@@ -103,7 +103,7 @@ class EventBus:
         event:    str,
         message:  str,
         severity: str              = "info",
-        payload:  Optional[dict]   = None,
+        payload:  dict | None   = None,
     ) -> BusEvent:
         bus_event = BusEvent(
             agent=agent,
@@ -160,7 +160,7 @@ class EventBus:
             except ValueError:
                 return False
 
-    def clear_subscribers(self, agent: Optional[str] = None) -> None:
+    def clear_subscribers(self, agent: str | None = None) -> None:
         """Remove all subscribers (or just for one agent). Useful in tests."""
         with self._lock:
             if agent is not None:
@@ -173,10 +173,10 @@ class EventBus:
     def get_recent(
         self,
         limit:      int            = 50,
-        agent:      Optional[str]  = None,
-        severity:   Optional[str]  = None,
-        event_type: Optional[str]  = None,
-    ) -> List[dict]:
+        agent:      str | None  = None,
+        severity:   str | None  = None,
+        event_type: str | None  = None,
+    ) -> list[dict]:
         with self._lock:
             events = list(self._buffer)
 
@@ -191,7 +191,7 @@ class EventBus:
 
         return [e.to_dict() for e in events[:limit]]
 
-    def get_latest(self, agent: Optional[str] = None) -> Optional[dict]:
+    def get_latest(self, agent: str | None = None) -> dict | None:
         result = self.get_recent(limit=1, agent=agent)
         return result[0] if result else None
 
@@ -224,7 +224,7 @@ class EventBus:
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 
-_global_bus: Optional[EventBus] = None
+_global_bus: EventBus | None = None
 _bus_lock = threading.Lock()
 
 
@@ -253,16 +253,16 @@ class AgentPublisher:
     def _bus(self) -> EventBus:
         return get_event_bus()
 
-    def debug(self, event: str, message: str, payload: Optional[dict] = None) -> BusEvent:
+    def debug(self, event: str, message: str, payload: dict | None = None) -> BusEvent:
         return self._bus().publish(self._agent, event, message, "debug", payload)
 
-    def info(self, event: str, message: str, payload: Optional[dict] = None) -> BusEvent:
+    def info(self, event: str, message: str, payload: dict | None = None) -> BusEvent:
         return self._bus().publish(self._agent, event, message, "info", payload)
 
-    def warning(self, event: str, message: str, payload: Optional[dict] = None) -> BusEvent:
+    def warning(self, event: str, message: str, payload: dict | None = None) -> BusEvent:
         return self._bus().publish(self._agent, event, message, "warning", payload)
 
-    def critical(self, event: str, message: str, payload: Optional[dict] = None) -> BusEvent:
+    def critical(self, event: str, message: str, payload: dict | None = None) -> BusEvent:
         return self._bus().publish(self._agent, event, message, "critical", payload)
 
 

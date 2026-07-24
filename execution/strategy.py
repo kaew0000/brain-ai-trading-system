@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Tuple
 
 # ── Optionally add conor19w bot to sys.path ───────────────────────────────────
 _HERE        = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,7 +58,7 @@ class SMC_OI_Regime_Strategy:
 
     # ── conor19w-compatible interface ─────────────────────────────────────
 
-    def generate_signal(self) -> Tuple[int, float, float]:
+    def generate_signal(self) -> tuple[int, float, float]:
         """
         Run one full brain cycle and return the conor19w-style tuple.
 

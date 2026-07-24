@@ -1,6 +1,22 @@
 line-length = 120
 
 [lint]
+# Pin the enabled rule *categories* explicitly instead of relying on
+# ruff's default set. ruff 0.16.0 (2026-07-23) expanded its stable
+# default from 59 rules to 413 (BLE001, B017, TRY203, I001, G201,
+# RUF059, S110, RUF013, and dozens more), which surfaced ~860
+# pre-existing findings repo-wide overnight with zero code changes on
+# our end — CI (unpinned `pip install ruff`) picked up 0.16.0 while
+# local dev envs were still on 0.15.19, so `ruff check` silently
+# diverged between the two. This repo has never been linted against
+# that expanded set and doesn't opt into it deliberately here; a real
+# audit of broad-except handling, logging, etc. is a legitimate
+# follow-up but is its own project, not something to force through
+# whatever PR happens to get unlucky with a CI tool version bump.
+# This restores ruff's pre-0.16 default selection verbatim (see
+# https://github.com/astral-sh/ruff/blob/main/CHANGELOG.md#0152),
+# so `ruff check` stops drifting every time ruff ships new defaults.
+select = ["E4", "E7", "E9", "F"]
 ignore = [
     "E701",
     "E702",

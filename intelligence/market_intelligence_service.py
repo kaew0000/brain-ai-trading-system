@@ -41,7 +41,7 @@ result = service.get_all(market_context)   # market_context = _state["latest_con
 from __future__ import annotations
 
 import time
-from typing import Optional, Protocol
+from typing import Protocol
 
 from utils.logger import get_logger
 
@@ -128,12 +128,12 @@ class MarketIntelligenceService:
 
     def __init__(
         self,
-        fear_greed_provider:  Optional[FearGreedProviderProtocol]       = None,
-        econ_calendar_provider: Optional[EconomicCalendarProviderProtocol] = None,
+        fear_greed_provider:  FearGreedProviderProtocol | None       = None,
+        econ_calendar_provider: EconomicCalendarProviderProtocol | None = None,
     ) -> None:
         self._fg_provider = fear_greed_provider or FearGreedProvider()
         self._ec_provider = econ_calendar_provider or EconomicCalendarProvider()
-        self._fg_cache: Optional[dict] = None
+        self._fg_cache: dict | None = None
         self._fg_cache_at: float = 0.0
 
     # ── Individual sources (each independently callable/testable) ────────────
@@ -204,7 +204,7 @@ class MarketIntelligenceService:
 
 # ── Singleton accessor (mirrors telemetry/reasoning pattern) ──────────────────
 
-_global_service: Optional[MarketIntelligenceService] = None
+_global_service: MarketIntelligenceService | None = None
 
 
 def get_market_intelligence_service() -> MarketIntelligenceService:
@@ -216,8 +216,8 @@ def get_market_intelligence_service() -> MarketIntelligenceService:
 
 
 def reset_market_intelligence_service(
-    fear_greed_provider: Optional[FearGreedProviderProtocol] = None,
-    econ_calendar_provider: Optional[EconomicCalendarProviderProtocol] = None,
+    fear_greed_provider: FearGreedProviderProtocol | None = None,
+    econ_calendar_provider: EconomicCalendarProviderProtocol | None = None,
 ) -> MarketIntelligenceService:
     """Replace the global singleton (useful in tests to inject fakes)."""
     global _global_service

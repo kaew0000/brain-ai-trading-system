@@ -19,13 +19,12 @@ show both, not just the composite.
 """
 from __future__ import annotations
 
-from typing import Dict, Tuple
 
 from config.settings import settings
 from ranking.ranking_models import ScoreBreakdown, ScoreStatus
 
 
-def fuse(breakdown: ScoreBreakdown, weights: Dict[str, float] = None) -> Tuple[float, float, str]:
+def fuse(breakdown: ScoreBreakdown, weights: dict[str, float] = None) -> tuple[float, float, str]:
     """
     Returns (composite_score, coverage, explanation).
 

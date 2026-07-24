@@ -1,72 +1,67 @@
-# PATCH NOTES — V16 Phase 4A: Ensemble Decision Engine (ConfidenceEngine Fusion)
+# PATCH NOTES — V16 Phase 4B Proper: Dynamic Per-Agent Weighting
 
-Branch: `feature/ensemble-decision-engine-4a`
-Base: `main` (post Phase 3A merge, "feat(execution): Phase 3A Strategy
-Plugin System", 1533 passing)
+Base: `main` + Phase 4B Step 1 (per-agent outcome attribution, this same
+session — see `docs/architecture.md §27`)
 
 ## Summary
 
-`agents/ceo_agent.py`'s `CEOAgent.decide()` previously took two separate
-code paths: when a `confidence_result` was passed in, it **overrode**
-the action/direction/confidence outright, and the agent layer's own
-votes (`smc`, `futures`, `regime`, `risk`, `journal`) only appeared in
-the `reasons` text — they never influenced the actual decision. Since
-`main.py`'s live pipeline and `execution/portfolio_signal_provider.py`
-both always pass a `confidence_result`, the "ensemble" vote was
-effectively dead code in production outside the risk veto.
-
-This phase fuses `ConfidenceEngine`'s opinion into the same weighted vote
-as every other agent instead of letting it override the agent layer, and
-adds an `agreement_score` that damps confidence when the agent layer is
-split on direction. Per §25's "Next up" and CLAUDE.md's Priority 2, this
-extends `agents/ceo_agent.py` rather than building a new module.
-
-**Scoped in two sub-phases before writing code.** The original ask was
-just "Ensemble Decision Engine." Reading `agents/ceo_agent.py`,
-`decision/confidence_engine.py`, `ranking/confidence_fusion.py`, and
-`journal/journal_v2.py` first split the work into: (A) fuse
-ConfidenceEngine + add disagreement scoring — no new data dependency,
-touches one file — and (B) weight agents by their real historical
-win-rate — blocked on per-agent outcome attribution that doesn't exist
-yet in the journal. Building (B) without (A)'s data would have been a
-static placeholder with no real signal behind it. This phase is (A)
-only; (B) is scoped as a follow-up in `docs/architecture.md` §26 "Next
-up".
+architecture.md §27 "Next up" scoped this as: "actually using
+`get_agent_performance()` to adjust `CEOAgent.WEIGHTS`". `CEOAgent.decide()`
+can now blend each agent's static weight toward its measured win-rate —
+gated **off by default** via `DYNAMIC_AGENT_WEIGHTS_ENABLED`, so nothing
+changes for any existing deployment unless explicitly opted in.
 
 ## Changes to existing modules
 
 | File | Change |
 |---|---|
-| `agents/ceo_agent.py` | `WEIGHTS` gains `confidence_engine: 0.15`, rebalanced from `{smc:.30 futures:.25 regime:.20 risk:.15 journal:.10}` to `{smc:.25 futures:.20 regime:.15 risk:.15 journal:.10 confidence_engine:.15}`. `confidence_result` is now wrapped as an `AgentReport` and folded into the existing weighted vote loop instead of overriding it in a separate branch. New `agreement_score` field on `CEODecision` (weighted fraction of directional votes agreeing with the winning action), used to damp `confidence` when the agent layer disagrees. `score_breakdown` gains `journal` and `confidence_engine` keys (previously omitted). A ConfidenceEngine hard block (`blocked=True` / `action=="BLOCKED"`) still short-circuits to `BLOCKED` unconditionally, same precedence as the risk veto. |
-| `docs/architecture.md` | +§26 (this phase). |
-| `CLAUDE.md` | "Current Development Status" / "Current Priorities" updated — Phase 4A moved to Completed under Priority 2; Phase 4B recorded as the next scoped step. |
+| `config/settings.py` | 4 new flags, all inert by default: `DYNAMIC_AGENT_WEIGHTS_ENABLED` (bool, `False`), `DYNAMIC_WEIGHT_MIN_SAMPLES` (int, `20`), `DYNAMIC_WEIGHT_BLEND` (float, `0.3`), `DYNAMIC_WEIGHT_REFRESH_SECONDS` (int, `300`). |
+| `agents/ceo_agent.py` | `CEOAgent.__init__` gains optional `journal=None`. New `_get_agent_performance_cached()` (TTL-cached `journal.get_agent_performance()`) and `_effective_weights(reports)` (blends toward `win_rate`, floor-gated by sample count, always renormalizes to sum 1.0, falls back to static `WEIGHTS` on any error). `decide()` now uses the effective weights consistently across the vote, `agreement_score`, and `score_breakdown`. `CEODecision` gains `weights_used: dict`. |
+| `agents/__init__.py` | `CEOAgent(...)` now also receives `journal=journal` (already threaded through `build_agent_layer()` for other agents). |
+| `docs/architecture.md` | +§28. |
+| `CLAUDE.md` | Phase 4B proper moved to Completed; Priority 2 rewritten — its only remaining open item is the execution_orchestrator.py journal gap. |
 
-Neither `execution/strategy.py`, `execution/portfolio_signal_provider.py`,
-`decision/confidence_engine.py`, nor `ranking/confidence_fusion.py` were
-modified — this phase changes how `CEOAgent` consumes their output, not
-the outputs themselves.
+No changes to `journal/journal_v2.py`, `execution/execution_orchestrator.py`,
+`decision/confidence_engine.py`, `main.py`, or any schema in this delivery.
 
-## Known limitation (documented, not hidden)
+## Safety properties (why this is safe to ship even before enabling it)
 
-Confidence damping from `agreement_score` is applied once, using the
-action/scores already computed from the undamped vote — it does not
-re-run action selection after damping. A vote that just barely cleared
-the 40-point action threshold can end up reported at a damped confidence
-below 40 (e.g. 39.38 in the test suite). This is intentional: it reflects
-"the agent layer is split, treat this as a weaker signal" rather than
-flip-flopping the action itself based on its own after-the-fact damping.
+- **Off by default.** `DYNAMIC_AGENT_WEIGHTS_ENABLED=False` → `_effective_weights()`
+  returns `self.WEIGHTS` unchanged, and doesn't even call the journal.
+- **No journal configured** (`journal=None`, still the default anywhere
+  `CEOAgent(...)` is constructed without the kwarg, e.g. existing tests) →
+  same fallback.
+- **Any exception** fetching performance (journal down, bad data, etc.) →
+  same fallback, logged as a warning, decision cycle continues normally.
+- **Per-agent sample floor** — an agent with fewer than
+  `DYNAMIC_WEIGHT_MIN_SAMPLES` closed, direction-matching trades keeps its
+  static weight untouched, so a brand-new or rarely-triggered agent is
+  never blended off a handful of noisy trades.
+- **Bounded multiplier** — win-rate maps to a `[0.5, 1.5]` multiplier
+  scaled by `DYNAMIC_WEIGHT_BLEND`, so no agent can be zeroed out or made
+  to dominate the vote outright, even at 0% or 100% measured win-rate.
+- **Always renormalized to sum to 1.0** — preserves the existing
+  `long_score`/`short_score >= 40` action threshold's meaning regardless
+  of whether blending is active.
+
+## Known limitation (carried over from Phase 4B Step 1, still applies)
+
+Only reflects trades from the legacy single-symbol `main.py` pipeline —
+`execution/execution_orchestrator.py` (V16 multi-symbol path) still
+doesn't write to the journal at all, so enabling dynamic weighting today
+would only ever be informed by single-symbol history. See
+`docs/architecture.md §28` "Next up".
 
 ## Testing
 
 ```
-pytest tests/ -q   → 1539 passed, 0 failed  (1533 baseline + 6 new)
+pytest tests/ -q   → 1556 passed, 0 failed  (1546 after §27 + 10 new)
 ruff check .        → clean
 ```
 
-6 new tests in `tests/test_ceo_ensemble_fusion.py`, using hand-built
-`FakeAgent` stubs (not `build_agent_layer`'s real engines) for
-deterministic weighted-vote math: agent layer outvoting ConfidenceEngine,
-agents and ConfidenceEngine agreeing, agreement-score + damping math
-checked to 2 decimal places, unanimous vote has zero damping, hard-block
-passthrough regardless of agent votes, and risk veto still winning over a
-directional fused result.
+10 new tests in `tests/test_dynamic_agent_weights.py`: disabled-by-default
+(journal never even queried), no-journal fallback, exception-during-fetch
+fallback, below-sample-floor fallback for that agent, weights always sum
+to 1.0, win-rate blending widens the weight ratio by the expected factor,
+zero-win-rate agent never zeroed out, TTL cache avoids repeated journal
+queries, `weights_used` present in `to_dict()`.

@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 from config.settings import settings
 from tools import bundle_utils, github_actions, sync as sync_module, ui
@@ -48,7 +47,7 @@ logger = get_logger(__name__)
 
 
 def _resolve_dirs(repo_dir: Path, args: argparse.Namespace) -> dict:
-    def _p(cli_value: Optional[str], setting_value: str) -> Path:
+    def _p(cli_value: str | None, setting_value: str) -> Path:
         raw = cli_value if cli_value is not None else setting_value
         p = Path(raw)
         return p if p.is_absolute() else (repo_dir / p)
@@ -87,7 +86,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     ui.info(f"Found {len(bundles)} bundle file(s) in {dirs['incoming']}")
 
     # ── Preview pass (always dry-run first, never touches the repo) ────────
-    preview: List = []
+    preview: list = []
     for b in bundles:
         preview.append(
             github_actions.import_bundle(
@@ -114,7 +113,7 @@ def cmd_import(args: argparse.Namespace) -> int:
             return 1
 
     # ── Real pass ────────────────────────────────────────────────────────
-    results: List = []
+    results: list = []
     for b in bundles:
         result = github_actions.import_bundle(
             b, repo_dir, history, dirs["applied"], dirs["failed"],
@@ -210,7 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

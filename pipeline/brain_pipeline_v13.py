@@ -32,7 +32,6 @@ pipeline.last_decision     property → most recent ConfidenceResult
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
 
 import pandas as pd
 
@@ -58,7 +57,7 @@ class BrainPipelineV13:
 
     def __init__(
         self,
-        weights: Optional[dict[str, float]] = None,
+        weights: dict[str, float] | None = None,
     ) -> None:
         self._context_builder  = MarketContextBuilder()
         self._confidence_engine = ConfidenceEngine(weights=weights)
@@ -159,7 +158,7 @@ class BrainPipelineV13:
         volume_signals: VolumeSignals,
         regime_result:  RegimeResult,
         df_m15:         pd.DataFrame,
-    ) -> Tuple[int, float, float]:
+    ) -> tuple[int, float, float]:
         """
         Run pipeline and return (Trade_Direction, stop_loss, take_profit).
         Compatible with conor19w/Binance-Futures-Trading-Bot interface.

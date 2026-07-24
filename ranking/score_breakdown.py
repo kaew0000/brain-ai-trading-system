@@ -24,7 +24,6 @@ see score_trend's docstring.
 from __future__ import annotations
 
 import bisect
-from typing import Dict, List
 
 from config.settings import settings
 from ranking.ranking_models import FactorScore, ScoreBreakdown, ScoreStatus
@@ -47,14 +46,14 @@ class UniverseStats:
     wired into a full pipeline).
     """
 
-    def __init__(self, snapshots: List[SymbolSnapshot]) -> None:
+    def __init__(self, snapshots: list[SymbolSnapshot]) -> None:
         self._volume_sorted = sorted(s.quote_volume_24h for s in snapshots)
         self._spread_sorted = sorted(s.spread_pct for s in snapshots)
         oi_vals = sorted(s.open_interest for s in snapshots if s.open_interest is not None)
         self._oi_sorted = oi_vals
 
     @staticmethod
-    def _percentile(sorted_vals: List[float], value: float) -> float:
+    def _percentile(sorted_vals: list[float], value: float) -> float:
         if not sorted_vals:
             return 50.0
         idx = bisect.bisect_left(sorted_vals, value)
@@ -77,7 +76,7 @@ class UniverseStats:
         return len(self._oi_sorted)
 
 
-def compute_universe_stats(snapshots: List[SymbolSnapshot]) -> UniverseStats:
+def compute_universe_stats(snapshots: list[SymbolSnapshot]) -> UniverseStats:
     return UniverseStats(snapshots)
 
 
@@ -269,7 +268,7 @@ _ALL_FACTORS = (
 
 
 def score_symbol(snap: SymbolSnapshot, stats: UniverseStats) -> ScoreBreakdown:
-    factors: Dict[str, FactorScore] = {
+    factors: dict[str, FactorScore] = {
         "trend":                  score_trend(snap),
         "market_structure":       score_market_structure(snap),
         "momentum":               score_momentum(snap),

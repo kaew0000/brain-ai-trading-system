@@ -53,7 +53,6 @@ zero of.
 from __future__ import annotations
 
 import time
-from typing import List, Optional
 
 from config.settings import settings
 from ranking.confidence_fusion import fuse
@@ -74,13 +73,13 @@ class OpportunityRanker:
         ranker.get_latest()                   # last computed result, no recompute
     """
 
-    def __init__(self, scanner: MarketScanner, top_n: Optional[int] = None) -> None:
+    def __init__(self, scanner: MarketScanner, top_n: int | None = None) -> None:
         self._scanner = scanner
         self._top_n   = top_n if top_n is not None else settings.RANKER_TOP_N
-        self._last_result: List[RankedOpportunity] = []
-        self._last_ranked_at: Optional[float] = None
+        self._last_result: list[RankedOpportunity] = []
+        self._last_ranked_at: float | None = None
 
-    def rank(self) -> List[RankedOpportunity]:
+    def rank(self) -> list[RankedOpportunity]:
         """
         Score every symbol currently in the scanner's cache, fuse to a
         composite, sort descending, keep the top N, persist, and return.
@@ -98,7 +97,7 @@ class OpportunityRanker:
         stats = compute_universe_stats(snapshots)
         now = time.time()
 
-        scored: List[RankedOpportunity] = []
+        scored: list[RankedOpportunity] = []
         for snap in snapshots:
             breakdown = score_symbol(snap, stats)
             composite, coverage, explanation = fuse(breakdown)
@@ -139,7 +138,7 @@ class OpportunityRanker:
         )
         return top
 
-    def get_latest(self) -> List[RankedOpportunity]:
+    def get_latest(self) -> list[RankedOpportunity]:
         """Last computed result without recomputing — cheap, for API/dashboard reads."""
         return list(self._last_result)
 

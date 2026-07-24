@@ -10,7 +10,6 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 
 from utils.logger import get_logger
 
@@ -131,7 +130,7 @@ class PaperPosition:
 
     # ── Mark price ────────────────────────────────────────────────────────────
 
-    def update_mark(self, mark_price: float) -> Optional[ClosedTrade]:
+    def update_mark(self, mark_price: float) -> ClosedTrade | None:
         """
         Update mark price. Checks SL/TP hit.
         Returns ClosedTrade if position was closed, else None.

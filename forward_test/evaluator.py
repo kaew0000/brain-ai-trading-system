@@ -13,7 +13,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
 
 from utils.logger import get_logger
 
@@ -74,7 +73,7 @@ class ForwardTestEvaluator:
     def __init__(self, starting_balance: float = 10_000.0) -> None:
         self._balance = starting_balance
         self._last_report_count = 0
-        self._last_report: Optional[ForwardTestReport] = None
+        self._last_report: ForwardTestReport | None = None
 
     def evaluate(self, trades: list[dict]) -> ForwardTestReport:
         if not trades:
@@ -166,7 +165,7 @@ class ForwardTestEvaluator:
         return False
 
     @property
-    def last_report(self) -> Optional[ForwardTestReport]:
+    def last_report(self) -> ForwardTestReport | None:
         return self._last_report
 
     # ── Maths ─────────────────────────────────────────────────────────────
@@ -176,9 +175,9 @@ class ForwardTestEvaluator:
         peak = equity[0]
         max_dd = 0.0
         for e in equity:
-            if e > peak: peak = e
+            peak = max(peak, e)
             dd = peak - e
-            if dd > max_dd: max_dd = dd
+            max_dd = max(max_dd, dd)
         max_dd_pct = max_dd / peak * 100 if peak > 0 else 0.0
         return max_dd, max_dd_pct
 

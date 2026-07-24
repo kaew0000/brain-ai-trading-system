@@ -1,6 +1,5 @@
 """ml/meta_label.py — Phase 3C: MetaLabelFilter wraps model + predictor"""
 from __future__ import annotations
-from typing import Optional, Tuple
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
@@ -34,7 +33,7 @@ class MetaLabelFilter:
         self._loaded = False
         self._model = None
 
-    def evaluate(self, features: dict) -> Tuple[str, float]:
+    def evaluate(self, features: dict) -> tuple[str, float]:
         """
         Returns (label, probability): label is "TRADE" or "SKIP",
         probability is the model's raw score (0-100).
@@ -46,7 +45,7 @@ class MetaLabelFilter:
         return label, prob
 
 
-_filter: Optional[MetaLabelFilter] = None
+_filter: MetaLabelFilter | None = None
 
 def get_meta_label_filter() -> MetaLabelFilter:
     global _filter

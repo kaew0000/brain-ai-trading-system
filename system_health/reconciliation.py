@@ -4,7 +4,6 @@ import threading
 import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Optional
 from utils.logger import get_logger
 from events.event_bus import get_event_bus
 logger = get_logger(__name__)
@@ -14,15 +13,15 @@ class ReconciliationEvent:
     id: str; timestamp: str; mismatch_type: str
     exchange_view: dict; journal_view: dict; bot_view: dict
     severity: str; detail: str
-    recovery_attempted: bool = False; recovery_result: Optional[str] = None
+    recovery_attempted: bool = False; recovery_result: str | None = None
     def to_dict(self) -> dict: return asdict(self)
 
 class ReconciliationEngine:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._buf: list[ReconciliationEvent] = []
-        self._last_run: Optional[str] = None
-        self._last_result: Optional[str] = None
+        self._last_run: str | None = None
+        self._last_result: str | None = None
         # Signature (mismatch_type, severity, detail) of the last mismatch
         # we actually published/logged/attempted-recovery-for. Used to
         # suppress re-firing the *identical* mismatch every cycle while a
@@ -30,10 +29,10 @@ class ReconciliationEngine:
         # exchange position opened before this bot session) remains open.
         # Reset to None once the system goes flat/clean, so a *new*
         # mismatch — even of the same type — always fires fresh.
-        self._last_fired_sig: Optional[tuple] = None
+        self._last_fired_sig: tuple | None = None
         self._suppressed_repeat_count: int = 0
 
-    def run(self, sys: dict) -> Optional[ReconciliationEvent]:
+    def run(self, sys: dict) -> ReconciliationEvent | None:
         try:
             ex = self._read_exchange(sys)
             bot = self._read_bot(sys, ex)
@@ -180,7 +179,7 @@ class ReconciliationEngine:
         return ("PRESENCE_MISMATCH", "critical",
                 f"Presence disagreement: open={open_src} flat={flat_src}")
 
-_rce: Optional[ReconciliationEngine] = None
+_rce: ReconciliationEngine | None = None
 _rce_lock = threading.Lock()
 
 def get_reconciliation_engine() -> ReconciliationEngine:

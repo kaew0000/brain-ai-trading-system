@@ -53,7 +53,6 @@ API surface: /api/decision  /api/signals
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -140,7 +139,7 @@ class ConfidenceEngine:
     inserted into the V1 pipeline without breaking existing tests.
     """
 
-    def __init__(self, weights: Optional[dict[str, float]] = None) -> None:
+    def __init__(self, weights: dict[str, float] | None = None) -> None:
         self._weights = _normalise_weights(weights or DEFAULT_WEIGHTS)
         logger.info(f"ConfidenceEngine ready | weights={self._weights}")
 

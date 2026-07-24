@@ -5,7 +5,7 @@ import os
 import pickle
 import threading
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Any
 from database.db import ManagedConn, get_db_path
 from utils.logger import get_logger
 logger = get_logger(__name__)
@@ -14,7 +14,7 @@ MODEL_TYPES = ("meta_label", "confidence_calibrator", "outcome_predictor")
 _MODELS_DIR = "ml_models"
 
 class ModelRegistry:
-    def __init__(self, db_path: Optional[str]=None, models_dir: str=_MODELS_DIR) -> None:
+    def __init__(self, db_path: str | None=None, models_dir: str=_MODELS_DIR) -> None:
         self.db_path = db_path or get_db_path()
         self.models_dir = models_dir
         os.makedirs(models_dir, exist_ok=True)
@@ -44,11 +44,10 @@ class ModelRegistry:
 
     def promote(self, model_id: int, model_type: str) -> bool:
         """Promote model_id — deactivate current active, activate new."""
-        with self._lock:
-            with self._conn() as c:
-                c.execute("UPDATE model_registry SET active=0 WHERE model_type=?", (model_type,))
-                c.execute("UPDATE model_registry SET active=1 WHERE id=?", (model_id,))
-                c.commit()
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE model_registry SET active=0 WHERE model_type=?", (model_type,))
+            c.execute("UPDATE model_registry SET active=1 WHERE id=?", (model_id,))
+            c.commit()
         logger.info(f"ModelRegistry: promoted #{model_id} ({model_type})")
         return True
 
@@ -63,14 +62,14 @@ class ModelRegistry:
                 npf > float(current.get("profit_factor",0)) and
                 ndd <= float(current.get("max_drawdown",999)))
 
-    def get_active(self, model_type: str) -> Optional[dict]:
+    def get_active(self, model_type: str) -> dict | None:
         with self._conn() as c:
             row = c.execute(
                 "SELECT * FROM model_registry WHERE model_type=? AND active=1 ORDER BY id DESC LIMIT 1",
                 (model_type,)).fetchone()
         return dict(row) if row else None
 
-    def load_active(self, model_type: str) -> Optional[Any]:
+    def load_active(self, model_type: str) -> Any | None:
         meta = self.get_active(model_type)
         if meta is None: return None
         path = meta.get("model_path","")
@@ -81,7 +80,7 @@ class ModelRegistry:
             logger.error(f"ModelRegistry.load_active({model_type}) failed: {exc}")
             return None
 
-    def list_models(self, model_type: Optional[str]=None, limit: int=50) -> list[dict]:
+    def list_models(self, model_type: str | None=None, limit: int=50) -> list[dict]:
         with self._conn() as c:
             if model_type:
                 rows = c.execute(
@@ -92,7 +91,7 @@ class ModelRegistry:
                     "SELECT * FROM model_registry ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
-_registry: Optional[ModelRegistry] = None
+_registry: ModelRegistry | None = None
 _registry_lock = threading.Lock()
 
 def get_model_registry() -> ModelRegistry:
@@ -102,7 +101,7 @@ def get_model_registry() -> ModelRegistry:
             if _registry is None: _registry = ModelRegistry()
     return _registry
 
-def reset_model_registry(db_path: Optional[str]=None) -> ModelRegistry:
+def reset_model_registry(db_path: str | None=None) -> ModelRegistry:
     global _registry
     with _registry_lock: _registry = ModelRegistry(db_path=db_path)
     return _registry

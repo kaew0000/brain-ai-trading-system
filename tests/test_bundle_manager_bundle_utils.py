@@ -61,9 +61,8 @@ class TestExtractBranchAndSha:
         """A bundle with only refs/tags/* (no refs/heads/*) has nothing
         this tool considers a feature branch."""
         with patch("tools.bundle_utils.git_utils.list_bundle_heads",
-                    return_value=[("sha1", "refs/tags/v1.0")]):
-            with pytest.raises(bundle_utils.BundleFormatError):
-                bundle_utils.extract_branch_and_sha(tmp_path / "x.bundle", tmp_path)
+                    return_value=[("sha1", "refs/tags/v1.0")]), pytest.raises(bundle_utils.BundleFormatError):
+            bundle_utils.extract_branch_and_sha(tmp_path / "x.bundle", tmp_path)
 
     def test_multiple_branch_heads_raises_bundle_format_error(self, tmp_path):
         with patch("tools.bundle_utils.git_utils.list_bundle_heads",

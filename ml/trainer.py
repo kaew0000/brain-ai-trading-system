@@ -1,6 +1,5 @@
 """ml/trainer.py — Phase 3C: Train meta-label + outcome predictor models"""
 from __future__ import annotations
-from typing import Optional
 import pandas as pd
 from utils.logger import get_logger
 logger = get_logger(__name__)
@@ -17,7 +16,7 @@ def _validate_df(df: pd.DataFrame) -> bool:
     if missing: logger.warning(f"Trainer: missing columns {missing}"); return False
     return True
 
-def train_meta_label(df: pd.DataFrame) -> Optional[tuple]:
+def train_meta_label(df: pd.DataFrame) -> tuple | None:
     """
     Binary classifier: should this signal be TRADE (1) or SKIP (0)?
     Priority 1 per spec. Uses XGBoost with sklearn fallback.
@@ -62,7 +61,7 @@ def train_meta_label(df: pd.DataFrame) -> Optional[tuple]:
         logger.error(f"train_meta_label failed: {exc}", exc_info=True)
         return None
 
-def train_outcome_predictor(df: pd.DataFrame) -> Optional[tuple]:
+def train_outcome_predictor(df: pd.DataFrame) -> tuple | None:
     """
     Regression/probability model: P(TP before SL) as 0-100.
     Priority 3 per spec.

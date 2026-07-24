@@ -34,7 +34,6 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime, timezone
-from typing import List, Optional, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -62,11 +61,11 @@ HEARTBEAT_INTERVAL_SECONDS = 5
 # class here to avoid the api.app <-> api.portfolio_ws circular import
 # that would come from importing api.app.ConnectionManager (api/app.py
 # is the one that includes this router).
-_clients: Set[WebSocket] = set()
+_clients: set[WebSocket] = set()
 
 # Dedup state — module-level because it tracks "has this cycle already
 # been broadcast to everyone", not anything per-connection.
-_last_broadcast_row_id: Optional[int] = None
+_last_broadcast_row_id: int | None = None
 _last_heartbeat_at: float = 0.0
 
 # V16 Phase 2E: separate dedup pointer for the execution-event relay —
@@ -80,7 +79,7 @@ async def _broadcast(message: dict) -> None:
     if not _clients:
         return
     raw = json.dumps(message)
-    dead: List[WebSocket] = []
+    dead: list[WebSocket] = []
     for client in list(_clients):
         try:
             await client.send_text(raw)

@@ -40,7 +40,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 from utils.logger import get_logger
 
@@ -68,7 +68,7 @@ class GitNotFoundError(RuntimeError):
     """Raised once, at first use, if no `git` executable is on PATH."""
 
 
-_GIT_EXE: Optional[str] = None
+_GIT_EXE: str | None = None
 
 
 def _resolve_git() -> str:
@@ -87,7 +87,7 @@ def _resolve_git() -> str:
 
 @dataclass(frozen=True)
 class GitResult:
-    cmd: List[str]
+    cmd: list[str]
     returncode: int
     stdout: str
     stderr: str
@@ -131,7 +131,7 @@ def run_git(
 
 # ── Bundle-specific plumbing ─────────────────────────────────────────────
 
-def verify_bundle(bundle_path: Path, cwd: Path, timeout: int = 120) -> Tuple[bool, str]:
+def verify_bundle(bundle_path: Path, cwd: Path, timeout: int = 120) -> tuple[bool, str]:
     """`git bundle verify` — checks the bundle is well-formed AND that
     this repo already has every prerequisite commit it needs (a bundle
     can be a valid file but still unusable here if it was built as an
@@ -146,14 +146,14 @@ def verify_bundle(bundle_path: Path, cwd: Path, timeout: int = 120) -> Tuple[boo
     return ok, message
 
 
-def list_bundle_heads(bundle_path: Path, cwd: Path, timeout: int = 60) -> List[Tuple[str, str]]:
+def list_bundle_heads(bundle_path: Path, cwd: Path, timeout: int = 60) -> list[tuple[str, str]]:
     """`git bundle list-heads` — returns [(sha, full_ref_name), ...].
     Structured plumbing output (stable across git versions), deliberately
     used instead of parsing `git bundle verify`'s prose summary."""
     result = run_git(
         ["bundle", "list-heads", str(bundle_path.resolve())], cwd=cwd, timeout=timeout,
     )
-    heads: List[Tuple[str, str]] = []
+    heads: list[tuple[str, str]] = []
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line:
@@ -231,7 +231,7 @@ def push_branch(
     if force:
         args.insert(1, "--force-with-lease")
 
-    last_error: Optional[GitCommandError] = None
+    last_error: GitCommandError | None = None
     for attempt in range(1, max(1, retries) + 1):
         try:
             return run_git(args, cwd=cwd, timeout=timeout)

@@ -1,5 +1,4 @@
 import os
-from typing import Optional, Dict
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
@@ -30,7 +29,7 @@ class Settings(BaseSettings):
     # single-symbol deployment is completely unaffected — use the
     # `symbol_list` property below rather than reading SYMBOLS directly,
     # since that property is what actually applies the SYMBOL fallback.
-    SYMBOLS: Optional[list] = Field(default=None, alias="SYMBOLS")
+    SYMBOLS: list | None = Field(default=None, alias="SYMBOLS")
 
     # ── Risk Management ───────────────────────────────────
     RISK_PER_TRADE_MIN: float = Field(default=0.005)
@@ -105,12 +104,33 @@ class Settings(BaseSettings):
     API_AUTH_ENABLED: bool = Field(default=False, alias="API_AUTH_ENABLED")
     # JSON object mapping raw API key -> role ("admin"|"operator"|"viewer").
     # e.g. API_KEYS={"changeme-op-key":"operator","changeme-view-key":"viewer"}
-    API_KEYS: Dict[str, str] = Field(default_factory=dict, alias="API_KEYS")
+    API_KEYS: dict[str, str] = Field(default_factory=dict, alias="API_KEYS")
     # HMAC signing secret for bearer JWTs. If left blank while
     # API_AUTH_ENABLED=true, api/auth.py generates a random per-process
     # secret and logs a critical warning (tokens won't survive a restart).
     JWT_SECRET: str = Field(default="", alias="JWT_SECRET")
     JWT_EXPIRY_MINUTES: int = Field(default=60, alias="JWT_EXPIRY_MINUTES")
+
+    # ── Ensemble Decision Engine — Phase 4B proper (architecture.md §28) ───
+    # Off by default: CEOAgent.WEIGHTS stays static until explicitly opted
+    # in, same reasoning as SCANNER_ENABLED above. When enabled, blends each
+    # agent's static weight toward its measured win-rate (from
+    # journal_v2.get_agent_performance(), Phase 4B Step 1) — but only once
+    # that agent has at least DYNAMIC_WEIGHT_MIN_SAMPLES closed,
+    # direction-matching trades; below that floor its static weight is used
+    # unchanged, so a quiet or brand-new agent is never blended off noise.
+    DYNAMIC_AGENT_WEIGHTS_ENABLED: bool = Field(default=False, alias="DYNAMIC_AGENT_WEIGHTS_ENABLED")
+    # Minimum closed, direction-matching trades before an agent's win-rate
+    # is trusted enough to influence its weight at all.
+    DYNAMIC_WEIGHT_MIN_SAMPLES: int = Field(default=20, alias="DYNAMIC_WEIGHT_MIN_SAMPLES")
+    # 0.0 = fully static (dynamic weighting has no effect even if enabled),
+    # 1.0 = fully performance-driven. Kept well below 1.0 by default so one
+    # agent's recent streak can't swing the fused vote on its own.
+    DYNAMIC_WEIGHT_BLEND: float = Field(default=0.3, alias="DYNAMIC_WEIGHT_BLEND")
+    # How long a fetched performance snapshot is reused before CEOAgent
+    # queries journal_v2.get_agent_performance() again — avoids a DB query
+    # on every single decision cycle.
+    DYNAMIC_WEIGHT_REFRESH_SECONDS: int = Field(default=300, alias="DYNAMIC_WEIGHT_REFRESH_SECONDS")
 
     # ── Market Scanner (V16 Phase 2, Part 1) ───────────────
     # Off by default: (1) this is a brand-new background thread making live
@@ -141,7 +161,7 @@ class Settings(BaseSettings):
     # that weight is simply excluded from the composite until a future
     # phase makes them computable; leaving them at 0 would misrepresent
     # their intended importance once they ARE wired in.
-    RANKER_FACTOR_WEIGHTS: Dict[str, float] = Field(
+    RANKER_FACTOR_WEIGHTS: dict[str, float] = Field(
         default_factory=lambda: {
             "trend": 10.0, "market_structure": 15.0, "momentum": 8.0,
             "volume": 7.0, "funding": 8.0, "open_interest": 7.0,

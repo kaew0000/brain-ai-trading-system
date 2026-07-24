@@ -149,9 +149,8 @@ class TestBearerTokens:
 
 class TestWebSocketAuth:
     def test_ws_events_rejects_without_credentials(self, auth_client):
-        with pytest.raises(Exception):
-            with auth_client.websocket_connect("/ws/events"):
-                pass
+        with pytest.raises(Exception), auth_client.websocket_connect("/ws/events"):
+            pass
 
     def test_ws_events_accepts_viewer_key(self, auth_client):
         with auth_client.websocket_connect(
@@ -161,11 +160,10 @@ class TestWebSocketAuth:
             assert msg["type"] == "init"
 
     def test_ws_command_rejects_viewer_key(self, auth_client):
-        with pytest.raises(Exception):
-            with auth_client.websocket_connect(
-                "/ws/command", headers={"X-API-Key": "test-viewer-key"}
-            ):
-                pass
+        with pytest.raises(Exception), auth_client.websocket_connect(
+            "/ws/command", headers={"X-API-Key": "test-viewer-key"}
+        ):
+            pass
 
     def test_ws_command_accepts_operator_key(self, auth_client):
         with auth_client.websocket_connect(

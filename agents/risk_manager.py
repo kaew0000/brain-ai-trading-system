@@ -6,7 +6,6 @@ Publishes events: TRADE_BLOCKED, DAILY_LIMIT_NEAR, CONSECUTIVE_LOSS, RISK_APPROV
 """
 
 from __future__ import annotations
-from typing import Optional
 from config.settings import settings
 from events.event_bus import risk_pub
 from utils.logger import get_logger
@@ -165,7 +164,7 @@ class RiskManagerAgent(BaseAgent):
             },
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         last = self._last
         if last is None: return "No risk assessment available yet."
         r = last.raw; q = question.lower()
