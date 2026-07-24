@@ -159,7 +159,7 @@ class SMCAnalyst(BaseAgent):
             },
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:  # noqa: F821
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         last = self._last
         if last is None:
             return "No SMC analysis available yet."
@@ -225,4 +225,3 @@ class SMCAnalyst(BaseAgent):
         return f"{base} → {signal}" if signal != "NEUTRAL" else f"{base} — no trade signal."
 
 
-from typing import Optional  # noqa: E402 (keep at bottom to avoid circular)

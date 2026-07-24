@@ -54,7 +54,7 @@ way it already handles any other ExecutionScheduler startup failure.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
 
 from execution.execution_orchestrator import ExecutionSignal
 from utils.logger import get_logger
@@ -64,7 +64,7 @@ logger = get_logger(__name__)
 # Matches execution/execution_orchestrator.py's own
 # SignalProvider = Callable[[str], Optional[ExecutionSignal]] exactly —
 # a factory returns anything satisfying that contract.
-StrategyFactory = Callable[..., Callable[[str], Optional[ExecutionSignal]]]
+StrategyFactory = Callable[..., Callable[[str], ExecutionSignal | None]]
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ class StrategyRegistry:
     """
 
     def __init__(self) -> None:
-        self._strategies: Dict[str, StrategySpec] = {}
+        self._strategies: dict[str, StrategySpec] = {}
 
     def register(
         self,
@@ -117,7 +117,7 @@ class StrategyRegistry:
         a build failure, this method doesn't swallow it."""
         return self.get(name).factory(**kwargs)
 
-    def list_strategies(self) -> List[dict]:
+    def list_strategies(self) -> list[dict]:
         return [
             {"name": s.name, "description": s.description}
             for s in sorted(self._strategies.values(), key=lambda s: s.name)
@@ -147,7 +147,7 @@ def build_strategy(name: str, **kwargs):
     return _REGISTRY.build(name, **kwargs)
 
 
-def list_strategies() -> List[dict]:
+def list_strategies() -> list[dict]:
     return _REGISTRY.list_strategies()
 
 
@@ -196,7 +196,7 @@ class SMCOIRegimeStrategyAdapter:
             data_provider=data_provider,
         )
 
-    def get_signal(self, symbol: str) -> Optional[ExecutionSignal]:
+    def get_signal(self, symbol: str) -> ExecutionSignal | None:
         direction, stop_loss, take_profit = self._strategy.generate_signal()
         if direction == 0:
             return None
@@ -213,7 +213,7 @@ class SMCOIRegimeStrategyAdapter:
             take_profit=take_profit,
         )
 
-    def __call__(self, symbol: str) -> Optional[ExecutionSignal]:
+    def __call__(self, symbol: str) -> ExecutionSignal | None:
         return self.get_signal(symbol)
 
 

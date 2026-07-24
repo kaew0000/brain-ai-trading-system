@@ -2,7 +2,6 @@
 from __future__ import annotations
 import threading
 from datetime import datetime, timezone
-from typing import Optional
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
@@ -103,7 +102,7 @@ class RecoveryEngine:
             logger.error(f"attempt_reconciliation_recovery failed: {exc}", exc_info=True)
             return f"error:{exc}"
 
-_re: Optional[RecoveryEngine] = None
+_re: RecoveryEngine | None = None
 _re_lock = threading.Lock()
 
 def get_recovery_engine() -> RecoveryEngine:

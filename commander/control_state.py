@@ -43,7 +43,6 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Optional
 
 from utils.logger import get_logger
 
@@ -53,7 +52,7 @@ logger = get_logger(__name__)
 @dataclass
 class ControlSnapshot:
     paused:             bool
-    paper_mode_forced:  Optional[bool]
+    paper_mode_forced:  bool | None
     updated_at:         str
 
     def to_dict(self) -> dict:
@@ -66,7 +65,7 @@ class TradingControlState:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._paused = False
-        self._paper_mode_forced: Optional[bool] = None
+        self._paper_mode_forced: bool | None = None
         self._updated_at = datetime.now(timezone.utc).isoformat()
 
     def pause(self) -> None:
@@ -85,13 +84,13 @@ class TradingControlState:
         with self._lock:
             return self._paused
 
-    def set_paper_mode_forced(self, value: Optional[bool]) -> None:
+    def set_paper_mode_forced(self, value: bool | None) -> None:
         with self._lock:
             self._paper_mode_forced = value
             self._updated_at = datetime.now(timezone.utc).isoformat()
         logger.info(f"TradingControlState: paper_mode_forced={value}")
 
-    def get_paper_mode_forced(self) -> Optional[bool]:
+    def get_paper_mode_forced(self) -> bool | None:
         with self._lock:
             return self._paper_mode_forced
 
@@ -112,7 +111,7 @@ class TradingControlState:
 
 # ── Singleton accessor (mirrors telemetry/reasoning/mission_tracker pattern) ──
 
-_global_state: Optional[TradingControlState] = None
+_global_state: TradingControlState | None = None
 _state_lock = threading.Lock()
 
 

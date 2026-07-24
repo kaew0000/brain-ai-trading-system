@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import math
 import threading
-from typing import List, Optional
 
 from config.settings import settings
 from paper.paper_account import PaperAccount
@@ -51,15 +50,15 @@ class PaperExecutionEngine:
 
     def __init__(
         self,
-        account:        Optional[PaperAccount] = None,
+        account:        PaperAccount | None = None,
         starting_usdt:  float = 1_000.0,
         max_open:       int   = 1,          # only 1 position at a time (same as live)
     ) -> None:
         self.account   = account or PaperAccount(balance=starting_usdt)
         self.max_open  = max_open
         self._lock     = threading.Lock()
-        self._open:    List[PaperPosition] = []
-        self._closed:  List[ClosedTrade]   = []
+        self._open:    list[PaperPosition] = []
+        self._closed:  list[ClosedTrade]   = []
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -121,15 +120,15 @@ class PaperExecutionEngine:
                 "margin_used": round(notional / self.account.leverage, 2),
             }
 
-    def tick(self, mark_price: float) -> List[ClosedTrade]:
+    def tick(self, mark_price: float) -> list[ClosedTrade]:
         """
         Feed a new mark price.  Closes any SL/TP-hit positions.
         Returns list of ClosedTrade objects (may be empty).
         """
-        closed_this_tick: List[ClosedTrade] = []
+        closed_this_tick: list[ClosedTrade] = []
 
         with self._lock:
-            still_open: List[PaperPosition] = []
+            still_open: list[PaperPosition] = []
             total_unrealised = 0.0
 
             for pos in self._open:
@@ -149,9 +148,9 @@ class PaperExecutionEngine:
 
         return closed_this_tick
 
-    def close_all(self, mark_price: float) -> List[ClosedTrade]:
+    def close_all(self, mark_price: float) -> list[ClosedTrade]:
         """Force-close all open positions (e.g. end of session)."""
-        closed: List[ClosedTrade] = []
+        closed: list[ClosedTrade] = []
         with self._lock:
             for pos in self._open:
                 ct = pos.close_manual(float(mark_price))
@@ -234,11 +233,11 @@ class PaperExecutionEngine:
 
     # ── State inspection ──────────────────────────────────────────────────────
 
-    def get_open_positions(self) -> List[dict]:
+    def get_open_positions(self) -> list[dict]:
         with self._lock:
             return [p.to_dict() for p in self._open]
 
-    def get_closed_trades(self, limit: int = 200) -> List[dict]:
+    def get_closed_trades(self, limit: int = 200) -> list[dict]:
         with self._lock:
             return [t.to_dict() for t in self._closed[-limit:]]
 
@@ -255,7 +254,7 @@ class PaperExecutionEngine:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _sharpe(pnls: List[float], periods_per_year: float = 365.0) -> float:
+def _sharpe(pnls: list[float], periods_per_year: float = 365.0) -> float:
     """Annualised Sharpe Ratio from a list of per-trade PnL values."""
     n = len(pnls)
     if n < 2:
@@ -268,7 +267,7 @@ def _sharpe(pnls: List[float], periods_per_year: float = 365.0) -> float:
     return round((mean / std) * math.sqrt(periods_per_year), 4)
 
 
-def _max_drawdown(pnls: List[float], starting_balance: float) -> tuple[float, float]:
+def _max_drawdown(pnls: list[float], starting_balance: float) -> tuple[float, float]:
     """
     Max drawdown in USDT and % from equity peak.
     starting_balance = account balance before the first trade.
@@ -280,8 +279,7 @@ def _max_drawdown(pnls: List[float], starting_balance: float) -> tuple[float, fl
 
     for pnl in pnls:
         equity += pnl
-        if equity > peak:
-            peak = equity
+        peak = max(peak, equity)
         dd     = peak - equity
         dd_pct = dd / peak if peak > 0 else 0.0
         if dd > max_dd:

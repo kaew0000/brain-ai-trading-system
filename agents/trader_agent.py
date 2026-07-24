@@ -6,7 +6,6 @@ Drives the TRADER NPC in the Pixel Office.
 """
 
 from __future__ import annotations
-from typing import Optional
 from events.event_bus import brain_pub
 from .base_agent import BaseAgent, AgentReport
 
@@ -66,7 +65,7 @@ class TraderAgent(BaseAgent):
             event_name = None if pos is None else "POSITION_STATUS",
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         last = self._last
         if last is None: return "No trader data yet."
         pos = last.raw.get("open_position"); q = question.lower()

@@ -31,7 +31,6 @@ import time
 import uuid
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Dict, Optional, Tuple
 
 import jwt  # PyJWT
 from fastapi import Request, WebSocket
@@ -48,7 +47,7 @@ class Role(IntEnum):
     ADMIN = 3
 
     @classmethod
-    def from_str(cls, name: str) -> "Role":
+    def from_str(cls, name: str) -> Role:
         try:
             return cls[name.strip().upper()]
         except (KeyError, AttributeError):
@@ -60,7 +59,7 @@ class AuthContext:
     principal: str            # masked API key, or JWT subject
     role: Role
     method: str                # "api_key" | "bearer" | "disabled"
-    jti: Optional[str] = None  # bearer tokens only
+    jti: str | None = None  # bearer tokens only
 
 
 class AuthError(Exception):
@@ -98,7 +97,7 @@ if settings.API_AUTH_ENABLED and not settings.API_KEYS:
 
 # ── API key lookup ──────────────────────────────────────────────────────
 
-def _lookup_api_key(raw_key: str) -> Optional[Role]:
+def _lookup_api_key(raw_key: str) -> Role | None:
     if not raw_key:
         return None
     for configured_key, role_name in settings.API_KEYS.items():
@@ -125,7 +124,7 @@ def _mask(raw_key: str) -> str:
 # in api/app.py) — doesn't survive a restart, which is fine since restart
 # also invalidates every in-flight token's usefulness for a live dashboard
 # session; the browser just re-authenticates.
-_revoked_jti: Dict[str, float] = {}
+_revoked_jti: dict[str, float] = {}
 
 
 def _cleanup_revoked() -> None:
@@ -143,7 +142,7 @@ def issue_token(role: Role, subject: str = "dashboard") -> dict:
     return {"token": token, "role": role.name, "expires_at": exp, "jti": jti}
 
 
-def issue_token_for_api_key(raw_key: str) -> Optional[dict]:
+def issue_token_for_api_key(raw_key: str) -> dict | None:
     """POST /api/auth/token — exchange an API key for a short-lived bearer token."""
     role = _lookup_api_key(raw_key)
     if role is None:
@@ -193,7 +192,7 @@ def rotate_token(bearer_token: str) -> dict:
 
 # ── Shared resolution (HTTP + WS) ────────────────────────────────────────
 
-def _extract_bearer(header_value: Optional[str]) -> Optional[str]:
+def _extract_bearer(header_value: str | None) -> str | None:
     if not header_value:
         return None
     parts = header_value.split(" ", 1)
@@ -202,7 +201,7 @@ def _extract_bearer(header_value: Optional[str]) -> Optional[str]:
     return None
 
 
-def _resolve(api_key: Optional[str], bearer: Optional[str]) -> AuthContext:
+def _resolve(api_key: str | None, bearer: str | None) -> AuthContext:
     if api_key:
         role = _lookup_api_key(api_key)
         if role is None:
@@ -220,7 +219,7 @@ def authenticate_request(request: Request) -> AuthContext:
     return _resolve(api_key, bearer)
 
 
-def _ws_credentials(ws: WebSocket) -> Tuple[Optional[str], Optional[str]]:
+def _ws_credentials(ws: WebSocket) -> tuple[str | None, str | None]:
     api_key = ws.headers.get("x-api-key")
     # Browsers can't set custom headers on the native WebSocket handshake,
     # so a bearer token may also arrive as ?token=... on the connect URL.
@@ -230,7 +229,7 @@ def _ws_credentials(ws: WebSocket) -> Tuple[Optional[str], Optional[str]]:
     return api_key, bearer
 
 
-async def enforce_ws_role(ws: WebSocket, min_role: Role) -> Optional[AuthContext]:
+async def enforce_ws_role(ws: WebSocket, min_role: Role) -> AuthContext | None:
     """Call BEFORE accepting the connection (i.e. before manager.connect()).
     Returns the AuthContext on success. On failure, closes the handshake
     and returns None — the caller must return immediately without

@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, date, timezone
-from typing import List, Optional
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -101,8 +100,8 @@ class TradeRecord:
         decision,           # DecisionResult or ConfidenceResult
         smc_m15,            # SMCSignals
         volume,             # VolumeSignals
-        execution: Optional[dict] = None,
-    ) -> "TradeRecord":
+        execution: dict | None = None,
+    ) -> TradeRecord:
         """Build a TradeRecord from pipeline objects.
 
         Accepts both:
@@ -287,7 +286,7 @@ class TradeJournal:
 
     # ── Read ──────────────────────────────────────────────────────────────
 
-    def get_open_trades(self) -> List[dict]:
+    def get_open_trades(self) -> list[dict]:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT * FROM trades WHERE result='OPEN' ORDER BY timestamp DESC"

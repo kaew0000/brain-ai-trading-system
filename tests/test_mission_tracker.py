@@ -346,20 +346,18 @@ class TestMissionsWebSocket:
     def test_ws_missions_sends_init_when_empty(self):
         from api.app import app
         from fastapi.testclient import TestClient
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/missions") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert msg["data"] == []
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/missions") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert msg["data"] == []
 
     def test_ws_missions_sends_init_with_active_mission(self):
         from api.app import app
         from missions.mission_tracker import get_mission_tracker
         from fastapi.testclient import TestClient
         get_mission_tracker().create(symbol="BTCUSDT", direction="LONG", confidence=70.0)
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/missions") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert len(msg["data"]) == 1
-                assert msg["data"][0]["direction"] == "LONG"
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/missions") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert len(msg["data"]) == 1
+            assert msg["data"][0]["direction"] == "LONG"

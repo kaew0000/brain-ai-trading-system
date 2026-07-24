@@ -27,7 +27,15 @@ def build_agent_layer(risk_engine=None, journal=None) -> dict:
 
 
 __all__ = [
-    "BaseAgent","AgentReport","SMCAnalyst","FuturesAnalyst","RegimeAnalyst",
-    "RiskManagerAgent","TraderAgent","JournalAnalyst","CEOAgent","CEODecision",
+    "AgentReport",
+    "BaseAgent",
+    "CEOAgent",
+    "CEODecision",
+    "FuturesAnalyst",
+    "JournalAnalyst",
+    "RegimeAnalyst",
+    "RiskManagerAgent",
+    "SMCAnalyst",
+    "TraderAgent",
     "build_agent_layer",
 ]

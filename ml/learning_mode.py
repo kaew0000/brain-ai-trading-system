@@ -11,12 +11,11 @@ Behavior (per spec):
 """
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Optional
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def run_nightly_retrain(min_rows: int = 50, symbol: Optional[str] = None) -> dict:
+def run_nightly_retrain(min_rows: int = 50, symbol: str | None = None) -> dict:
     """
     Full retrain + conditional promotion cycle.
     Safe to call from a scheduler (never raises — all errors logged and

@@ -15,7 +15,6 @@ formatting) from structured logging, not a bypass of it.
 """
 from __future__ import annotations
 
-from typing import List, Optional
 
 from rich.console import Console
 from rich.table import Table
@@ -69,7 +68,7 @@ _STATUS_STYLE = {
 }
 
 
-def results_table(results: List) -> None:
+def results_table(results: list) -> None:
     """Renders a list of tools.github_actions.ImportResult as a table.
     Accepts any object with .bundle_path/.branch/.sha/.status/.reason
     attributes (duck-typed rather than importing ImportResult directly,
@@ -101,7 +100,7 @@ def results_table(results: List) -> None:
     logger.info("ui: import summary — %s", summary or "no bundles processed")
 
 
-def history_table(records: List, limit: Optional[int] = 20) -> None:
+def history_table(records: list, limit: int | None = 20) -> None:
     """Renders tools.history.BundleRecord entries, most recent first."""
     table = Table(title="Bundle History", show_lines=False)
     table.add_column("Imported At")

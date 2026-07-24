@@ -21,7 +21,6 @@ VIEWER role — nothing in api/auth.py needed changing.
 """
 from __future__ import annotations
 
-from typing import Optional
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
@@ -48,7 +47,7 @@ def _ok(data) -> JSONResponse:
     return JSONResponse(content={"ok": True, "data": data})
 
 
-def _latest_row() -> Optional[dict]:
+def _latest_row() -> dict | None:
     rows = portfolio_history.get_latest_decisions(limit=1)
     return rows[0] if rows else None
 
@@ -71,8 +70,8 @@ async def portfolio_decision_latest():
 async def portfolio_history_endpoint(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    symbol: Optional[str] = Query(default=None),
-    sector: Optional[str] = Query(default=None),
+    symbol: str | None = Query(default=None),
+    sector: str | None = Query(default=None),
 ):
     """Paginated decision-cycle history, newest first. symbol/sector are
     optional filters (see portfolio_history.query_decisions for exactly

@@ -46,7 +46,6 @@ graph = build_agent_graph(None)          # falls back to static topology
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional
 
 # Static fallback topology — used when the live agent_layer isn't available
 # yet (e.g. dashboard loaded before the bot has finished booting). Keys and
@@ -73,7 +72,7 @@ _CEO_NODE_ID = "ceo"
 _HUB_RADIUS  = 280   # px — spoke distance from CEO in the default layout
 
 
-def build_agent_graph(agent_layer: Optional[dict] = None) -> dict:
+def build_agent_graph(agent_layer: dict | None = None) -> dict:
     """
     Build the agent dependency graph in React Flow node/edge format.
 
@@ -96,9 +95,9 @@ def build_agent_graph(agent_layer: Optional[dict] = None) -> dict:
 
 def _build_from_live_layer(agent_layer: dict) -> dict:
     ceo = agent_layer["ceo"]
-    weights: Dict[str, float] = dict(getattr(ceo, "WEIGHTS", _STATIC_WEIGHTS))
+    weights: dict[str, float] = dict(getattr(ceo, "WEIGHTS", _STATIC_WEIGHTS))
 
-    spoke_keys = [k for k in agent_layer.keys() if k != "ceo"]
+    spoke_keys = [k for k in agent_layer if k != "ceo"]
     # Stable ordering: weighted agents first (by weight desc), then unweighted
     spoke_keys.sort(key=lambda k: (-weights.get(k, 0.0), k))
 

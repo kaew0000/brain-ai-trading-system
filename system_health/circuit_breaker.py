@@ -31,7 +31,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Optional
 
 from utils.logger import get_logger
 
@@ -61,9 +60,9 @@ class BreakerSnapshot:
     state:            str
     failure_count:    int
     success_count:    int
-    last_failure:     Optional[str]
+    last_failure:     str | None
     last_state_change: str
-    recovery_in_s:    Optional[float]
+    recovery_in_s:    float | None
 
 
 class CircuitBreaker:
@@ -94,13 +93,13 @@ class CircuitBreaker:
         self._state            = BreakerState.CLOSED
         self._failure_count    = 0
         self._success_count    = 0
-        self._last_failure_at: Optional[float] = None
+        self._last_failure_at: float | None = None
         self._state_changed_at = time.monotonic()
-        self._last_failure_msg: Optional[str]  = None
+        self._last_failure_msg: str | None  = None
 
     # ── Context manager ───────────────────────────────────────────────────────
 
-    def __enter__(self) -> "CircuitBreaker":
+    def __enter__(self) -> CircuitBreaker:
         self._pre_call()
         return self
 
@@ -188,7 +187,7 @@ class CircuitBreaker:
     def snapshot(self) -> dict:
         with self._lock:
             now = datetime.now(timezone.utc)
-            recovery_in: Optional[float] = None
+            recovery_in: float | None = None
             if self._state == BreakerState.OPEN and self._last_failure_at:
                 elapsed = time.monotonic() - self._last_failure_at
                 remaining = self._recovery_timeout - elapsed
@@ -217,7 +216,7 @@ class CircuitBreaker:
 
 # ── Global registry ───────────────────────────────────────────────────────────
 
-_registry: Dict[str, CircuitBreaker] = {}
+_registry: dict[str, CircuitBreaker] = {}
 _registry_lock = threading.Lock()
 
 
@@ -242,7 +241,7 @@ def get_breaker(
         return _registry[name]
 
 
-def all_snapshots() -> Dict[str, dict]:
+def all_snapshots() -> dict[str, dict]:
     """Return snapshots for all registered circuit breakers."""
     with _registry_lock:
         breakers = list(_registry.values())

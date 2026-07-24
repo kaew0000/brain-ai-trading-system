@@ -46,9 +46,9 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import List, Optional
 
 from utils.logger import get_logger
+import builtins
 
 logger = get_logger(__name__)
 
@@ -74,7 +74,7 @@ class Mission:
     confidence: float = 0.0
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    history:    List[dict] = field(default_factory=list)
+    history:    list[dict] = field(default_factory=list)
     meta:       dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -90,14 +90,14 @@ class MissionTracker:
 
     def __init__(self) -> None:
         self._lock:     threading.Lock = threading.Lock()
-        self._missions: "OrderedDict[str, Mission]" = OrderedDict()
+        self._missions: OrderedDict[str, Mission] = OrderedDict()
 
     def create(
         self,
         symbol:     str,
         direction:  str,
         confidence: float = 0.0,
-        meta:       Optional[dict] = None,
+        meta:       dict | None = None,
     ) -> Mission:
         """Create a new mission at stage=SIGNAL_FOUND. Thread-safe."""
         mission_id = uuid.uuid4().hex[:12]
@@ -124,7 +124,7 @@ class MissionTracker:
         mission_id:  str,
         stage:       str,
         note:        str = "",
-        meta_update: Optional[dict] = None,
+        meta_update: dict | None = None,
     ) -> Mission:
         """
         Transition a mission to a new stage.
@@ -166,11 +166,11 @@ class MissionTracker:
         logger.info(f"Mission {mission_id} → {stage}" + (f" ({note})" if note else ""))
         return mission
 
-    def get(self, mission_id: str) -> Optional[Mission]:
+    def get(self, mission_id: str) -> Mission | None:
         with self._lock:
             return self._missions.get(mission_id)
 
-    def list(self, stage: Optional[str] = None, limit: int = 50) -> List[dict]:
+    def list(self, stage: str | None = None, limit: int = 50) -> builtins.list[dict]:
         """Return missions newest-first, optionally filtered by stage."""
         with self._lock:
             missions = list(self._missions.values())
@@ -179,7 +179,7 @@ class MissionTracker:
             missions = [m for m in missions if m.stage == stage]
         return [m.to_dict() for m in missions[:limit]]
 
-    def get_active(self) -> List[dict]:
+    def get_active(self) -> builtins.list[dict]:
         """Return all missions not yet CLOSED, newest-first."""
         with self._lock:
             missions = [m for m in self._missions.values() if m.stage != _CLOSED]
@@ -198,7 +198,7 @@ class MissionTracker:
 
 # ── Singleton accessor (mirrors events.event_bus pattern) ─────────────────────
 
-_global_tracker: Optional[MissionTracker] = None
+_global_tracker: MissionTracker | None = None
 _tracker_lock = threading.Lock()
 
 

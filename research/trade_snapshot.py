@@ -1,6 +1,5 @@
 """research/trade_snapshot.py + dataset_builder.py — Phase 3B capture & export"""
 from __future__ import annotations
-from typing import Optional
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
@@ -11,9 +10,9 @@ def _sf(v, fb=None, default=0.0):
         except Exception: continue
     return default
 
-def build_feature_vector(mission=None, trade_row: Optional[dict]=None,
-                          market_context: Optional[dict]=None,
-                          intelligence: Optional[dict]=None) -> dict:
+def build_feature_vector(mission=None, trade_row: dict | None=None,
+                          market_context: dict | None=None,
+                          intelligence: dict | None=None) -> dict:
     try:
         mm = (mission.meta if mission is not None else {}) or {}
         tr = trade_row or {}; mc = market_context or {}; intel = intelligence or {}

@@ -1,22 +1,27 @@
 line-length = 120
 
 [lint]
+# Pin the enabled rule *categories* explicitly instead of relying on
+# ruff's default set. ruff 0.16.0 (2026-07-23) expanded its stable
+# default from 59 rules to 413 (BLE001, B017, TRY203, I001, G201,
+# RUF059, S110, RUF013, and dozens more), which surfaced ~860
+# pre-existing findings repo-wide overnight with zero code changes on
+# our end — CI (unpinned `pip install ruff`) picked up 0.16.0 while
+# local dev envs were still on 0.15.19, so `ruff check` silently
+# diverged between the two. This repo has never been linted against
+# that expanded set and doesn't opt into it deliberately here; a real
+# audit of broad-except handling, logging, etc. is a legitimate
+# follow-up but is its own project, not something to force through
+# whatever PR happens to get unlucky with a CI tool version bump.
+# This restores ruff's pre-0.16 default selection verbatim (see
+# https://github.com/astral-sh/ruff/blob/main/CHANGELOG.md#0152),
+# so `ruff check` stops drifting every time ruff ships new defaults.
+select = ["E4", "E7", "E9", "F"]
 ignore = [
     "E701",
     "E702",
     "E402",
     "F841",
-    # I001 ("Import block is un-sorted or un-formatted"): this repo has
-    # never enforced isort-style ordering, and a recent ruff release
-    # apparently added "I" to its DEFAULT rule set (this file never
-    # explicitly selected or excluded it either way). That surfaced 201
-    # pre-existing violations across the whole codebase overnight, with
-    # zero code changes on our end — confirmed via `ruff check . --select
-    # I001` on main itself. Ignoring here rather than reformatting ~50+
-    # unrelated files in an unrelated PR; a deliberate repo-wide import
-    # sort is a fine follow-up task on its own, just not bundled into
-    # whatever PR happens to get unlucky with a CI tool version bump.
-    "I001",
 ]
 
 exclude = [

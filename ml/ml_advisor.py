@@ -17,7 +17,6 @@ MLAdvisor CANNOT:
 from __future__ import annotations
 import threading
 from datetime import datetime, timezone
-from typing import Optional
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
@@ -29,7 +28,7 @@ MAX_CONFIDENCE_REDUCE = 20.0   # percentage points
 class MLAdvisor:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._last_prediction: Optional[dict] = None
+        self._last_prediction: dict | None = None
         self._calibrator = None
         self._calibrator_loaded = False
 
@@ -149,7 +148,7 @@ class MLAdvisor:
         except Exception as exc:
             logger.debug(f"MLAdvisor._persist_prediction failed: {exc}")
 
-    def get_last_prediction(self) -> Optional[dict]:
+    def get_last_prediction(self) -> dict | None:
         with self._lock:
             return dict(self._last_prediction) if self._last_prediction else None
 
@@ -172,7 +171,7 @@ class MLAdvisor:
 
 
 # ── Singleton ────────────────────────────────────────────────────────────────
-_advisor: Optional[MLAdvisor] = None
+_advisor: MLAdvisor | None = None
 _advisor_lock = threading.Lock()
 
 

@@ -48,7 +48,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -94,7 +94,7 @@ _STARTED_AT = datetime.now(timezone.utc)
 
 # ── Shared state (set by main.py or paper runner) ─────────────────────────────
 # These are set at runtime by the caller; API reads them safely.
-_state: Dict[str, Any] = {
+_state: dict[str, Any] = {
     "latest_decision":   None,   # ConfidenceResult or dict
     "latest_context":    None,   # market_context dict
     "paper_engine":      None,   # PaperExecutionEngine instance
@@ -124,7 +124,7 @@ class ConnectionManager:
     """Fan-out broadcaster for a single WS channel."""
 
     def __init__(self) -> None:
-        self._clients: Set[WebSocket] = set()
+        self._clients: set[WebSocket] = set()
 
     async def connect(self, ws: WebSocket) -> None:
         await ws.accept()
@@ -136,7 +136,7 @@ class ConnectionManager:
         logger.debug(f"WS client disconnected ({len(self._clients)} remaining)")
 
     async def broadcast(self, data: dict) -> None:
-        dead: List[WebSocket] = []
+        dead: list[WebSocket] = []
         msg = json.dumps(data)
         for client in list(self._clients):
             try:
@@ -418,8 +418,8 @@ else:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Injected instances (set by main.py _start_api_server)
-_JOURNAL_INSTANCE: "TradeJournalV2 | None" = None
-_BUS_INSTANCE:     "Any | None"            = None
+_JOURNAL_INSTANCE: TradeJournalV2 | None = None
+_BUS_INSTANCE:     Any | None            = None
 _COMMANDER = CommanderService()   # v14 Phase 2.5 — stateless, safe as module singleton
 
 
@@ -709,7 +709,7 @@ async def market_intelligence(refresh_fear_greed: bool = Query(default=False)):
 
 @app.get("/api/missions")
 async def missions(
-    stage:       Optional[str] = Query(default=None),
+    stage:       str | None = Query(default=None),
     limit:       int  = Query(default=50, ge=1, le=500),
     active_only: bool = Query(default=False),
 ):
@@ -782,8 +782,8 @@ async def regime(
 @app.get("/api/events")
 async def events(
     limit:  int          = Query(default=50,  ge=1, le=200),
-    agent:  Optional[str] = Query(default=None),
-    event:  Optional[str] = Query(default=None),
+    agent:  str | None = Query(default=None),
+    event:  str | None = Query(default=None),
 ):
     """Recent EventBus messages with optional agent/event filter."""
     bus  = get_event_bus()
@@ -1178,7 +1178,7 @@ async def agents_telemetry(spec_only: bool = Query(default=False)):
 @app.get("/api/agents/reasoning")
 async def agents_reasoning(
     limit: int = Query(default=50, ge=1, le=500),
-    agent: Optional[str] = Query(default=None),
+    agent: str | None = Query(default=None),
     latest_only: bool = Query(default=False),
 ):
     """

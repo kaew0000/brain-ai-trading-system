@@ -29,7 +29,6 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple
 
 _HISTORY_SIZE = 500  # ring buffer, mirrors events/event_bus.py's _RING_BUFFER_SIZE choice
 
@@ -56,13 +55,13 @@ class ExecutionRecord:
     status:         ExecutionStatus = ExecutionStatus.PENDING
     retry_count:    int = 0
     created_at:     float = field(default_factory=time.time)
-    started_at:     Optional[float] = None
-    finished_at:    Optional[float] = None
-    error:          Optional[str] = None
-    result:         Optional[dict] = None
+    started_at:     float | None = None
+    finished_at:    float | None = None
+    error:          str | None = None
+    result:         dict | None = None
 
     @property
-    def latency_seconds(self) -> Optional[float]:
+    def latency_seconds(self) -> float | None:
         if self.started_at is None or self.finished_at is None:
             return None
         return max(0.0, self.finished_at - self.started_at)
@@ -92,9 +91,9 @@ class ExecutionState:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._records: Dict[str, ExecutionRecord] = {}
+        self._records: dict[str, ExecutionRecord] = {}
         self._order: deque[str] = deque(maxlen=_HISTORY_SIZE)  # eviction order
-        self._executed_keys: Set[Tuple[str, str]] = set()  # (batch_id, symbol)
+        self._executed_keys: set[tuple[str, str]] = set()  # (batch_id, symbol)
 
     # ── Idempotency ──────────────────────────────────────────────────────
 
@@ -123,7 +122,7 @@ class ExecutionState:
             self._records[execution_id] = record
         return record
 
-    def start(self, execution_id: str) -> Optional[ExecutionRecord]:
+    def start(self, execution_id: str) -> ExecutionRecord | None:
         """Transition an enqueued PENDING record to RUNNING. Returns None
         (and does nothing) if the record was cancelled while pending, or
         doesn't exist — callers must check for None and skip the engine
@@ -187,15 +186,15 @@ class ExecutionState:
 
     # ── Query ────────────────────────────────────────────────────────────
 
-    def get(self, execution_id: str) -> Optional[ExecutionRecord]:
+    def get(self, execution_id: str) -> ExecutionRecord | None:
         with self._lock:
             return self._records.get(execution_id)
 
-    def all_records(self) -> List[ExecutionRecord]:
+    def all_records(self) -> list[ExecutionRecord]:
         with self._lock:
             return list(self._records.values())
 
-    def by_status(self, status: ExecutionStatus) -> List[ExecutionRecord]:
+    def by_status(self, status: ExecutionStatus) -> list[ExecutionRecord]:
         with self._lock:
             return [r for r in self._records.values() if r.status == status]
 
@@ -243,7 +242,7 @@ class ExecutionState:
 # exactly — same problem (one process-wide instance, but tests need a
 # fresh one), same solution, no new idiom invented.
 
-_global_state: Optional[ExecutionState] = None
+_global_state: ExecutionState | None = None
 _state_lock = threading.Lock()
 
 

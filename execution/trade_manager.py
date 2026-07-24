@@ -19,7 +19,6 @@ from __future__ import annotations
 import math
 import time
 import uuid
-from typing import Optional
 
 from binance.um_futures import UMFutures
 from binance.error import ClientError
@@ -75,7 +74,7 @@ def _is_duplicate_order_error(exc: ClientError) -> bool:
 
 class TradeManager:
 
-    def __init__(self, data_provider, symbol: Optional[str] = None) -> None:
+    def __init__(self, data_provider, symbol: str | None = None) -> None:
         """
         Parameters
         ----------
@@ -224,8 +223,8 @@ class TradeManager:
 
     @retry_api_call(retries=5, delay=3.0, breaker=_TRADE_BREAKER)
     def place_market_order(
-        self, direction: str, quantity: float, client_order_id: Optional[str] = None
-    ) -> Optional[dict]:
+        self, direction: str, quantity: float, client_order_id: str | None = None
+    ) -> dict | None:
         """
         client_order_id should be generated ONCE by the caller (execute_trade)
         and passed in explicitly so every retry attempt of this same logical
@@ -275,8 +274,8 @@ class TradeManager:
     @retry_api_call(retries=5, delay=3.0, breaker=_TRADE_BREAKER)
     def place_stop_loss(
         self, direction: str, quantity: float, stop_price: float,
-        client_order_id: Optional[str] = None,
-    ) -> Optional[dict]:
+        client_order_id: str | None = None,
+    ) -> dict | None:
         """
         Place SL with three-tier fallback to handle exchange limitations:
           1. STOP_MARKET closePosition=True workingType=MARK_PRICE  (preferred)
@@ -389,8 +388,8 @@ class TradeManager:
     @retry_api_call(retries=5, delay=3.0, breaker=_TRADE_BREAKER)
     def place_take_profit(
         self, direction: str, quantity: float, tp_price: float,
-        client_order_id: Optional[str] = None,
-    ) -> Optional[dict]:
+        client_order_id: str | None = None,
+    ) -> dict | None:
         """
         Place TP with three-tier fallback (mirrors place_stop_loss strategy).
           1. TAKE_PROFIT_MARKET closePosition=True workingType=MARK_PRICE
@@ -506,8 +505,8 @@ class TradeManager:
 
     @retry_api_call(retries=2, delay=2.0)
     def close_position(
-        self, direction: str, quantity: float, client_order_id: Optional[str] = None
-    ) -> Optional[dict]:
+        self, direction: str, quantity: float, client_order_id: str | None = None
+    ) -> dict | None:
         """Market close with reduceOnly. See place_market_order for the
         idempotency contract — pass a stable client_order_id from the caller
         when this is part of a retried/critical path (e.g. SL-failed

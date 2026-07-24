@@ -49,7 +49,6 @@ import threading
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
 
 import pandas as pd
 import ta
@@ -78,10 +77,10 @@ class SymbolSnapshot:
     quote_volume_24h: float
     funding_rate: float
     spread_pct: float
-    open_interest: Optional[float]   # None until this symbol gets a detail pass
-    atr_pct: Optional[float]         # None until this symbol gets a detail pass
+    open_interest: float | None   # None until this symbol gets a detail pass
+    atr_pct: float | None         # None until this symbol gets a detail pass
     scanned_at: float                # unix epoch — bulk pass time
-    detail_at: Optional[float]       # unix epoch of last detail refresh, None if never
+    detail_at: float | None       # unix epoch of last detail refresh, None if never
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -105,10 +104,10 @@ class MarketScanner:
     def __init__(
         self,
         data_provider,
-        interval_s: Optional[int] = None,
-        detail_top_n: Optional[int] = None,
-        min_quote_volume: Optional[float] = None,
-        universe_refresh_s: Optional[int] = None,
+        interval_s: int | None = None,
+        detail_top_n: int | None = None,
+        min_quote_volume: float | None = None,
+        universe_refresh_s: int | None = None,
     ) -> None:
         self._client = data_provider.market_client
 
@@ -122,15 +121,15 @@ class MarketScanner:
         )
 
         self._lock = threading.RLock()
-        self._snapshots: Dict[str, SymbolSnapshot] = {}
-        self._universe: List[str] = []
+        self._snapshots: dict[str, SymbolSnapshot] = {}
+        self._universe: list[str] = []
         self._universe_refreshed_at: float = 0.0
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._cycle_count = 0
-        self._last_error: Optional[str] = None
-        self._last_cycle_duration: Optional[float] = None
+        self._last_error: str | None = None
+        self._last_cycle_duration: float | None = None
         self._prune_every_n_cycles = max(1, int(3600 / max(self._interval, 1)))  # ~hourly
 
     # ── Lifecycle ────────────────────────────────────────────────────────
@@ -170,7 +169,7 @@ class MarketScanner:
 
     # ── One scan cycle ──────────────────────────────────────────────────
 
-    def run_cycle(self) -> Dict[str, SymbolSnapshot]:
+    def run_cycle(self) -> dict[str, SymbolSnapshot]:
         """
         Runs one full scan cycle synchronously and returns the new
         snapshot map. Safe to call directly (e.g. from a test, or an
@@ -218,7 +217,7 @@ class MarketScanner:
                 raise  # no fallback on the very first call — nothing to scan
 
     @retry_api_call(retries=2, delay=1.0, backoff=2.0)
-    def _fetch_universe(self) -> List[str]:
+    def _fetch_universe(self) -> list[str]:
         """USDT-margined PERPETUAL contracts currently TRADING."""
         with _SCANNER_BREAKER:
             info = self._client.exchange_info()
@@ -237,7 +236,7 @@ class MarketScanner:
     # ── Bulk pass (full universe, 3 calls total) ────────────────────────
 
     @retry_api_call(retries=2, delay=1.0, backoff=2.0)
-    def _fetch_bulk(self) -> Dict[str, dict]:
+    def _fetch_bulk(self) -> dict[str, dict]:
         with _SCANNER_BREAKER:
             tickers = self._client.ticker_24hr_price_change()
             marks = self._client.mark_price()
@@ -248,7 +247,7 @@ class MarketScanner:
         mark_by_symbol = {m["symbol"]: m for m in marks if m.get("symbol") in universe}
         book_by_symbol = {b["symbol"]: b for b in books if b.get("symbol") in universe}
 
-        out: Dict[str, dict] = {}
+        out: dict[str, dict] = {}
         for symbol in self._universe:
             t = ticker_by_symbol.get(symbol, {})
             m = mark_by_symbol.get(symbol, {})
@@ -275,7 +274,7 @@ class MarketScanner:
 
     # ── Detail pass (top-N candidates only) ─────────────────────────────
 
-    def _select_detail_candidates(self, bulk: Dict[str, dict]) -> List[str]:
+    def _select_detail_candidates(self, bulk: dict[str, dict]) -> list[str]:
         eligible = [
             (symbol, d["quote_volume_24h"])
             for symbol, d in bulk.items()
@@ -284,8 +283,8 @@ class MarketScanner:
         eligible.sort(key=lambda pair: pair[1], reverse=True)
         return [symbol for symbol, _ in eligible[: self._detail_top_n]]
 
-    def _fetch_details(self, symbols: List[str]) -> Dict[str, dict]:
-        out: Dict[str, dict] = {}
+    def _fetch_details(self, symbols: list[str]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
         for symbol in symbols:
             try:
                 out[symbol] = self._fetch_one_detail(symbol)
@@ -308,9 +307,9 @@ class MarketScanner:
 
     # ── Merge ────────────────────────────────────────────────────────────
 
-    def _merge(self, bulk: Dict[str, dict], details: Dict[str, dict]) -> Dict[str, SymbolSnapshot]:
+    def _merge(self, bulk: dict[str, dict], details: dict[str, dict]) -> dict[str, SymbolSnapshot]:
         now = time.time()
-        merged: Dict[str, SymbolSnapshot] = {}
+        merged: dict[str, SymbolSnapshot] = {}
         for symbol, d in bulk.items():
             detail = details.get(symbol)
             prev = self._snapshots.get(symbol)
@@ -330,7 +329,7 @@ class MarketScanner:
 
     # ── Persistence ──────────────────────────────────────────────────────
 
-    def _persist(self, merged: Dict[str, SymbolSnapshot], duration: float) -> None:
+    def _persist(self, merged: dict[str, SymbolSnapshot], duration: float) -> None:
         try:
             detail_count = sum(1 for s in merged.values() if s.detail_at is not None)
             payload = json.dumps({sym: s.to_dict() for sym, s in merged.items()})
@@ -365,12 +364,12 @@ class MarketScanner:
 
     # ── Public read API ──────────────────────────────────────────────────
 
-    def get_snapshots(self) -> Dict[str, SymbolSnapshot]:
+    def get_snapshots(self) -> dict[str, SymbolSnapshot]:
         """Thread-safe read of the latest full snapshot map."""
         with self._lock:
             return dict(self._snapshots)
 
-    def get_snapshot(self, symbol: str) -> Optional[SymbolSnapshot]:
+    def get_snapshot(self, symbol: str) -> SymbolSnapshot | None:
         with self._lock:
             return self._snapshots.get(symbol)
 
@@ -398,7 +397,7 @@ def _safe_float(value, default: float = 0.0) -> float:
         return default
 
 
-def _atr_pct_from_klines(raw_klines: list) -> Optional[float]:
+def _atr_pct_from_klines(raw_klines: list) -> float | None:
     """
     ATR as a percentage of price, same definition RegimeEngine already
     uses elsewhere in this codebase (ta.volatility.AverageTrueRange,

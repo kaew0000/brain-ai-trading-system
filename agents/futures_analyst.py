@@ -17,7 +17,6 @@ Publishes specific events to EventBus:
 
 from __future__ import annotations
 
-from typing import Optional
 
 from events.event_bus import futures_pub
 from .base_agent import BaseAgent, AgentReport
@@ -151,7 +150,7 @@ class FuturesAnalyst(BaseAgent):
             },
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         last = self._last
         if last is None:
             return "No futures analysis available yet."

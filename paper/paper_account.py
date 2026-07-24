@@ -10,7 +10,6 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -58,7 +57,7 @@ class PaperAccount:
         self._day_date          = datetime.now(timezone.utc).date()
 
         # Equity curve (one point per closed trade)
-        self._equity_curve: List[dict] = []
+        self._equity_curve: list[dict] = []
 
         logger.info(
             f"PaperAccount ready | balance={self._balance:.2f} U "
@@ -201,7 +200,7 @@ class PaperAccount:
         }
 
     @property
-    def equity_curve(self) -> List[dict]:
+    def equity_curve(self) -> list[dict]:
         with self._lock:
             return list(self._equity_curve)
 

@@ -22,7 +22,7 @@ capital_manager.py):
 """
 from __future__ import annotations
 
-from typing import Iterable, Optional, Tuple
+from collections.abc import Iterable
 
 from config.correlation_table import cluster_of, super_group_of
 from portfolio.portfolio_models import CorrelationTier
@@ -93,14 +93,14 @@ class CorrelationEngine:
         return _PENALTY[tier]
 
     @classmethod
-    def pairwise(cls, symbol_a: str, symbol_b: str) -> Tuple[CorrelationTier, float]:
+    def pairwise(cls, symbol_a: str, symbol_b: str) -> tuple[CorrelationTier, float]:
         tier = cls.get_tier(symbol_a, symbol_b)
         return tier, cls.get_penalty(tier)
 
     @classmethod
     def worst_against_portfolio(
         cls, candidate_symbol: str, held_symbols: Iterable[str],
-    ) -> Tuple[CorrelationTier, float, Optional[str]]:
+    ) -> tuple[CorrelationTier, float, str | None]:
         """
         The tier/penalty a candidate should actually be scored on: its
         WORST (most correlated) pairing against anything already held or

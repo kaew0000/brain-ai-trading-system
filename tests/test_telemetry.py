@@ -218,21 +218,19 @@ class TestTelemetryTimer:
         i.e. BEFORE __exit__ has run."""
         from telemetry.agent_telemetry import telemetry_timer
         captured = {}
-        with pytest.raises(ValueError):
-            with telemetry_timer() as t:
-                time.sleep(0.01)
-                try:
-                    raise ValueError("boom")
-                except ValueError:
-                    captured["latency_ms"] = t.latency_ms
-                    raise
+        with pytest.raises(ValueError), telemetry_timer() as t:
+            time.sleep(0.01)
+            try:
+                raise ValueError("boom")
+            except ValueError:
+                captured["latency_ms"] = t.latency_ms
+                raise
         assert captured["latency_ms"] >= 9.0
 
     def test_does_not_suppress_exceptions(self):
         from telemetry.agent_telemetry import telemetry_timer
-        with pytest.raises(RuntimeError):
-            with telemetry_timer():
-                raise RuntimeError("should propagate")
+        with pytest.raises(RuntimeError), telemetry_timer():
+            raise RuntimeError("should propagate")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -437,20 +435,18 @@ class TestAgentsWebSocket:
         always be sent, even when the telemetry registry is empty."""
         from api.app import app
         from fastapi.testclient import TestClient
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/agents") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert msg["data"] == {}
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/agents") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert msg["data"] == {}
 
     def test_ws_agents_sends_init_with_data(self):
         from api.app import app
         from telemetry.agent_telemetry import get_telemetry_registry
         from fastapi.testclient import TestClient
         get_telemetry_registry().record(agent="WS_TEST_AGENT", status="OK", confidence=77.0)
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/agents") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert "WS_TEST_AGENT" in msg["data"]
-                assert msg["data"]["WS_TEST_AGENT"]["confidence"] == 77.0
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/agents") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert "WS_TEST_AGENT" in msg["data"]
+            assert msg["data"]["WS_TEST_AGENT"]["confidence"] == 77.0

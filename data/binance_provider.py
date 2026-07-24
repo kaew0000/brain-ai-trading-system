@@ -32,7 +32,6 @@ from __future__ import annotations
 import time
 import types
 import pandas as pd
-from typing import Optional
 
 from binance.um_futures import UMFutures
 from binance.error import ClientError
@@ -194,7 +193,7 @@ class BinanceDataProvider:
     # ─────────────────────────────────────────────────────────────────────
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_ohlcv(self, timeframe: str, limit: int | None = None, symbol: Optional[str] = None) -> pd.DataFrame:
+    def get_ohlcv(self, timeframe: str, limit: int | None = None, symbol: str | None = None) -> pd.DataFrame:
         """Fetch OHLCV candlestick data for a single timeframe.
 
         symbol: V16 Phase 2F — explicit override for multi-symbol callers
@@ -217,7 +216,7 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_mark_price(self, symbol: Optional[str] = None) -> float:
+    def get_mark_price(self, symbol: str | None = None) -> float:
         """Return current mark price."""
         target_symbol = symbol or self.symbol
         try:
@@ -234,7 +233,7 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_current_open_interest(self, symbol: Optional[str] = None) -> float:
+    def get_current_open_interest(self, symbol: str | None = None) -> float:
         """Return current open interest (contracts)."""
         target_symbol = symbol or self.symbol
         try:
@@ -251,7 +250,7 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_oi_history(self, period: str = "5m", limit: int = 30, symbol: Optional[str] = None) -> list:
+    def get_oi_history(self, period: str = "5m", limit: int = 30, symbol: str | None = None) -> list:
         target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
@@ -266,7 +265,7 @@ class BinanceDataProvider:
             return []
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_funding_rate(self, symbol: Optional[str] = None) -> float:
+    def get_funding_rate(self, symbol: str | None = None) -> float:
         target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
@@ -281,7 +280,7 @@ class BinanceDataProvider:
             return 0.0
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_long_short_ratio(self, symbol: Optional[str] = None) -> dict:
+    def get_long_short_ratio(self, symbol: str | None = None) -> dict:
         target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
@@ -296,7 +295,7 @@ class BinanceDataProvider:
             return {}
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_taker_ratio(self, symbol: Optional[str] = None) -> dict:
+    def get_taker_ratio(self, symbol: str | None = None) -> dict:
         target_symbol = symbol or self.symbol
         try:
             with _MARKET_BREAKER:
@@ -345,7 +344,7 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_position_info(self) -> Optional[dict]:
+    def get_position_info(self) -> dict | None:
         """Return open position dict or None."""
         try:
             with _TRADE_BREAKER:

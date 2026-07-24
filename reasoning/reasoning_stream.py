@@ -53,7 +53,6 @@ import threading
 from collections import deque
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Deque, Dict, List, Optional
 
 from utils.logger import get_logger
 
@@ -86,8 +85,8 @@ class ReasoningStream:
 
     def __init__(self) -> None:
         self._lock:   threading.Lock = threading.Lock()
-        self._buffer: Deque[ReasoningEntry] = deque(maxlen=_RING_BUFFER_SIZE)
-        self._latest: Dict[str, ReasoningEntry] = {}
+        self._buffer: deque[ReasoningEntry] = deque(maxlen=_RING_BUFFER_SIZE)
+        self._latest: dict[str, ReasoningEntry] = {}
 
     def record(
         self,
@@ -110,7 +109,7 @@ class ReasoningStream:
             self._latest[agent] = entry
         return entry
 
-    def get_recent(self, limit: int = 50, agent: Optional[str] = None) -> List[dict]:
+    def get_recent(self, limit: int = 50, agent: str | None = None) -> list[dict]:
         """Return recent entries, newest-first. Optionally filtered by agent."""
         with self._lock:
             entries = list(self._buffer)
@@ -119,7 +118,7 @@ class ReasoningStream:
             entries = [e for e in entries if e.agent == agent]
         return [e.to_dict() for e in entries[:limit]]
 
-    def get_latest(self, agent: Optional[str] = None) -> Optional[dict]:
+    def get_latest(self, agent: str | None = None) -> dict | None:
         """Return the single most recent entry overall, or for one agent."""
         with self._lock:
             if agent:
@@ -129,7 +128,7 @@ class ReasoningStream:
                 return None
             return self._buffer[-1].to_dict()
 
-    def get_latest_all(self) -> Dict[str, dict]:
+    def get_latest_all(self) -> dict[str, dict]:
         """Return {agent_name: latest_entry_dict} for every known agent."""
         with self._lock:
             return {name: e.to_dict() for name, e in self._latest.items()}
@@ -142,7 +141,7 @@ class ReasoningStream:
 
 # ── Singleton accessor (mirrors events.event_bus pattern) ─────────────────────
 
-_global_stream: Optional[ReasoningStream] = None
+_global_stream: ReasoningStream | None = None
 _stream_lock = threading.Lock()
 
 

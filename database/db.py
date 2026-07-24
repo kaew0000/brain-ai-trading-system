@@ -26,7 +26,6 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
-from typing import Dict, Optional
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -36,14 +35,14 @@ logger = get_logger(__name__)
 _SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema_v13.sql")
 
 # ── Per-path write lock (fixes BUG-V15-DB-02) ────────────────────────────────
-_write_locks:    Dict[str, threading.Lock] = {}
+_write_locks:    dict[str, threading.Lock] = {}
 _write_lock_mtx = threading.Lock()
 
 # ── Schema init tracking (protected by write lock) ────────────────────────────
 _initialized_paths: set[str] = set()
 
 # ── In-memory connection cache (one shared conn per :memory: path) ────────────
-_memory_connections: Dict[str, sqlite3.Connection] = {}
+_memory_connections: dict[str, sqlite3.Connection] = {}
 _memory_lock = threading.Lock()
 
 
@@ -90,7 +89,7 @@ def _new_file_conn(path: str) -> sqlite3.Connection:
     return conn
 
 
-def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
+def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     """
     Return a ready SQLite connection.
 
@@ -142,9 +141,9 @@ class ManagedConn:
     :memory: paths share their global lock.
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         self._path  = db_path or get_db_path()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._lock  = _get_write_lock(self._path)
 
     def __enter__(self) -> sqlite3.Connection:
@@ -186,9 +185,9 @@ class ReadConn:
     WAL mode allows concurrent readers with zero contention.
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         self._path  = db_path or get_db_path()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
 
     def __enter__(self) -> sqlite3.Connection:
         if self._path == ":memory:":

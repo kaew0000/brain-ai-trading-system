@@ -71,7 +71,6 @@ scores are equal").
 from __future__ import annotations
 
 import time
-from typing import List, Optional
 
 from config.settings import settings
 from portfolio.correlation_engine import CorrelationEngine
@@ -91,7 +90,7 @@ def _factor_score(opportunity, name: str, default: float = 0.0) -> float:
     return f.score if f is not None else default
 
 
-def _factor_raw(opportunity, name: str) -> Optional[float]:
+def _factor_raw(opportunity, name: str) -> float | None:
     f = opportunity.breakdown.factors.get(name)
     return f.raw_value if f is not None else None
 
@@ -100,9 +99,9 @@ class CapitalManager:
 
     def __init__(
         self,
-        limits: Optional[PortfolioLimits] = None,
-        correlation_engine: Optional[CorrelationEngine] = None,
-        coverage_weight_floor: Optional[float] = None,
+        limits: PortfolioLimits | None = None,
+        correlation_engine: CorrelationEngine | None = None,
+        coverage_weight_floor: float | None = None,
     ) -> None:
         self.limits = limits or PortfolioLimits()
         self.correlation_engine = correlation_engine or CorrelationEngine()
@@ -113,7 +112,7 @@ class CapitalManager:
         )
 
     @classmethod
-    def from_settings(cls) -> "CapitalManager":
+    def from_settings(cls) -> CapitalManager:
         limits = PortfolioLimits(
             max_positions=settings.PORTFOLIO_MAX_POSITIONS,
             max_symbol_pct=settings.PORTFOLIO_MAX_SYMBOL_PCT,
@@ -133,7 +132,7 @@ class CapitalManager:
 
     def decide(
         self,
-        candidates: List,             # List[ranking.ranking_models.RankedOpportunity], already rank-sorted
+        candidates: list,             # List[ranking.ranking_models.RankedOpportunity], already rank-sorted
         risk_engine,                   # risk.risk_engine.RiskEngine
         state: PortfolioState,
         balance: float,
@@ -164,7 +163,7 @@ class CapitalManager:
         )
 
         available_slots = max(0, self.limits.max_positions - state.position_count)
-        rejected: List[RejectedCandidate] = []
+        rejected: list[RejectedCandidate] = []
 
         if available_slots <= 0:
             rejected = [
@@ -181,8 +180,8 @@ class CapitalManager:
             )
 
         # ── Per-candidate eligibility gates, in rank order ────────────────
-        held_and_selected: List[str] = list(state.held_symbols)
-        eligible: List[PortfolioCandidate] = []
+        held_and_selected: list[str] = list(state.held_symbols)
+        eligible: list[PortfolioCandidate] = []
 
         for c in candidates:
             if len(eligible) >= available_slots:
@@ -268,7 +267,7 @@ class CapitalManager:
         deployable_capital = max(0.0, deployable_capital)
 
         total_final_score = sum(c.final_score for c in eligible)
-        allocations: List[PortfolioAllocation] = []
+        allocations: list[PortfolioAllocation] = []
         total_capital_allocated = 0.0
         total_risk_allocated    = 0.0
 

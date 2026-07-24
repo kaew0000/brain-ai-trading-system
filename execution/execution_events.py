@@ -27,7 +27,6 @@ of the existing bus:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from events.event_bus import BusEvent, EventBus, get_event_bus
 
@@ -51,12 +50,12 @@ def publish_execution_event(
     event_type: ExecutionEventType,
     *,
     execution_id: str,
-    symbol: Optional[str] = None,
-    decision_id: Optional[str] = None,
+    symbol: str | None = None,
+    decision_id: str | None = None,
     message: str = "",
     severity: str = "info",
-    payload: Optional[dict] = None,
-    bus: Optional[EventBus] = None,
+    payload: dict | None = None,
+    bus: EventBus | None = None,
 ) -> BusEvent:
     """Publish one execution-lifecycle event through the existing
     EventBus. Returns the BusEvent so callers/tests can assert on

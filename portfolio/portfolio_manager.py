@@ -82,7 +82,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace as dc_replace
-from typing import Dict, List, Optional
 
 from config.settings import settings
 from portfolio import portfolio_history
@@ -104,11 +103,11 @@ class PortfolioManager:
 
     def __init__(
         self,
-        capital_manager: Optional[CapitalManager] = None,
-        sector_engine: Optional[SectorEngine] = None,
-        replacement_threshold_pct: Optional[float] = None,
-        cooldown_seconds: Optional[int] = None,
-        min_hold_seconds: Optional[int] = None,
+        capital_manager: CapitalManager | None = None,
+        sector_engine: SectorEngine | None = None,
+        replacement_threshold_pct: float | None = None,
+        cooldown_seconds: int | None = None,
+        min_hold_seconds: int | None = None,
     ) -> None:
         self.capital_manager = capital_manager or CapitalManager()
         # Read limits from the wrapped CapitalManager rather than
@@ -131,19 +130,19 @@ class PortfolioManager:
             min_hold_seconds if min_hold_seconds is not None
             else settings.PORTFOLIO_MIN_HOLD_SECONDS
         )
-        self._cooldowns: Dict[str, float] = {}         # symbol -> cooldown_until epoch
-        self._protected_until: Dict[str, float] = {}   # symbol -> min-hold protection epoch
+        self._cooldowns: dict[str, float] = {}         # symbol -> cooldown_until epoch
+        self._protected_until: dict[str, float] = {}   # symbol -> min-hold protection epoch
         logger.info("PortfolioManager ready")
 
     @classmethod
-    def from_settings(cls) -> "PortfolioManager":
+    def from_settings(cls) -> PortfolioManager:
         return cls(capital_manager=CapitalManager.from_settings())
 
     # ── Main entry point ─────────────────────────────────────────────────
 
     def decide(
         self,
-        candidates: List,             # List[ranking.ranking_models.RankedOpportunity], already rank-sorted
+        candidates: list,             # List[ranking.ranking_models.RankedOpportunity], already rank-sorted
         risk_engine,                   # risk.risk_engine.RiskEngine
         state: PortfolioState,
         balance: float,
@@ -223,12 +222,12 @@ class PortfolioManager:
 
     # ── Cooldown ─────────────────────────────────────────────────────────
 
-    def is_in_cooldown(self, symbol: str, now: Optional[float] = None) -> bool:
+    def is_in_cooldown(self, symbol: str, now: float | None = None) -> bool:
         now = now if now is not None else time.time()
         until = self._cooldowns.get(symbol)
         return until is not None and now < until
 
-    def notify_position_closed(self, symbol: str, now: Optional[float] = None) -> None:
+    def notify_position_closed(self, symbol: str, now: float | None = None) -> None:
         """External hook for a future execution-wiring phase: report that
         a position was closed for ANY reason (stop-loss, take-profit,
         manual, an executed replacement) so its symbol enters cooldown
@@ -243,8 +242,8 @@ class PortfolioManager:
         self._cooldowns[symbol] = now + self.cooldown_seconds
 
     def _apply_cooldown(self, candidates, state: PortfolioState, now: float):
-        active: List = []
-        rejected: List[RejectedCandidate] = []
+        active: list = []
+        rejected: list[RejectedCandidate] = []
         held = set(state.held_symbols)
         for c in candidates:
             if c.symbol not in held and self.is_in_cooldown(c.symbol, now):
@@ -266,8 +265,8 @@ class PortfolioManager:
         max_symbol_pct: a cap on deployed capital, not leveraged notional.
         """
         candidates_by_symbol = {c.symbol: c for c in candidates}
-        kept: List[PortfolioAllocation] = []
-        newly_rejected: List[RejectedCandidate] = []
+        kept: list[PortfolioAllocation] = []
+        newly_rejected: list[RejectedCandidate] = []
         cumulative = dict(self.sector_engine.capital_by_sector(state.active_positions))
         cap_usdt = self.limits.max_sector_pct * balance if balance > 0 else 0.0
 
@@ -293,7 +292,7 @@ class PortfolioManager:
 
     def _evaluate_replacements(
         self, candidates, base_decision, state: PortfolioState, risk_engine, balance: float, now: float,
-    ) -> List[ReplacementProposal]:
+    ) -> list[ReplacementProposal]:
         if state.position_count < self.limits.max_positions:
             return []   # there was room this cycle; CapitalManager already used it
         if not state.active_positions:
@@ -316,8 +315,8 @@ class PortfolioManager:
         challenger = max(extra, key=lambda a: a.final_score)
 
         candidates_by_symbol = {c.symbol: c for c in candidates}
-        weakest_symbol: Optional[str] = None
-        weakest_score: Optional[float] = None
+        weakest_symbol: str | None = None
+        weakest_score: float | None = None
         for pos in state.active_positions:
             protected_until = self._protected_until.get(pos.symbol)
             if protected_until is not None and now < protected_until:

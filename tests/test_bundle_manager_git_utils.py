@@ -70,9 +70,8 @@ class TestRunGit:
         import subprocess as sp
         with patch("tools.git_utils.shutil.which", return_value="/usr/bin/git"), \
              patch("tools.git_utils.subprocess.run",
-                   side_effect=sp.TimeoutExpired(cmd="git", timeout=5)):
-            with pytest.raises(git_utils.GitCommandError):
-                git_utils.run_git(["fetch"], cwd=Path("."), timeout=5)
+                   side_effect=sp.TimeoutExpired(cmd="git", timeout=5)), pytest.raises(git_utils.GitCommandError):
+            git_utils.run_git(["fetch"], cwd=Path("."), timeout=5)
 
     def test_uses_list_form_never_shell(self):
         """Structural guard against shell=True (injection surface) —
@@ -195,9 +194,8 @@ class TestPushBranch:
     def test_exhausts_retries_and_raises(self):
         with patch("tools.git_utils.run_git",
                     side_effect=git_utils.GitCommandError(["push"], 1, "", "permanently rejected")), \
-             patch("tools.git_utils.time.sleep"):
-            with pytest.raises(git_utils.GitCommandError):
-                git_utils.push_branch("feature/x", Path("."), retries=2)
+             patch("tools.git_utils.time.sleep"), pytest.raises(git_utils.GitCommandError):
+            git_utils.push_branch("feature/x", Path("."), retries=2)
 
     def test_force_uses_force_with_lease_not_bare_force(self):
         """--force-with-lease, never a bare --force — safety: refuses to

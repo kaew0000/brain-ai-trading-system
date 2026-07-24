@@ -25,7 +25,6 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
 
 from utils.logger import get_logger
 
@@ -42,7 +41,7 @@ class BundleRecord:
     status:           str            # "applied" | "failed"
     imported_at:      str            # ISO 8601 UTC
     pushed:           bool = False
-    reason:           Optional[str] = None   # populated when status == "failed"
+    reason:           str | None = None   # populated when status == "failed"
 
 
 class BundleHistory:
@@ -52,7 +51,7 @@ class BundleHistory:
 
     def __init__(self, path: Path):
         self.path = path
-        self._records: List[BundleRecord] = []
+        self._records: list[BundleRecord] = []
         self._by_sha: dict = {}
         self._load()
 
@@ -90,7 +89,7 @@ class BundleHistory:
         record = self._by_sha.get(sha)
         return record is not None and record.status == "applied"
 
-    def get(self, sha: str) -> Optional[BundleRecord]:
+    def get(self, sha: str) -> BundleRecord | None:
         return self._by_sha.get(sha)
 
     def record_applied(self, sha: str, branch: str, bundle_filename: str, pushed: bool) -> None:
@@ -113,7 +112,7 @@ class BundleHistory:
         self._records.append(record)
         self._by_sha[record.sha] = record
 
-    def all_records(self) -> List[BundleRecord]:
+    def all_records(self) -> list[BundleRecord]:
         return list(self._records)
 
     def save(self) -> None:

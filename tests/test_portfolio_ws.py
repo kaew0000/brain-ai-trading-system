@@ -18,7 +18,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-import api.portfolio_ws as portfolio_ws
+from api import portfolio_ws
 from events.event_bus import reset_event_bus
 from execution.execution_events import ExecutionEventType, publish_execution_event
 

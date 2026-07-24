@@ -1,11 +1,10 @@
 """ml/confidence_calibrator.py — Phase 3C: calibrate_confidence() via Platt/Isotonic"""
 from __future__ import annotations
-from typing import Optional
 import numpy as np
 from utils.logger import get_logger
 logger = get_logger(__name__)
 
-def train_calibrator(confidences: list, outcomes: list, method: str="isotonic") -> Optional[object]:
+def train_calibrator(confidences: list, outcomes: list, method: str="isotonic") -> object | None:
     """
     Train a calibrator mapping raw confidence (0-100) → calibrated win probability (0-100).
     method: 'platt' (Platt Scaling via LogisticRegression) or 'isotonic'

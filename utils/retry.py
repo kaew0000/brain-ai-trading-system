@@ -28,7 +28,8 @@ from __future__ import annotations
 import functools
 import random
 import time
-from typing import Callable, Optional, TypeVar
+from typing import TypeVar
+from collections.abc import Callable
 
 from requests.exceptions import ConnectionError as ReqConnectionError, Timeout
 from binance.error import ClientError
@@ -106,7 +107,7 @@ def retry_api_call(
         def wrapper(*args, **kwargs):
             from system_health.circuit_breaker import CircuitBreakerOpen
 
-            last_exc: Optional[Exception] = None
+            last_exc: Exception | None = None
 
             for attempt in range(1, retries + 1):
                 # Circuit breaker check (fast-fail without sleeping)

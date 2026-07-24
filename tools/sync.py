@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
 
 from tools import git_utils
 from tools.history import BundleHistory
@@ -26,7 +25,7 @@ class SyncResult:
     before_sha:         str
     after_sha:           str
     fast_forwarded:      bool
-    newly_merged_shas:   List[str] = field(default_factory=list)
+    newly_merged_shas:   list[str] = field(default_factory=list)
     pruned:              bool = False
 
 
@@ -81,7 +80,7 @@ def sync_main(
     after_sha = git_utils.rev_parse(base_branch, repo_dir)
     fast_forwarded = before_sha != after_sha
 
-    newly_merged: List[str] = []
+    newly_merged: list[str] = []
     for record in history.all_records():
         if record.status != "applied":
             continue

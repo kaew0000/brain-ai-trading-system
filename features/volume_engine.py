@@ -29,11 +29,15 @@ class VolumeSignals:
     """All volume-based signals for one OHLCV timeframe."""
 
     __slots__ = (
-        "volume_spike", "obv_direction",
-        "divergence", "divergence_type",
+        "avg_volume",
         "breakout_confirmed",
+        "current_volume",
+        "divergence",
+        "divergence_type",
+        "obv_direction",
         "score",
-        "avg_volume", "current_volume", "volume_ratio",
+        "volume_ratio",
+        "volume_spike",
     )
 
     def __init__(self) -> None:

@@ -53,7 +53,6 @@ API surface: /api/signals includes market_context as raw_features
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -93,8 +92,8 @@ class MarketContextBuilder:
         regime_result:  RegimeResult,
         ohlcv_h4=None,                              # pd.DataFrame (for trend analysis)
         ohlcv_h1=None,
-        intelligence:   Optional[dict] = None,      # Layer 2 output (optional)
-        symbol:         Optional[str] = None,       # V16 Phase 2F: explicit symbol for
+        intelligence:   dict | None = None,      # Layer 2 output (optional)
+        symbol:         str | None = None,       # V16 Phase 2F: explicit symbol for
                                                       # multi-symbol callers; defaults to
                                                       # settings.SYMBOL (the single-symbol
                                                       # legacy caller's implicit behavior,

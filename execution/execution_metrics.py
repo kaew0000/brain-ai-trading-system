@@ -19,7 +19,6 @@ mutating an old one.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict
 
 from execution.execution_state import ExecutionState, ExecutionStatus
 
@@ -36,7 +35,7 @@ class ExecutionMetricsSnapshot:
     failure_rate:            float   # failed / (completed + failed), 0.0 if none finished
     retry_rate:              float   # fraction of finished executions that needed >=1 retry
     average_latency_seconds: float   # mean latency_seconds across finished records with a latency
-    per_symbol_counts:        Dict[str, int] = field(default_factory=dict)
+    per_symbol_counts:        dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -77,7 +76,7 @@ def compute_metrics(state: ExecutionState) -> ExecutionMetricsSnapshot:
     latencies = [r.latency_seconds for r in finished if r.latency_seconds is not None]
     average_latency = (sum(latencies) / len(latencies)) if latencies else 0.0
 
-    per_symbol: Dict[str, int] = {}
+    per_symbol: dict[str, int] = {}
     for r in records:
         per_symbol[r.symbol] = per_symbol.get(r.symbol, 0) + 1
 

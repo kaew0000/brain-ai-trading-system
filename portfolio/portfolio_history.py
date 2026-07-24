@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime, timezone
-from typing import List
 
 from config.settings import settings
 from database.db import ManagedConn, ReadConn
@@ -77,7 +76,7 @@ def _prune_old_decisions() -> None:
         logger.debug(f"portfolio_history pruning failed (non-fatal): {exc}")
 
 
-def get_latest_decisions(limit: int = 1) -> List[dict]:
+def get_latest_decisions(limit: int = 1) -> list[dict]:
     """Most recent decision cycle(s), newest first. Returns raw row dicts
     (id, timestamp, decided_at, blocked, block_reason, selected_count,
     rejected_count, replacement_count, total_capital_allocated,
@@ -134,9 +133,9 @@ def get_latest_decisions(limit: int = 1) -> List[dict]:
 def query_decisions(
     limit: int = 50,
     offset: int = 0,
-    symbol: "str | None" = None,
-    sector: "str | None" = None,
-) -> List[dict]:
+    symbol: str | None = None,
+    sector: str | None = None,
+) -> list[dict]:
     """Paginated decision history, newest first, same row shape as
     get_latest_decisions(). symbol filters to cycles where `symbol`
     appears in that cycle's selected or rejected list; sector filters to

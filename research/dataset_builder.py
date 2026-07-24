@@ -1,7 +1,6 @@
 """research/dataset_builder.py — Phase 3B: orchestration + ML export"""
 from __future__ import annotations
 import threading
-from typing import Optional
 import pandas as pd
 from research.feature_store import FeatureStore
 from research.trade_snapshot import build_feature_vector, build_outcome
@@ -13,13 +12,13 @@ REGIME_ENCODING = {"":0,"RANGE":1,"TREND":2,"SQUEEZE":3,"HIGH_VOLATILITY":4,
 DIRECTION_ENCODING = {"":0,"SHORT":-1,"LONG":1}
 
 class DatasetBuilder:
-    def __init__(self, store: Optional[FeatureStore]=None) -> None:
+    def __init__(self, store: FeatureStore | None=None) -> None:
         self._store = store or FeatureStore()
         self._lock = threading.Lock()
 
-    def capture_closed_mission(self, mission=None, trade_row: Optional[dict]=None,
-                                market_context: Optional[dict]=None,
-                                intelligence: Optional[dict]=None) -> Optional[int]:
+    def capture_closed_mission(self, mission=None, trade_row: dict | None=None,
+                                market_context: dict | None=None,
+                                intelligence: dict | None=None) -> int | None:
         try:
             tr = trade_row or {}
             features = build_feature_vector(mission, tr, market_context, intelligence)
@@ -37,7 +36,7 @@ class DatasetBuilder:
             return None
 
     def export_training_dataframe(self, min_rows: int=30, limit: int=10_000,
-                                   symbol: Optional[str]=None) -> Optional[pd.DataFrame]:
+                                   symbol: str | None=None) -> pd.DataFrame | None:
         try:
             rows = self._store.get_training_rows(limit=limit, symbol=symbol)
             if len(rows) < min_rows:
@@ -58,7 +57,7 @@ class DatasetBuilder:
         try: return self._store.count(labelled_only=labelled_only)
         except Exception: return 0
 
-_db: Optional[DatasetBuilder] = None
+_db: DatasetBuilder | None = None
 _db_lock = threading.Lock()
 
 def get_dataset_builder() -> DatasetBuilder:
@@ -68,7 +67,7 @@ def get_dataset_builder() -> DatasetBuilder:
             if _db is None: _db = DatasetBuilder()
     return _db
 
-def reset_dataset_builder(store: Optional[FeatureStore]=None) -> DatasetBuilder:
+def reset_dataset_builder(store: FeatureStore | None=None) -> DatasetBuilder:
     global _db
     with _db_lock: _db = DatasetBuilder(store=store)
     return _db

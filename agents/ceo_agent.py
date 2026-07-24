@@ -42,7 +42,6 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Optional
 
 from events.event_bus import conf_pub
 from telemetry.agent_telemetry import get_telemetry_registry
@@ -124,17 +123,17 @@ class CEOAgent(BaseAgent):
     # the 40-point action threshold shouldn't be double-punished down to 0.
     AGREEMENT_FLOOR_MULTIPLIER = 0.5
 
-    def __init__(self, agents: Optional[dict] = None, journal=None) -> None:
+    def __init__(self, agents: dict | None = None, journal=None) -> None:
         super().__init__()
         self._agents: dict = agents or {}
-        self._last_ceo:  Optional[CEODecision] = None
+        self._last_ceo:  CEODecision | None = None
         # Phase 4B: optional TradeJournalV2 (or compatible) instance used
         # for dynamic weighting. None (the default) means CEOAgent behaves
         # exactly as before Phase 4B — _effective_weights() always falls
         # back to the static WEIGHTS in that case regardless of the
         # DYNAMIC_AGENT_WEIGHTS_ENABLED setting.
         self._journal = journal
-        self._perf_cache:    Optional[dict] = None
+        self._perf_cache:    dict | None = None
         self._perf_cache_ts: float = 0.0
 
     def register_agent(self, name: str, agent: BaseAgent) -> None:
@@ -405,7 +404,7 @@ class CEOAgent(BaseAgent):
             raw        = dec.to_dict(),
         )
 
-    def answer(self, question: str, market_context: Optional[dict] = None) -> str:
+    def answer(self, question: str, market_context: dict | None = None) -> str:
         """
         CEO answers by delegating to the appropriate agent.
         """
@@ -435,5 +434,5 @@ class CEOAgent(BaseAgent):
         return "CEO: No decision available yet. Waiting for first analysis cycle."
 
     @property
-    def last_decision(self) -> Optional[CEODecision]:
+    def last_decision(self) -> CEODecision | None:
         return self._last_ceo

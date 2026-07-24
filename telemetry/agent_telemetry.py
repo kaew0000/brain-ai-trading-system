@@ -47,7 +47,6 @@ import threading
 import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Dict, Optional
 
 from utils.logger import get_logger
 
@@ -98,8 +97,8 @@ class TelemetryRegistry:
 
     def __init__(self) -> None:
         self._lock:      threading.Lock = threading.Lock()
-        self._entries:   Dict[str, AgentTelemetry] = {}
-        self._first_seen: Dict[str, float] = {}   # agent -> perf_counter() at first record
+        self._entries:   dict[str, AgentTelemetry] = {}
+        self._first_seen: dict[str, float] = {}   # agent -> perf_counter() at first record
 
     def record(
         self,
@@ -145,16 +144,16 @@ class TelemetryRegistry:
 
         return entry
 
-    def get(self, agent: str) -> Optional[AgentTelemetry]:
+    def get(self, agent: str) -> AgentTelemetry | None:
         with self._lock:
             return self._entries.get(agent)
 
-    def snapshot(self) -> Dict[str, dict]:
+    def snapshot(self) -> dict[str, dict]:
         """Return {agent_name: telemetry_dict} for every known agent."""
         with self._lock:
             return {name: e.to_dict() for name, e in self._entries.items()}
 
-    def snapshot_spec(self) -> Dict[str, dict]:
+    def snapshot_spec(self) -> dict[str, dict]:
         """Same as snapshot() but restricted to the exact 7-field spec schema."""
         with self._lock:
             return {name: e.to_spec_dict() for name, e in self._entries.items()}
@@ -167,7 +166,7 @@ class TelemetryRegistry:
 
 # ── Singleton accessor (mirrors events.event_bus pattern) ─────────────────────
 
-_global_registry: Optional[TelemetryRegistry] = None
+_global_registry: TelemetryRegistry | None = None
 _registry_lock = threading.Lock()
 
 
@@ -209,9 +208,9 @@ class telemetry_timer:
         record_ok(latency_ms=t.latency_ms)               # also correct
     """
 
-    def __enter__(self) -> "telemetry_timer":
+    def __enter__(self) -> telemetry_timer:
         self._start = time.perf_counter()
-        self._frozen_ms: Optional[float] = None
+        self._frozen_ms: float | None = None
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:

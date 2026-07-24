@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Brain Bot BTCUSDT Futures v2
 ============================================================

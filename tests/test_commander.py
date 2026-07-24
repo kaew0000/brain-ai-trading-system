@@ -503,58 +503,53 @@ class TestCommandWebSocket:
     def test_ws_command_sends_init_frame(self):
         from api.app import app
         from fastapi.testclient import TestClient
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/command") as ws:
-                msg = ws.receive_json()
-                assert msg["type"] == "init"
-                assert "paused" in msg["data"]
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/command") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "init"
+            assert "paused" in msg["data"]
 
     def test_ws_command_executes_and_replies(self):
         from api.app import app
         from fastapi.testclient import TestClient
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/command") as ws:
-                ws.receive_json()   # init frame
-                ws.send_text('{"command": "show positions"}')
-                reply = ws.receive_json()
-                assert reply["type"] == "command_result"
-                assert reply["data"]["matched"] == "show_positions"
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/command") as ws:
+            ws.receive_json()   # init frame
+            ws.send_text('{"command": "show positions"}')
+            reply = ws.receive_json()
+            assert reply["type"] == "command_result"
+            assert reply["data"]["matched"] == "show_positions"
 
     def test_ws_command_no_duplicate_reply(self):
         """Regression test for the self-caught duplicate-broadcast bug:
         sending one command must yield exactly ONE result frame back."""
         from api.app import app
         from fastapi.testclient import TestClient
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/command") as ws:
-                ws.receive_json()   # init
-                ws.send_text('{"command": "show pnl"}')
-                first = ws.receive_json()
-                assert first["type"] == "command_result"
-                # If the bug were present, a second frame would already be
-                # queued here. Send a harmless follow-up and confirm the
-                # NEXT frame is for the NEW command, not a leftover duplicate.
-                ws.send_text('{"command": "show risk"}')
-                second = ws.receive_json()
-                assert second["data"]["matched"] == "show_risk"
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/command") as ws:
+            ws.receive_json()   # init
+            ws.send_text('{"command": "show pnl"}')
+            first = ws.receive_json()
+            assert first["type"] == "command_result"
+            # If the bug were present, a second frame would already be
+            # queued here. Send a harmless follow-up and confirm the
+            # NEXT frame is for the NEW command, not a leftover duplicate.
+            ws.send_text('{"command": "show risk"}')
+            second = ws.receive_json()
+            assert second["data"]["matched"] == "show_risk"
 
     def test_ws_command_accepts_bare_string(self):
         from api.app import app
         from fastapi.testclient import TestClient
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/command") as ws:
-                ws.receive_json()
-                ws.send_text("show positions")   # not JSON — bare string
-                reply = ws.receive_json()
-                assert reply["data"]["matched"] == "show_positions"
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/command") as ws:
+            ws.receive_json()
+            ws.send_text("show positions")   # not JSON — bare string
+            reply = ws.receive_json()
+            assert reply["data"]["matched"] == "show_positions"
 
     def test_ws_command_mutates_control_state(self):
         from api.app import app
         from commander.control_state import get_control_state
         from fastapi.testclient import TestClient
-        with TestClient(app, raise_server_exceptions=False) as c:
-            with c.websocket_connect("/ws/command") as ws:
-                ws.receive_json()
-                ws.send_text('{"command": "pause trader"}')
-                ws.receive_json()
+        with TestClient(app, raise_server_exceptions=False) as c, c.websocket_connect("/ws/command") as ws:
+            ws.receive_json()
+            ws.send_text('{"command": "pause trader"}')
+            ws.receive_json()
         assert get_control_state().is_paused() is True

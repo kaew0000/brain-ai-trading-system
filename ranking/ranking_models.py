@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import Dict, Optional
 
 
 class ScoreStatus(str, Enum):
@@ -29,7 +28,7 @@ class FactorScore:
     score:       float          # 0-100, higher = more favorable
     status:      ScoreStatus
     explanation: str
-    raw_value:   Optional[float] = None   # the underlying metric, if any (e.g. atr_pct)
+    raw_value:   float | None = None   # the underlying metric, if any (e.g. atr_pct)
     weight:      float = 0.0              # weight actually applied during fusion
 
     def to_dict(self) -> dict:
@@ -42,7 +41,7 @@ class FactorScore:
 class ScoreBreakdown:
     """All factor scores for one symbol, keyed by factor name."""
     symbol:  str
-    factors: Dict[str, FactorScore] = field(default_factory=dict)
+    factors: dict[str, FactorScore] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {

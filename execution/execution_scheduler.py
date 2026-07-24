@@ -45,7 +45,6 @@ boundary" section — same discipline, same reasons):
 from __future__ import annotations
 
 import threading
-from typing import Optional
 
 from execution.execution_orchestrator import ExecutionBatch, ExecutionOrchestrator
 from portfolio.portfolio_state import PortfolioState
@@ -66,9 +65,9 @@ class ExecutionScheduler:
         risk_engine,                      # risk.risk_engine.RiskEngine
         execution_orchestrator: ExecutionOrchestrator,
         data_provider,                    # data.binance_provider.BinanceDataProvider — for get_account_balance()
-        portfolio_state: Optional[PortfolioState] = None,
-        interval_seconds: Optional[int] = None,
-        candidate_limit: Optional[int] = None,
+        portfolio_state: PortfolioState | None = None,
+        interval_seconds: int | None = None,
+        candidate_limit: int | None = None,
     ) -> None:
         from config.settings import settings
 
@@ -85,10 +84,10 @@ class ExecutionScheduler:
             candidate_limit if candidate_limit is not None else settings.SCHEDULER_CANDIDATE_LIMIT
         )
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._cycle_count = 0
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
 
         logger.info(
             f"ExecutionScheduler ready | interval={self.interval_seconds}s "
@@ -122,7 +121,7 @@ class ExecutionScheduler:
 
     # ── One cycle ───────────────────────────────────────────────────────
 
-    def run_once(self) -> Optional[ExecutionBatch]:
+    def run_once(self) -> ExecutionBatch | None:
         """Run exactly one decide()->execute() cycle. Never raises — any
         failure anywhere in the cycle is logged and the cycle is treated
         as a no-op, matching this project's "safety wrapping at every
@@ -168,7 +167,7 @@ class ExecutionScheduler:
         return self._cycle_count
 
     @property
-    def last_error(self) -> Optional[str]:
+    def last_error(self) -> str | None:
         return self._last_error
 
     def to_dict(self) -> dict:

@@ -41,7 +41,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Optional
 
 from commander.control_state import get_control_state
 from utils.logger import get_logger
@@ -65,7 +64,7 @@ class CommandResult:
 class CommanderService:
     """Parses and executes natural-language trading commands."""
 
-    def execute(self, command_text: str, context: Optional[dict] = None) -> CommandResult:
+    def execute(self, command_text: str, context: dict | None = None) -> CommandResult:
         """
         Parse command_text against the fixed command set and execute it.
 
