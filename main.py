@@ -255,7 +255,7 @@ def build_system() -> dict:
                     context_builder=context_builder,
                     confidence_engine=confidence_engine,
                 )
-                portfolio_manager = PortfolioManager()
+                portfolio_manager = PortfolioManager(journal=journal_v2)
                 # Reuse the SAME execution engine the single-symbol loop
                 # already built above (trade_manager) rather than calling
                 # build_execution_engine() a second time — that would spin
@@ -268,6 +268,7 @@ def build_system() -> dict:
                     execution_engine=trade_manager,
                     portfolio_manager=portfolio_manager,
                     signal_provider=signal_provider,
+                    journal=journal_v2,
                 )
                 execution_scheduler = ExecutionScheduler(
                     opportunity_ranker=OpportunityRanker(market_scanner),

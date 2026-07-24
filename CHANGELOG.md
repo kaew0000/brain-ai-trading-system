@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4B Step 2: Execution Attribution + Portfolio Integration
+
+### Added
+- **`journal/trade_attribution.py`**: `record_trade_outcome(journal,
+  trade_id, **fields)` — reusable attribution API, every field
+  optional, covers both open-side (execution_id/order_id/slippage/
+  latency_seconds) and close-side (+result/exit_price/pnl) calls.
+  `agent_attribution_from_ceo_decision(ceo_decision)` — per-agent
+  extraction from a real `CEODecision.to_dict()` using
+  `CEOAgent.WEIGHTS`'s actual keys, plus a `"ceo"` aggregate entry.
+- **`journal/journal_v2.py`**: `+save_execution_attribution()` (merges
+  execution facts into `trades.extra_data`, no schema migration),
+  `+get_trade_attribution()` (one trade's full facts + agent
+  participation, joined via `signal_id` like `get_agent_performance()`
+  already does), `+get_ensemble_learning_dataset()` (clean per-trade
+  rows for a future Phase 4C — read-only, no weight-learning logic).
+- **`portfolio/portfolio_models.py`**: `PortfolioPosition`
+  `+trade_id: int | None = None`.
+
+### Changed
+- **`execution/execution_orchestrator.py`**: `+journal=None` (optional).
+  Successful open now persists signal+trade+attribution and threads
+  `trade_id` onto the position. Successful replacement close now
+  computes exit_price/pnl/result honestly (never guessed) and hands
+  them to `notify_position_closed()`.
+- **`portfolio/portfolio_manager.py`**: `+journal=None` (optional).
+  `notify_position_closed()` gains 10 new optional keyword-only
+  params — every existing call site keeps working unchanged. Now the
+  single place close-side attribution is persisted, for any current
+  or future closing path.
+- **`main.py`**: scheduler bootstrap passes `journal=journal_v2` into
+  both `PortfolioManager(...)` and `ExecutionOrchestrator(...)`.
+
+### Known limitations
+Multi-symbol trades' `agent_participation` is genuinely `[]` (the
+agent layer doesn't run on that signal path). Only replacement-
+triggered closes are wired (no natural SL/TP monitor exists yet).
+`fees` is always `None` (not computable from any data this codebase
+fetches today). See PATCH_NOTES.md for full detail.
+
+### Testing
+`pytest tests/ -q` → 1600 passed, 0 failed (1556 baseline + 44 new).
+`ruff check .` → clean.
+
 ## [Unreleased] — V16 Phase 3A: Strategy Plugin System
 
 ### Added

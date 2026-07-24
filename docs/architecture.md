@@ -2052,3 +2052,130 @@ zeroed out, the TTL cache avoids re-querying the journal across repeated
 - Multi-Agent Framework enhancements, Quant Research Pipeline /
   Research-Optimization Framework, AI Self-Improvement (human-approved
   gate) — unchanged, still open.
+
+---
+
+## 29. Ensemble Learning — Phase 4B Step 2: Execution Attribution + Portfolio Integration (2026-07-24)
+
+§27/§28's own "Next up" named this exact gap: "Wire
+`execution/execution_orchestrator.py` to the journal... Execution-Layer
+work (open + close paths, idempotency under retries, interaction with
+`ReplacementProposal` closes) and needs its own scoping pass." This
+phase is that scoping pass and its implementation.
+
+### Discovery — read before writing any code
+
+Four things changed the shape of this work from how it was requested:
+
+1. **Multi-symbol trades have no agent votes to attribute.**
+   `execution/portfolio_signal_provider.py` (Phase 2F) runs
+   `RegimeEngine->SMCEngine->VolumeEngine->MarketContextBuilder->
+   ConfidenceEngine` directly — it never touches `agents/ceo_agent.py`'s
+   CEOAgent. So per-agent attribution (vote/weight/confidence/
+   contribution) is only ever real for trades taken through the legacy
+   single-symbol loop (the only path that runs the agent layer today).
+   `get_trade_attribution()` below returns an honestly empty
+   `agent_participation: []` for every V16 multi-symbol trade rather
+   than fabricating agent votes that never happened.
+2. **Only replacement-triggered closes exist for the multi-symbol
+   path.** `PortfolioManager.notify_position_closed()`'s own docstring
+   already said it's meant to fire "for ANY reason (stop-loss,
+   take-profit, manual, an executed replacement)" — but grepping every
+   caller shows exactly one: `execution_orchestrator.py`'s
+   `_execute_replacement_close()`. Nothing anywhere polls open
+   multi-symbol positions for a natural SL/TP hit. This phase wires the
+   real call path that exists; a natural-close monitor is its own
+   future Execution-Layer phase, not folded in here.
+3. **Paper mode's execution engine has no `close_position()` at all**
+   (`paper/paper_execution.py` — confirmed by reading it, not assumed).
+   `EXECUTION_MODE=paper` is the default, so in a default deployment,
+   close-side attribution literally cannot be observed end-to-end today
+   — `_execute_replacement_close()` already handled this pre-existing
+   limitation by cancelling with `execution_engine_does_not_support_close`
+   before this phase, and still does. Testnet/live mode (real
+   `TradeManager.close_position()`) is required to see this working.
+4. **Fees are not computable anywhere in this codebase today.**
+   Binance Futures' market-order response doesn't include commission —
+   that needs a separate `userTrades`/account API call nothing here
+   makes. `fees` exists as a field on `record_trade_outcome()` /
+   `save_execution_attribution()` (Task 1's schema requirement) so a
+   future caller that DOES fetch it can pass it straight in with zero
+   API changes, but every current call site passes `fees=None`,
+   honestly, not a guess. **Slippage**, by contrast, IS honestly
+   computable — entry fill price (`entry_order["avgPrice"]`, when
+   present) minus the requested price, direction-adjusted — and is
+   wired for real.
+
+### New module
+
+| File | Purpose |
+|---|---|
+| `journal/trade_attribution.py` | Task 5's reusable API. `record_trade_outcome(journal, trade_id, **fields)` — every field optional, covers both the open-side call (execution_id/order_id/slippage/latency only) and the close-side call (result/exit_price/pnl too) with one function; callers never touch SQLite directly. `agent_attribution_from_ceo_decision(ceo_decision)` — Task 4's per-agent extraction from a real `CEODecision.to_dict()`, using the real `CEOAgent.WEIGHTS` keys (`smc`/`futures`/`regime`/`risk`/`journal`/`confidence_engine`) plus a `"ceo"` aggregate entry (weight fixed at 1.0 — the CEO isn't itself a weighted vote, it's the aggregator). |
+
+### Changes to existing modules (all additive)
+
+| File | Change |
+|---|---|
+| `journal/journal_v2.py` | +`save_execution_attribution()` (Task 1 — merges execution_id/order_id/fees/slippage/latency_seconds into `trades.extra_data`, no ALTER TABLE), +`get_trade_attribution()` (Task 1+4 combined read — joins `agent_decisions` via the trade's `signal_id`, exactly like `get_agent_performance()` already does), +`get_ensemble_learning_dataset()` (Task 6/7 — one clean row per closed trade, ready for a future Phase 4C). |
+| `portfolio/portfolio_models.py` | `PortfolioPosition` +`trade_id: int \| None = None` — carries the journal row this position was opened under, so the close path can find it via the same `PortfolioState.get_position()` call it already makes. |
+| `execution/execution_orchestrator.py` | +optional `journal=None` constructor param (Task 2). On successful open: `save_signal()` → `save_trade()` → `record_trade_outcome()` (execution_id, order_id, slippage), `trade_id` threaded onto the new `PortfolioPosition`. On successful replacement close: computes exit_price/pnl/result from the raw close order + the removed position (honest `None`s when unavailable, not guesses), hands them to `notify_position_closed()` rather than writing to the journal a second time itself. |
+| `portfolio/portfolio_manager.py` | +optional `journal=None` constructor param. `notify_position_closed()` gains 10 new optional keyword-only params (Task 3) — every existing call site (`notify_position_closed(symbol)`, or with just `now=`) keeps working unchanged. Cooldown registration is unconditional and runs first; attribution recording is layered on top and can never block or undo it. This is now the ONE place close-side attribution is persisted — by any current or future caller. |
+| `main.py` | The scheduler bootstrap now passes `journal=journal_v2` into both `PortfolioManager(...)` and `ExecutionOrchestrator(...)` — without this, attribution wiring would exist but never actually activate. |
+
+### Testing
+
+44 new tests: `tests/test_execution_attribution.py` (27 — journal_v2's
+three new methods + both `trade_attribution.py` functions, `tmp_path`-
+backed DB per test, same reasoning as §27's tests), plus extensions to
+`tests/test_execution_orchestrator.py` (11 — open/close attribution
+wiring, slippage computation, broken-journal-never-breaks-a-trade) and
+`tests/test_portfolio_manager.py` (6 — `notify_position_closed()`'s new
+kwargs, backward compatibility, cooldown-always-runs-first). 3
+pre-existing tests needed their `FakePortfolioManager` test double
+updated to accept the new optional kwargs (`**kwargs` passthrough) —
+not a behavior change, the fake's signature just needed to keep up with
+the real (backward-compatible) one it doubles for.
+
+**Verified: `pytest tests/ -q` → 1600 passed, 0 failed** (1556 baseline
++ 44 new). `ruff check .` → clean.
+
+### Scope boundary — what this phase does NOT claim
+
+- Agent participation is genuinely empty for every V16 multi-symbol
+  trade today (see "Discovery" #1) — not a bug, a real gap this phase
+  documents rather than hides.
+- Natural SL/TP-triggered closes for multi-symbol positions still
+  aren't detected anywhere (see "Discovery" #2) — attribution fires
+  correctly for the replacement-close path that exists; a monitor for
+  the natural-close path is separate, future Execution-Layer work.
+- `fees` is always `None` today (see "Discovery" #4) — the schema/API
+  is ready, the data source isn't wired.
+- No weight-learning logic was added — `get_ensemble_learning_dataset()`
+  only reads and shapes existing data. Phase 4B proper (§28) already
+  shipped a simple win-rate blend (`DYNAMIC_AGENT_WEIGHTS_ENABLED`);
+  this phase's richer per-trade dataset is additive groundwork for a
+  future, more sophisticated Phase 4C — not a replacement for §28, and
+  not itself "Dynamic Weight Learning" (naming overlap flagged
+  explicitly so it doesn't read as contradictory).
+
+### Next up
+
+- **Natural SL/TP close monitor for the multi-symbol path** — the
+  single biggest remaining gap for this phase's own close-side
+  attribution to matter broadly (today: replacement closes only).
+  Needs its own scoping pass; deliberately not started here.
+- **Make `PortfolioSignalProvider` agent-aware** — the only way
+  multi-symbol trades will ever get real (non-empty)
+  `agent_participation`. A significant, separate redesign of the
+  multi-symbol signal path, not something this journal/attribution
+  phase should fold in.
+- **Phase 4C** — consume `get_ensemble_learning_dataset()` for
+  something more sophisticated than §28's win-rate blend. Explicitly
+  not started here per Task 7.
+- Fee capture via a real Binance `userTrades`/commission fetch —
+  separate Execution-Layer API work.
+- Everything §28 already carried forward and this phase didn't touch:
+  dashboard exposure, RiskEngine's single account-level gate, real
+  correlation tracking, sector-cap capital redistribution,
+  reconciliation alert escalation, `dashboard_api`/`websocket`
+  heartbeat gaps.

@@ -76,6 +76,7 @@ from execution.execution_events import (
 )
 from execution.execution_metrics import ExecutionMetricsSnapshot, compute_metrics
 from execution.execution_state import ExecutionState, ExecutionStatus, get_execution_state
+from journal.trade_attribution import record_trade_outcome
 from portfolio.portfolio_models import (
     OrchestratedDecision,
     PortfolioAllocation,
@@ -114,6 +115,29 @@ def _is_recoverable_error(error: str | None) -> bool:
                       # evidence it's a permanent rejection; treat as retryable.
     lowered = error.lower()
     return not any(marker in lowered for marker in _NON_RECOVERABLE_MARKERS)
+
+
+def _compute_slippage(direction: int, requested_price: float, entry_order: dict) -> float | None:
+    """V16 Phase 4B Step 2: entry slippage = actual fill price minus the
+    requested price, direction-adjusted so a POSITIVE number always
+    means "cost more than intended" (paid more on a LONG entry, or sold
+    for less on a SHORT entry) regardless of side — the conventional
+    meaning of slippage. Returns None (not 0.0) when there's no usable
+    fill price to compare against, e.g. paper mode's order dicts don't
+    carry `avgPrice`/`price` at all — None means "not computable", not
+    "zero slippage".
+    """
+    if not isinstance(entry_order, dict) or not requested_price:
+        return None
+    fill = entry_order.get("avgPrice") or entry_order.get("price")
+    try:
+        fill = float(fill)
+    except (TypeError, ValueError):
+        return None
+    if not fill:
+        return None
+    raw = fill - requested_price
+    return round(raw if direction == 1 else -raw, 6)
 
 
 @dataclass(frozen=True)
@@ -235,6 +259,7 @@ class ExecutionOrchestrator:
         state: ExecutionState | None = None,
         max_retries: int | None = None,
         retry_delay_seconds: float | None = None,
+        journal=None,                # V16 Phase 4B Step 2: TradeJournalV2-compatible; None = attribution inert
     ) -> None:
         from config.settings import settings
 
@@ -242,6 +267,7 @@ class ExecutionOrchestrator:
         self.portfolio_manager = portfolio_manager
         self.signal_provider = signal_provider
         self.state = state or get_execution_state()
+        self.journal = journal
         self.max_retries = (
             max_retries if max_retries is not None else settings.EXECUTION_MAX_RETRIES
         )
@@ -398,7 +424,8 @@ class ExecutionOrchestrator:
 
         if result.get("success"):
             self.state.complete(execution_id, result)
-            self._apply_opened_position(portfolio_state, alloc, result, direction_str)
+            trade_id = self._record_trade_opened(execution_id, alloc, signal, result)
+            self._apply_opened_position(portfolio_state, alloc, result, direction_str, trade_id=trade_id)
             publish_execution_event(
                 ExecutionEventType.COMPLETED, execution_id=execution_id, symbol=alloc.symbol,
                 payload={"quantity": result.get("quantity"), "entry_price": result.get("entry_price")},
@@ -412,8 +439,86 @@ class ExecutionOrchestrator:
         )
         return ExecutionResult(execution_id, alloc.symbol, ExecutionStatus.FAILED, False, attempts, result.get("error"), result)
 
+    def _record_trade_opened(
+        self, execution_id: str, alloc: PortfolioAllocation, signal: ExecutionSignal, result: dict,
+    ) -> int | None:
+        """V16 Phase 4B Step 2 (docs/architecture.md §29): persist this
+        open to the journal so it's attributable at close time. No-op
+        (returns None) when self.journal isn't configured. On ANY
+        failure, logs and returns None rather than raising — `result`
+        here already has success=True, meaning the trade has ALREADY
+        been placed on the exchange; attribution bookkeeping must never
+        be able to make a real trade look like it failed (same rule as
+        agents/ceo_agent.py's dynamic-weight fallback and main.py's
+        per-agent try/except around save_agent_decision()).
+
+        No agent_attribution is recorded here — this pipeline
+        (execution/portfolio_signal_provider.py) doesn't run
+        agents/ceo_agent.py's CEOAgent, so there are no real per-agent
+        votes to attach (see docs/architecture.md §29 "Scope boundary").
+        get_trade_attribution() honestly returns an empty
+        agent_participation list for these trades rather than this
+        method fabricating one.
+        """
+        if self.journal is None:
+            return None
+        try:
+            from datetime import datetime, timezone
+
+            from analytics.trade_journal import TradeRecord
+
+            direction_str = "LONG" if signal.direction == 1 else "SHORT"
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            sig_id = self.journal.save_signal(
+                {
+                    "timestamp":   now_iso,
+                    "action":      direction_str,
+                    "direction":   direction_str,
+                    "confidence":  0.0,
+                    "entry_price": signal.entry_price,
+                    "stop_loss":   signal.stop_loss,
+                    "take_profit": signal.take_profit,
+                },
+                symbol=alloc.symbol,
+            )
+
+            entry_order = result.get("entry_order") or {}
+            order_id = str(entry_order.get("orderId", "")) if isinstance(entry_order, dict) else ""
+
+            rec = TradeRecord()
+            rec.timestamp   = now_iso
+            rec.symbol      = alloc.symbol
+            rec.direction   = direction_str
+            rec.entry_price = result.get("entry_price") or signal.entry_price
+            rec.stop_loss   = signal.stop_loss
+            rec.take_profit = signal.take_profit
+            rec.quantity    = result.get("quantity") or 0.0
+            rec.order_id    = order_id
+            trade_id = self.journal.save_trade(rec, signal_id=sig_id)
+
+            record_trade_outcome(
+                self.journal, trade_id,
+                execution_id=execution_id,
+                order_id=order_id or None,
+                slippage=_compute_slippage(signal.direction, signal.entry_price, entry_order),
+                # fees: not recorded — Binance Futures' market-order
+                # response doesn't include commission; that requires a
+                # separate userTrades/account API call this codebase
+                # doesn't make anywhere today. The field exists on
+                # record_trade_outcome()/save_execution_attribution() so
+                # a future caller that DOES fetch it can pass it
+                # straight in with zero API changes — see
+                # docs/architecture.md §29 "Scope boundary".
+            )
+            return trade_id
+        except Exception as exc:
+            logger.error(f"ExecutionOrchestrator: attribution open-record failed for {alloc.symbol}: {exc}")
+            return None
+
     def _apply_opened_position(
         self, portfolio_state: PortfolioState, alloc: PortfolioAllocation, result: dict, direction_str: str,
+        trade_id: int | None = None,
     ) -> None:
         entry_price = result.get("entry_price") or 0.0
         quantity    = result.get("quantity") or 0.0
@@ -433,6 +538,7 @@ class ExecutionOrchestrator:
             unrealized_pnl=0.0,
             state=PositionState.OPEN,
             opened_at=time.time(),
+            trade_id=trade_id,
         ))
 
     # ── Replacement execution (close outgoing side only) ─────────────────
@@ -512,8 +618,23 @@ class ExecutionOrchestrator:
 
         if order is not None:
             self.state.complete(execution_id, order)
-            portfolio_state.remove_position(symbol)
-            self.portfolio_manager.notify_position_closed(symbol)
+            removed_position = portfolio_state.remove_position(symbol)
+            close_outcome = self._compute_close_outcome(removed_position, order)
+            record = self.state.get(execution_id)
+            # V16 Phase 4B Step 2 (docs/architecture.md §29): PortfolioManager
+            # is the single place close-side attribution is actually
+            # persisted (Task 3) — ExecutionOrchestrator's job here is only
+            # to compute the execution-level facts (Task 2) and hand them
+            # to the one hook every current AND future close path already
+            # calls, rather than this orchestrator writing to the journal
+            # a second time itself.
+            self.portfolio_manager.notify_position_closed(
+                symbol,
+                trade_id=removed_position.trade_id if removed_position else None,
+                execution_id=execution_id,
+                latency_seconds=record.latency_seconds if record else None,
+                **close_outcome,
+            )
             publish_execution_event(
                 ExecutionEventType.COMPLETED, execution_id=execution_id, symbol=symbol,
                 payload={"replacement": True},
@@ -526,6 +647,44 @@ class ExecutionOrchestrator:
             severity="error", payload={"error": error, "replacement": True},
         )
         return ExecutionResult(execution_id, symbol, ExecutionStatus.FAILED, False, attempts, error, None, is_replacement=True)
+
+    # ── Close-side attribution (V16 Phase 4B Step 2) ───────────────────────
+
+    def _compute_close_outcome(self, position: PortfolioPosition | None, order: dict) -> dict:
+        """Derive exit_price/pnl/result/order_id from the raw close
+        order response plus the position being closed. Returns None for
+        any field that can't be honestly computed (e.g. no position was
+        tracked, or the order response doesn't carry a fill price)
+        rather than guessing — see docs/architecture.md §29 "Scope
+        boundary". A pnl of exactly 0.0 is classified WIN (breakeven
+        counted as a win) — a deliberate, documented convention, not an
+        accident.
+        """
+        if position is None or not isinstance(order, dict):
+            return {"exit_price": None, "pnl": None, "result": None, "order_id": None}
+
+        order_id = order.get("orderId")
+        exit_price = order.get("avgPrice") or order.get("price")
+        try:
+            exit_price = float(exit_price) if exit_price else None
+        except (TypeError, ValueError):
+            exit_price = None
+
+        pnl = None
+        result = None
+        if exit_price:
+            if position.direction == "LONG":
+                pnl = (exit_price - position.entry_price) * position.quantity
+            else:
+                pnl = (position.entry_price - exit_price) * position.quantity
+            result = "WIN" if pnl >= 0 else "LOSS"
+
+        return {
+            "exit_price": exit_price,
+            "pnl": round(pnl, 4) if pnl is not None else None,
+            "result": result,
+            "order_id": str(order_id) if order_id is not None else None,
+        }
 
     # ── Helpers ──────────────────────────────────────────────────────────
 

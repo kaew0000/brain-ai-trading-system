@@ -128,6 +128,14 @@ class PortfolioPosition:
     opened_at:              float          # unix epoch
     sector:                str | None = None               # None until 2B's Sector Engine
     correlation_cluster:    str | None = None               # config/correlation_table.py cluster name
+    # V16 Phase 4B Step 2 (Execution Attribution): the journal `trades.id`
+    # row ExecutionOrchestrator opened for this position, if journal
+    # wiring is configured (None otherwise — every existing construction
+    # site that doesn't pass this keeps working unchanged). Carried on
+    # the position itself, not a second parallel lookup table, so the
+    # close path can find "which trade row is this?" from the same
+    # object it already fetches via PortfolioState.get_position().
+    trade_id:              int | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
