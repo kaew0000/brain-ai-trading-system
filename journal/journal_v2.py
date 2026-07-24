@@ -281,6 +281,164 @@ class TradeJournalV2:
         }
 
     # ════════════════════════════════════════════════════════════════════
+    # EXECUTION ATTRIBUTION — V16 Phase 4B Step 2 (architecture.md §29)
+    # ════════════════════════════════════════════════════════════════════
+    #
+    # Execution-level facts (execution_id, order_id, fees, slippage,
+    # latency_seconds) have no dedicated trades columns — trades.extra_data
+    # (already part of the V13 schema, already the general-purpose "extra
+    # dict" column save_trade() accepts) is reused as a namespaced JSON
+    # blob instead of an ALTER TABLE migration. Per-agent participation is
+    # NOT duplicated onto every trade either: trades.signal_id ->
+    # agent_decisions.signal_id (the exact join get_agent_performance()
+    # above already does) is the single source of truth for "which agents
+    # voted on this trade" — get_trade_attribution() below reads through
+    # that existing join rather than storing a second copy that could
+    # drift out of sync with it.
+
+    def save_execution_attribution(self, trade_id: int, **fields) -> bool:
+        """
+        Merge execution-level attribution fields into trades.extra_data
+        for `trade_id` — a read-modify-write MERGE (not overwrite), so
+        this can be called independently of, before, or after
+        update_trade_result() without clobbering extra_data a caller
+        already set. Recognised **fields (all optional — only non-None
+        ones are stored): execution_id, order_id, fees, slippage,
+        latency_seconds, agent_attribution (list[dict], see
+        journal/trade_attribution.py's agent_attribution_from_ceo_decision()).
+        Any other keyword is stored as-is too — this method doesn't
+        validate field names, matching extra_data's existing free-form
+        convention elsewhere in this file.
+
+        Returns False (logged, never raises) if `trade_id` doesn't exist
+        or the write fails — attribution is diagnostic data; a failure
+        here must never be allowed to look like the trade itself failed.
+        """
+        payload = {k: v for k, v in fields.items() if v is not None}
+        if not payload:
+            return True  # nothing to merge is not an error
+        try:
+            with self._conn() as c:
+                row = c.execute(
+                    "SELECT extra_data FROM trades WHERE id=?", (trade_id,)
+                ).fetchone()
+                if row is None:
+                    logger.warning(f"save_execution_attribution: no trade #{trade_id}")
+                    return False
+                existing = _json_loads(row["extra_data"], default={}) or {}
+                attribution = existing.get("attribution", {})
+                attribution.update(payload)
+                existing["attribution"] = attribution
+                c.execute(
+                    "UPDATE trades SET extra_data=? WHERE id=?",
+                    (_json(existing), trade_id),
+                )
+                c.commit()
+            return True
+        except Exception as exc:
+            logger.error(f"save_execution_attribution error (trade #{trade_id}): {exc}")
+            return False
+
+    def get_trade_attribution(self, trade_id: int) -> dict | None:
+        """
+        Task 1 + Task 4's combined read: one trade's full attribution —
+        execution facts (trades.extra_data's "attribution" key, Task 1)
+        plus which agents participated and how (Task 4), joined from
+        agent_decisions via the trade's signal_id exactly like
+        get_agent_performance() already joins.
+
+        Per-agent entries use this project's real CEOAgent.WEIGHTS keys
+        (smc/futures/regime/risk/journal/confidence_engine) — see
+        journal/trade_attribution.py's module docstring for why. If the
+        trade carries an explicit agent_attribution (a caller passed one
+        to save_execution_attribution() / record_trade_outcome()
+        directly), that is returned as-is instead of the join — the
+        explicit value is assumed more complete. Returns an EMPTY
+        agent_participation list (never fabricated entries) for any
+        trade whose signal_id has no agent_decisions rows — today that
+        is every trade taken through the V16 multi-symbol path, since
+        execution/portfolio_signal_provider.py's pipeline doesn't run
+        the agent layer (see docs/architecture.md §29 "Scope boundary" —
+        an honest, pre-existing gap, not a bug in this method).
+        """
+        with self._conn() as c:
+            trade = c.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+            if trade is None:
+                return None
+            trade_d = _row_to_dict(trade, json_cols=("confidence_breakdown", "block_reasons", "extra_data"))
+
+            agents: list[dict] = []
+            if trade["signal_id"] is not None:
+                rows = c.execute(
+                    "SELECT * FROM agent_decisions WHERE signal_id=? ORDER BY id",
+                    (trade["signal_id"],),
+                ).fetchall()
+                agents = [_row_to_dict(r, json_cols=("details",)) for r in rows]
+
+        attribution = trade_d.get("extra_data") or {}
+        attribution = attribution.get("attribution", {}) if isinstance(attribution, dict) else {}
+
+        agent_participation = attribution.get("agent_attribution") or [
+            {
+                "agent":        a["agent"],
+                "vote":         a["decision"],
+                "weight":       a["weight"],
+                "confidence":   a["score"],
+                "contribution": round(a["score"] * a["weight"], 2),
+            }
+            for a in agents
+        ]
+
+        return {
+            "trade_id":            trade_d["id"],
+            "symbol":              trade_d["symbol"],
+            "timestamp":           trade_d["timestamp"],
+            "direction":           trade_d["direction"],
+            "entry_price":         trade_d["entry_price"],
+            "exit_price":          trade_d["exit_price"],
+            "result":              trade_d["result"],
+            "pnl":                 trade_d["pnl"],
+            "order_id":            trade_d["order_id"] or attribution.get("order_id"),
+            "execution_id":        attribution.get("execution_id"),
+            "fees":                attribution.get("fees"),
+            "slippage":            attribution.get("slippage"),
+            "latency_seconds":     attribution.get("latency_seconds"),
+            "agent_participation": agent_participation,
+        }
+
+    def get_ensemble_learning_dataset(self, limit: int = 1000, symbol: str | None = None) -> list[dict]:
+        """
+        Task 6/7 (architecture.md §29): one clean, flat row per CLOSED
+        trade — trade facts + execution attribution + per-agent
+        participation — ready for a future Phase 4C to consume. This
+        method only reads and shapes EXISTING data (trades,
+        agent_decisions, extra_data); it computes no weights and makes
+        no learning decisions — see journal/trade_attribution.py's
+        module docstring for why that's deliberately out of scope here.
+
+        Deliberately reuses get_trade_attribution() per row (N+1 reads)
+        rather than a second, hand-written mega-join — this is a bulk/
+        offline export method (mirrors research/feature_store.py's
+        get_training_rows(), also not a hot decision-cycle path), and
+        reuse means the single-row and bulk-dataset shapes can never
+        silently drift apart from each other.
+
+        Rows with empty agent_participation are included, not filtered
+        out — a future Phase 4C consumer needs to see that gap in the
+        data (today: every V16 multi-symbol trade), not have it hidden.
+        """
+        sql = "SELECT id FROM trades WHERE result IN ('WIN','LOSS')"
+        args: tuple = ()
+        if symbol:
+            sql += " AND symbol=?"
+            args = (symbol,)
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        args = args + (limit,)
+        with self._conn() as c:
+            ids = [r["id"] for r in c.execute(sql, args).fetchall()]
+        return [row for row in (self.get_trade_attribution(tid) for tid in ids) if row is not None]
+
+    # ════════════════════════════════════════════════════════════════════
     # SIGNALS — backs /api/signals and /api/decision
     # ════════════════════════════════════════════════════════════════════
 

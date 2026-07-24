@@ -457,6 +457,85 @@ class TestCooldownHelpers:
         assert pm.is_in_cooldown("BTCUSDT", now=now + 150) is False
 
 
+# ── Execution attribution — V16 Phase 4B Step 2 (architecture.md §29) ─────
+
+class FakeAttributionJournal:
+    """Records every call so tests can assert without touching SQLite —
+    mirrors tests/test_execution_orchestrator.py's FakeJournal."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def update_trade_result(self, trade_id, result, exit_price, pnl):
+        self.calls.append({"method": "update_trade_result", "trade_id": trade_id,
+                            "result": result, "exit_price": exit_price, "pnl": pnl})
+        return True
+
+    def save_execution_attribution(self, trade_id, **fields):
+        self.calls.append({"method": "save_execution_attribution", "trade_id": trade_id, **fields})
+        return True
+
+
+class BrokenAttributionJournal:
+    def update_trade_result(self, *a, **kw):
+        raise RuntimeError("db exploded")
+
+    def save_execution_attribution(self, *a, **kw):
+        raise RuntimeError("db exploded")
+
+
+class TestNotifyPositionClosedAttribution:
+
+    def test_no_journal_configured_is_backward_compatible(self):
+        """The exact pre-Phase-4B-Step-2 call shape (positional symbol
+        only) must keep working with zero behavior change."""
+        pm = PortfolioManager()
+        pm.notify_position_closed("BTCUSDT")
+        assert pm.is_in_cooldown("BTCUSDT") is True
+
+    def test_journal_configured_but_no_trade_id_skips_attribution(self):
+        journal = FakeAttributionJournal()
+        pm = PortfolioManager(journal=journal)
+        pm.notify_position_closed("BTCUSDT")  # no trade_id kwarg
+        assert journal.calls == []
+        assert pm.is_in_cooldown("BTCUSDT") is True  # cooldown still registered
+
+    def test_journal_and_trade_id_records_outcome(self):
+        journal = FakeAttributionJournal()
+        pm = PortfolioManager(journal=journal)
+        pm.notify_position_closed(
+            "BTCUSDT", trade_id=7, execution_id="batch-1:close:BTCUSDT",
+            exit_price=69000.0, pnl=200.0, result="WIN", latency_seconds=0.5,
+        )
+        methods = {c["method"] for c in journal.calls}
+        assert methods == {"update_trade_result", "save_execution_attribution"}
+        update_call = next(c for c in journal.calls if c["method"] == "update_trade_result")
+        assert update_call == {"method": "update_trade_result", "trade_id": 7,
+                                "result": "WIN", "exit_price": 69000.0, "pnl": 200.0}
+
+    def test_agent_attribution_forwarded(self):
+        journal = FakeAttributionJournal()
+        pm = PortfolioManager(journal=journal)
+        votes = [{"agent": "smc", "vote": "LONG", "weight": 0.25, "confidence": 80.0, "contribution": 20.0}]
+        pm.notify_position_closed("BTCUSDT", trade_id=7, agent_attribution=votes)
+        attrib_call = next(c for c in journal.calls if c["method"] == "save_execution_attribution")
+        assert attrib_call["agent_attribution"] == votes
+
+    def test_broken_journal_does_not_break_cooldown_registration(self):
+        pm = PortfolioManager(journal=BrokenAttributionJournal())
+        pm.notify_position_closed("BTCUSDT", trade_id=7, exit_price=1.0, pnl=1.0, result="WIN")
+        assert pm.is_in_cooldown("BTCUSDT") is True  # cooldown unaffected by the exception
+
+    def test_partial_outcome_only_persists_attribution_not_result(self):
+        """No exit_price/pnl/result given (e.g. an open-side-only call
+        shape) — update_trade_result must NOT fire, only attribution."""
+        journal = FakeAttributionJournal()
+        pm = PortfolioManager(journal=journal)
+        pm.notify_position_closed("BTCUSDT", trade_id=7, execution_id="x")
+        methods = {c["method"] for c in journal.calls}
+        assert methods == {"save_execution_attribution"}
+
+
 # ── Persistence ────────────────────────────────────────────────────────────
 
 class TestPersistence:

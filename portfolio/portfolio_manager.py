@@ -94,6 +94,7 @@ from portfolio.portfolio_models import (
 )
 from portfolio.portfolio_state import PortfolioState
 from portfolio.sector_engine import SectorEngine
+from journal.trade_attribution import record_trade_outcome
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -108,6 +109,7 @@ class PortfolioManager:
         replacement_threshold_pct: float | None = None,
         cooldown_seconds: int | None = None,
         min_hold_seconds: int | None = None,
+        journal=None,   # V16 Phase 4B Step 2: TradeJournalV2-compatible; None = attribution inert
     ) -> None:
         self.capital_manager = capital_manager or CapitalManager()
         # Read limits from the wrapped CapitalManager rather than
@@ -130,6 +132,7 @@ class PortfolioManager:
             min_hold_seconds if min_hold_seconds is not None
             else settings.PORTFOLIO_MIN_HOLD_SECONDS
         )
+        self.journal = journal
         self._cooldowns: dict[str, float] = {}         # symbol -> cooldown_until epoch
         self._protected_until: dict[str, float] = {}   # symbol -> min-hold protection epoch
         logger.info("PortfolioManager ready")
@@ -227,16 +230,67 @@ class PortfolioManager:
         until = self._cooldowns.get(symbol)
         return until is not None and now < until
 
-    def notify_position_closed(self, symbol: str, now: float | None = None) -> None:
-        """External hook for a future execution-wiring phase: report that
-        a position was closed for ANY reason (stop-loss, take-profit,
-        manual, an executed replacement) so its symbol enters cooldown
-        before being eligible for new selection again. decide() does NOT
-        call this itself for ordinary per-cycle rejections — only actual
-        removals should cool a symbol down, not merely not being picked
-        this cycle."""
+    def notify_position_closed(
+        self,
+        symbol: str,
+        now: float | None = None,
+        *,
+        trade_id: int | None = None,
+        execution_id: str | None = None,
+        order_id: str | None = None,
+        exit_price: float | None = None,
+        pnl: float | None = None,
+        result: str | None = None,
+        fees: float | None = None,
+        slippage: float | None = None,
+        latency_seconds: float | None = None,
+        agent_attribution: list[dict] | None = None,
+    ) -> None:
+        """Hook for ANY closing path (stop-loss, take-profit, manual, an
+        executed replacement) to report that a position was closed, so
+        its symbol enters cooldown before being eligible for new
+        selection again. decide() does NOT call this itself for
+        ordinary per-cycle rejections — only actual removals should
+        cool a symbol down, not merely not being picked this cycle.
+
+        V16 Phase 4B Step 2 (docs/architecture.md §29, Task 3): every
+        keyword beyond `now` is new and optional, defaulting to None —
+        every pre-existing call site (today: execution/
+        execution_orchestrator.py's one call, plus any test calling
+        notify_position_closed(symbol) alone) keeps working completely
+        unchanged. When `trade_id` and `self.journal` are BOTH present,
+        this is now the single place "a trade completed" turns into a
+        persisted, agent-attributable outcome — deliberately the ONLY
+        place (ExecutionOrchestrator computes the execution-level facts
+        and hands them here rather than also writing to the journal
+        itself) so every current and future closing path (a later
+        natural-SL/TP-close monitor would call this exact same method)
+        shares one write path instead of two that could drift apart.
+        Cooldown registration below is unconditional and always runs
+        first — attribution is diagnostic data layered on top, and a
+        failure recording it must never be able to skip or undo the
+        cooldown a real closed position always needs.
+        """
         now = now if now is not None else time.time()
         self._register_cooldown(symbol, now)
+
+        if self.journal is None or trade_id is None:
+            return
+        try:
+            record_trade_outcome(
+                self.journal, trade_id,
+                result=result,
+                exit_price=exit_price,
+                pnl=pnl,
+                execution_id=execution_id,
+                order_id=order_id,
+                fees=fees,
+                slippage=slippage,
+                latency_seconds=latency_seconds,
+                agent_attribution=agent_attribution,
+            )
+        except Exception as exc:
+            logger.error(f"PortfolioManager: attribution record failed for {symbol} (trade #{trade_id}): {exc}")
 
     def _register_cooldown(self, symbol: str, now: float) -> None:
         self._cooldowns[symbol] = now + self.cooldown_seconds

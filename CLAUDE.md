@@ -42,6 +42,9 @@ Completed
 - Ensemble Decision Engine Phase 4B proper — dynamic per-agent weighting
   (architecture.md §28 — `agents/ceo_agent.py`, off by default via
   `DYNAMIC_AGENT_WEIGHTS_ENABLED`)
+- Ensemble Decision Engine Phase 4B Step 2 — execution attribution +
+  portfolio integration (architecture.md §29 — `journal/trade_attribution.py`,
+  `execution/execution_orchestrator.py`, `portfolio/portfolio_manager.py`)
 
 In Progress
 
@@ -196,17 +199,18 @@ Ensemble Decision Engine — Phase 4A DONE (architecture.md §26). Phase 4B
 Step 1 DONE (architecture.md §27: per-agent outcome attribution via
 `journal_v2.get_agent_performance()`). Phase 4B proper DONE (architecture.md
 §28: `CEOAgent` can now blend `WEIGHTS` toward measured win-rate, gated
-off by default via `DYNAMIC_AGENT_WEIGHTS_ENABLED`). The Ensemble
-Decision Engine pillar's **only remaining open item** is:
-`execution/execution_orchestrator.py` (V16 multi-symbol path) still does
-not write to the journal at all — no `save_trade`/`update_trade_result`
-calls anywhere in `execution/` or `portfolio/`, confirmed by inspection
-while scoping §27. Until that's wired, `get_agent_performance()` (and
-therefore dynamic weighting, once enabled) only ever reflects legacy
-single-symbol history — trades taken through the multi-symbol path are
-invisible to it. This is Execution-Layer work and needs its own scoping
-pass; deliberately not started, per the "never modify Execution Layer
-blindly" rule.
+off by default via `DYNAMIC_AGENT_WEIGHTS_ENABLED`). Phase 4B Step 2 DONE
+(architecture.md §29: `execution/execution_orchestrator.py` now writes to
+the journal on both open and close for the multi-symbol path, via the new
+`journal/trade_attribution.py` reusable API — the gap this section used to
+describe as the pillar's only remaining open item). What's still open,
+scoped precisely in §29 "Next up" rather than re-described here:
+1) a natural SL/TP close monitor for the multi-symbol path (today only
+replacement-triggered closes call `notify_position_closed()`), 2) making
+`PortfolioSignalProvider` agent-aware (multi-symbol trades still get
+empty `agent_participation` — the agent layer never runs on that path),
+3) Phase 4C itself (consuming `get_ensemble_learning_dataset()` for
+something beyond §28's win-rate blend — explicitly not started).
 
 Priority 3
 

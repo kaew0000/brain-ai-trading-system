@@ -69,11 +69,11 @@ def make_decision(selected=None, replacements=None, blocked=False, block_reason=
     )
 
 
-def make_position(symbol="BTCUSDT", direction="LONG", qty=1.0) -> PortfolioPosition:
+def make_position(symbol="BTCUSDT", direction="LONG", qty=1.0, trade_id=None) -> PortfolioPosition:
     return PortfolioPosition(
         symbol=symbol, direction=direction, entry_price=100.0, quantity=qty,
         leverage=5, notional=500.0, margin_used=100.0, unrealized_pnl=0.0,
-        state=PositionState.OPEN, opened_at=time.time(),
+        state=PositionState.OPEN, opened_at=time.time(), trade_id=trade_id,
     )
 
 
@@ -84,9 +84,11 @@ def always_long_signal(symbol) -> ExecutionSignal:
 class FakePortfolioManager:
     def __init__(self):
         self.closed_symbols = []
+        self.close_calls = []  # V16 Phase 4B Step 2: full kwargs per notify_position_closed() call
 
-    def notify_position_closed(self, symbol):
+    def notify_position_closed(self, symbol, **kwargs):
         self.closed_symbols.append(symbol)
+        self.close_calls.append({"symbol": symbol, **kwargs})
 
 
 class FakeEngine:
@@ -643,3 +645,211 @@ class TestSignalDirectionMapping:
         orch = make_orchestrator(engine=engine, signal_provider=lambda s: ExecutionSignal(-1, 100.0, 110.0, 90.0))
         orch.execute(make_decision(selected=[make_allocation()]), PortfolioState(), 1_000.0)
         assert engine.execute_calls[0]["direction"] == "SHORT"
+
+
+# ── Execution attribution — V16 Phase 4B Step 2 (architecture.md §29) ─────
+
+class FakeJournal:
+    """Records every call so tests can assert without touching SQLite —
+    same duck-typed-fake philosophy as FakeEngine/FakePortfolioManager
+    above (see this file's module docstring)."""
+
+    def __init__(self):
+        self.signals: list[dict] = []
+        self.trades: list[dict] = []
+        self.attribution_calls: list[tuple] = []
+        self._next_trade_id = 1
+
+    def save_signal(self, decision, symbol=None, **kwargs):
+        self.signals.append({"decision": decision, "symbol": symbol})
+        return len(self.signals)
+
+    def save_trade(self, rec, signal_id=None, **kwargs):
+        tid = self._next_trade_id
+        self._next_trade_id += 1
+        self.trades.append({"rec": rec, "signal_id": signal_id, "trade_id": tid})
+        return tid
+
+    def update_trade_result(self, trade_id, result, exit_price, pnl):
+        self.attribution_calls.append(("update_trade_result", trade_id, result, exit_price, pnl))
+        return True
+
+    def save_execution_attribution(self, trade_id, **fields):
+        self.attribution_calls.append(("save_execution_attribution", trade_id, fields))
+        return True
+
+
+class BrokenJournal:
+    """Every method raises — attribution recording must never be able to
+    break a real trade that already succeeded on the exchange."""
+
+    def save_signal(self, *a, **kw):
+        raise RuntimeError("db exploded")
+
+    def save_trade(self, *a, **kw):
+        raise RuntimeError("db exploded")
+
+    def update_trade_result(self, *a, **kw):
+        raise RuntimeError("db exploded")
+
+    def save_execution_attribution(self, *a, **kw):
+        raise RuntimeError("db exploded")
+
+
+class TestOpenSideAttribution:
+
+    def test_no_journal_configured_is_a_complete_noop(self):
+        """Default behavior (journal=None) — the whole point of Task 2's
+        "additive, backward compatible" requirement."""
+        engine = FakeEngine()
+        orch = make_orchestrator(engine=engine)  # no journal= kwarg
+        pstate = PortfolioState()
+        orch.execute(make_decision(selected=[make_allocation()]), pstate, 1_000.0)
+        assert pstate.get_position("BTCUSDT").trade_id is None
+
+    def test_journal_configured_records_signal_and_trade(self):
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=FakeEngine(), journal=journal)
+        pstate = PortfolioState()
+        orch.execute(make_decision(selected=[make_allocation()]), pstate, 1_000.0)
+
+        assert len(journal.signals) == 1
+        assert len(journal.trades) == 1
+        assert journal.trades[0]["rec"].symbol == "BTCUSDT"
+        assert journal.trades[0]["rec"].direction == "LONG"
+
+    def test_trade_id_lands_on_the_opened_position(self):
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=FakeEngine(), journal=journal)
+        pstate = PortfolioState()
+        orch.execute(make_decision(selected=[make_allocation()]), pstate, 1_000.0)
+
+        position = pstate.get_position("BTCUSDT")
+        assert position.trade_id == journal.trades[0]["trade_id"]
+
+    def test_open_side_execution_attribution_includes_execution_id(self):
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=FakeEngine(), journal=journal)
+        pstate = PortfolioState()
+        orch.execute(make_decision(selected=[make_allocation()]), pstate, 1_000.0)
+
+        calls = [c for c in journal.attribution_calls if c[0] == "save_execution_attribution"]
+        assert len(calls) == 1
+        assert calls[0][2]["execution_id"]  # non-empty string
+        assert "fees" not in calls[0][2] or calls[0][2]["fees"] is None
+
+    def test_slippage_computed_when_entry_order_has_avg_price(self):
+        class SlippageEngine(FakeEngine):
+            def execute_trade(self, **kwargs):
+                result = super().execute_trade(**kwargs)
+                # Requested 50_000.0 (always_long_signal), filled worse:
+                result["entry_order"] = {"avgPrice": "50010.0", "orderId": 777}
+                return result
+
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=SlippageEngine(), journal=journal)
+        pstate = PortfolioState()
+        orch.execute(make_decision(selected=[make_allocation()]), pstate, 1_000.0)
+
+        calls = [c for c in journal.attribution_calls if c[0] == "save_execution_attribution"]
+        assert calls[0][2]["slippage"] == pytest.approx(10.0)  # paid 10 more than requested on a LONG
+        assert calls[0][2]["order_id"] == "777"
+
+    def test_no_avg_price_gives_none_slippage_not_zero(self):
+        """FakeEngine's default entry_order is {} (no avgPrice/price) —
+        matches paper mode's real shape (see execution/paper_execution.py)."""
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=FakeEngine(), journal=journal)
+        pstate = PortfolioState()
+        orch.execute(make_decision(selected=[make_allocation()]), pstate, 1_000.0)
+
+        calls = [c for c in journal.attribution_calls if c[0] == "save_execution_attribution"]
+        assert calls[0][2].get("slippage") is None
+
+    def test_broken_journal_does_not_fail_the_trade(self):
+        engine = FakeEngine()
+        orch = make_orchestrator(engine=engine, journal=BrokenJournal())
+        pstate = PortfolioState()
+        batch = orch.execute(make_decision(selected=[make_allocation()]), pstate, 1_000.0)
+
+        assert batch.results[0].status == ExecutionStatus.COMPLETED  # trade itself still succeeded
+        assert pstate.get_position("BTCUSDT").trade_id is None  # attribution silently gave up
+
+
+class TestCloseSideAttribution:
+
+    def test_no_journal_configured_close_still_works(self):
+        """notify_position_closed()'s new kwargs are all optional —
+        FakePortfolioManager (and the real PortfolioManager) accept them
+        with journal=None having no effect, exactly like before this
+        phase."""
+        pm = FakePortfolioManager()
+        pstate = PortfolioState()
+        pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0))
+        orch = make_orchestrator(engine=FakeEngine(), pm=pm)  # no journal=
+        proposal = ReplacementProposal(
+            incoming_symbol="NEWUSDT", outgoing_symbol="SOLUSDT",
+            incoming_score=90.0, outgoing_score=40.0, reason="better opportunity",
+        )
+        batch = orch.execute(make_decision(replacements=[proposal]), pstate, 1_000.0)
+        assert batch.results[0].status == ExecutionStatus.COMPLETED
+        assert pm.closed_symbols == ["SOLUSDT"]
+
+    def test_close_passes_trade_id_and_execution_id_to_portfolio_manager(self):
+        pm = FakePortfolioManager()
+        pstate = PortfolioState()
+        pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0, trade_id=42))
+        orch = make_orchestrator(engine=FakeEngine(), pm=pm)
+        proposal = ReplacementProposal(
+            incoming_symbol="NEWUSDT", outgoing_symbol="SOLUSDT",
+            incoming_score=90.0, outgoing_score=40.0, reason="x",
+        )
+        orch.execute(make_decision(replacements=[proposal]), pstate, 1_000.0)
+
+        assert len(pm.close_calls) == 1
+        assert pm.close_calls[0]["trade_id"] == 42
+        assert pm.close_calls[0]["execution_id"]
+        assert pm.close_calls[0]["latency_seconds"] is not None
+
+    def test_exit_price_and_pnl_computed_from_fill_price(self):
+        class FillEngine(FakeEngine):
+            def close_position(self, direction, quantity, symbol=None, client_order_id=None):
+                self.close_calls.append({"direction": direction, "quantity": quantity, "symbol": symbol})
+                return {"avgPrice": "110.0", "orderId": 555}
+
+        pm = FakePortfolioManager()
+        pstate = PortfolioState()
+        position = make_position("SOLUSDT", "LONG", qty=3.0, trade_id=42)  # entry_price=100.0
+        pstate.add_position(position)
+        orch = make_orchestrator(engine=FillEngine(), pm=pm)
+        proposal = ReplacementProposal(
+            incoming_symbol="NEWUSDT", outgoing_symbol="SOLUSDT",
+            incoming_score=90.0, outgoing_score=40.0, reason="x",
+        )
+        orch.execute(make_decision(replacements=[proposal]), pstate, 1_000.0)
+
+        call = pm.close_calls[0]
+        assert call["exit_price"] == 110.0
+        assert call["pnl"] == pytest.approx((110.0 - 100.0) * 3.0)
+        assert call["result"] == "WIN"
+        assert call["order_id"] == "555"
+
+    def test_no_fill_price_gives_none_outcome_not_a_guess(self):
+        """FakeEngine's default close_position() return has no
+        avgPrice/price (matches this file's existing TestReplacementClose
+        fixtures) — exit_price/pnl/result must stay None, not 0.0."""
+        pm = FakePortfolioManager()
+        pstate = PortfolioState()
+        pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0))
+        orch = make_orchestrator(engine=FakeEngine(), pm=pm)
+        proposal = ReplacementProposal(
+            incoming_symbol="NEWUSDT", outgoing_symbol="SOLUSDT",
+            incoming_score=90.0, outgoing_score=40.0, reason="x",
+        )
+        orch.execute(make_decision(replacements=[proposal]), pstate, 1_000.0)
+
+        call = pm.close_calls[0]
+        assert call["exit_price"] is None
+        assert call["pnl"] is None
+        assert call["result"] is None
+

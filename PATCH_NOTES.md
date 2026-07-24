@@ -1,67 +1,78 @@
-# PATCH NOTES — V16 Phase 4B Proper: Dynamic Per-Agent Weighting
+# PATCH NOTES — V16 Phase 4B Step 2: Execution Attribution + Portfolio Integration
 
-Base: `main` + Phase 4B Step 1 (per-agent outcome attribution, this same
-session — see `docs/architecture.md §27`)
+Branch: `feature/ensemble-learning-4b-step2`
+Base: `main` (post Phase 4B proper merge, PR #11, 1556 passing)
 
 ## Summary
 
-architecture.md §27 "Next up" scoped this as: "actually using
-`get_agent_performance()` to adjust `CEOAgent.WEIGHTS`". `CEOAgent.decide()`
-can now blend each agent's static weight toward its measured win-rate —
-gated **off by default** via `DYNAMIC_AGENT_WEIGHTS_ENABLED`, so nothing
-changes for any existing deployment unless explicitly opted in.
+Wires `execution/execution_orchestrator.py` to the journal on both open
+and close for the V16 multi-symbol path — the gap §27/§28 both flagged
+as "still open" and "the single biggest gap standing between Phase 4B
+and it actually mattering for V16's primary multi-symbol path." Adds a
+reusable `record_trade_outcome()` API (`journal/trade_attribution.py`)
+so callers never touch SQLite directly, and makes
+`PortfolioManager.notify_position_closed()` the one place any current
+or future closing path persists a completed trade's attribution.
 
-## Changes to existing modules
+## Discovery — read before writing any code
+
+1. **Multi-symbol trades have no agent votes to attribute.**
+   `execution/portfolio_signal_provider.py` never runs
+   `agents/ceo_agent.py`'s CEOAgent — per-agent attribution is only
+   real for the legacy single-symbol loop. `get_trade_attribution()`
+   returns an honestly empty `agent_participation: []` for V16
+   multi-symbol trades rather than fabricating votes.
+2. **Only replacement-triggered closes exist today** for the
+   multi-symbol path — no natural SL/TP close monitor exists anywhere.
+   This phase wires the real path that exists.
+3. **Paper mode (the default) has no `close_position()` at all** —
+   confirmed by reading `paper/paper_execution.py`. Close-side
+   attribution needs testnet/live mode to observe end-to-end.
+4. **Fees aren't computable anywhere in this codebase today** —
+   Binance commission needs a separate API call nothing here makes.
+   The field exists on the API for a future caller; every current call
+   site passes `fees=None` honestly. Slippage, by contrast, IS wired
+   for real (fill price vs. requested price, direction-adjusted).
+
+## New module
+
+| File | Purpose |
+|---|---|
+| `journal/trade_attribution.py` | `record_trade_outcome(journal, trade_id, **fields)` — Task 5's reusable API, every field optional, covers open- and close-side calls with one function. `agent_attribution_from_ceo_decision(ceo_decision)` — Task 4's per-agent extraction using the real `CEOAgent.WEIGHTS` keys plus a `"ceo"` aggregate entry. |
+
+## Changes to existing modules (all additive)
 
 | File | Change |
 |---|---|
-| `config/settings.py` | 4 new flags, all inert by default: `DYNAMIC_AGENT_WEIGHTS_ENABLED` (bool, `False`), `DYNAMIC_WEIGHT_MIN_SAMPLES` (int, `20`), `DYNAMIC_WEIGHT_BLEND` (float, `0.3`), `DYNAMIC_WEIGHT_REFRESH_SECONDS` (int, `300`). |
-| `agents/ceo_agent.py` | `CEOAgent.__init__` gains optional `journal=None`. New `_get_agent_performance_cached()` (TTL-cached `journal.get_agent_performance()`) and `_effective_weights(reports)` (blends toward `win_rate`, floor-gated by sample count, always renormalizes to sum 1.0, falls back to static `WEIGHTS` on any error). `decide()` now uses the effective weights consistently across the vote, `agreement_score`, and `score_breakdown`. `CEODecision` gains `weights_used: dict`. |
-| `agents/__init__.py` | `CEOAgent(...)` now also receives `journal=journal` (already threaded through `build_agent_layer()` for other agents). |
-| `docs/architecture.md` | +§28. |
-| `CLAUDE.md` | Phase 4B proper moved to Completed; Priority 2 rewritten — its only remaining open item is the execution_orchestrator.py journal gap. |
+| `journal/journal_v2.py` | +`save_execution_attribution()` (merges into `trades.extra_data`, no schema migration), +`get_trade_attribution()` (Task 1+4 combined read), +`get_ensemble_learning_dataset()` (Task 6/7 clean dataset export). |
+| `portfolio/portfolio_models.py` | `PortfolioPosition` +`trade_id: int \| None = None`. |
+| `execution/execution_orchestrator.py` | +optional `journal=None`. Open success: persists signal+trade+attribution, threads `trade_id` onto the position. Close success (replacement path): computes exit/pnl/result honestly, hands to `notify_position_closed()`. |
+| `portfolio/portfolio_manager.py` | +optional `journal=None`. `notify_position_closed()` +10 new optional keyword-only params — every existing call site unchanged. Now the single place close-side attribution is persisted. |
+| `main.py` | Scheduler bootstrap now passes `journal=journal_v2` into both `PortfolioManager(...)` and `ExecutionOrchestrator(...)` — without this the wiring above would exist but never activate. |
 
-No changes to `journal/journal_v2.py`, `execution/execution_orchestrator.py`,
-`decision/confidence_engine.py`, `main.py`, or any schema in this delivery.
+Neither `agents/ceo_agent.py`, `execution/portfolio_signal_provider.py`,
+nor `execution/strategy.py` were modified.
 
-## Safety properties (why this is safe to ship even before enabling it)
+## Known limitations (documented, not hidden)
 
-- **Off by default.** `DYNAMIC_AGENT_WEIGHTS_ENABLED=False` → `_effective_weights()`
-  returns `self.WEIGHTS` unchanged, and doesn't even call the journal.
-- **No journal configured** (`journal=None`, still the default anywhere
-  `CEOAgent(...)` is constructed without the kwarg, e.g. existing tests) →
-  same fallback.
-- **Any exception** fetching performance (journal down, bad data, etc.) →
-  same fallback, logged as a warning, decision cycle continues normally.
-- **Per-agent sample floor** — an agent with fewer than
-  `DYNAMIC_WEIGHT_MIN_SAMPLES` closed, direction-matching trades keeps its
-  static weight untouched, so a brand-new or rarely-triggered agent is
-  never blended off a handful of noisy trades.
-- **Bounded multiplier** — win-rate maps to a `[0.5, 1.5]` multiplier
-  scaled by `DYNAMIC_WEIGHT_BLEND`, so no agent can be zeroed out or made
-  to dominate the vote outright, even at 0% or 100% measured win-rate.
-- **Always renormalized to sum to 1.0** — preserves the existing
-  `long_score`/`short_score >= 40` action threshold's meaning regardless
-  of whether blending is active.
-
-## Known limitation (carried over from Phase 4B Step 1, still applies)
-
-Only reflects trades from the legacy single-symbol `main.py` pipeline —
-`execution/execution_orchestrator.py` (V16 multi-symbol path) still
-doesn't write to the journal at all, so enabling dynamic weighting today
-would only ever be informed by single-symbol history. See
-`docs/architecture.md §28` "Next up".
+- Multi-symbol trades' `agent_participation` is genuinely `[]` today —
+  the agent layer doesn't run on that path (see "Discovery" #1).
+- Natural SL/TP closes aren't detected for multi-symbol positions
+  (see "Discovery" #2) — only replacement closes are wired.
+- `fees` is always `None` (see "Discovery" #4).
+- No weight-learning logic added — `get_ensemble_learning_dataset()`
+  only reads/shapes existing data, groundwork for a future Phase 4C,
+  not a replacement for §28's existing win-rate blend.
 
 ## Testing
 
 ```
-pytest tests/ -q   → 1556 passed, 0 failed  (1546 after §27 + 10 new)
+pytest tests/ -q   → 1600 passed, 0 failed  (1556 baseline + 44 new)
 ruff check .        → clean
 ```
 
-10 new tests in `tests/test_dynamic_agent_weights.py`: disabled-by-default
-(journal never even queried), no-journal fallback, exception-during-fetch
-fallback, below-sample-floor fallback for that agent, weights always sum
-to 1.0, win-rate blending widens the weight ratio by the expected factor,
-zero-win-rate agent never zeroed out, TTL cache avoids repeated journal
-queries, `weights_used` present in `to_dict()`.
+44 new tests: `tests/test_execution_attribution.py` (27),
+`tests/test_execution_orchestrator.py` (+11), `tests/test_portfolio_manager.py`
+(+6). 3 pre-existing tests needed their `FakePortfolioManager` test
+double updated to accept the new optional kwargs (not a behavior
+change — the fake's signature needed to keep up with the real one).
