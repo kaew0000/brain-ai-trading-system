@@ -1,17 +1,28 @@
-All Rights Reserved (placeholder — please replace)
+Copyright (c) 2026 Krush Pasho
 
-Copyright (c) 2026 [your name/organization]
+Brain AI Trading System Community Edition
 
-This repository was not given an explicit license by its author, and it
-contains a live trading system with financial and API-key handling
-logic, so a permissive open-source license was NOT assumed by default.
+Permission is granted to:
 
-All rights are reserved unless and until you choose otherwise. No
-permission is granted to copy, modify, merge, publish, distribute,
-sublicense, or sell copies of this software.
+- View the source code.
+- Use the software for personal and educational purposes.
+- Fork the repository.
+- Submit Pull Requests.
 
---------------------------------------------------------------------
-If you intend to open-source this project, replace this file with the
-license text of your choice (MIT, Apache-2.0, GPL-3.0, etc.) before
-pushing to a public GitHub repository — happy to generate the exact
-text for whichever license you pick.
+You may NOT:
+
+- Use this software for any commercial purpose.
+- Sell, sublicense, or redistribute this software commercially.
+- Operate this software as a paid service (SaaS).
+- Use it for commercial trading services, signal services, copy trading,
+  or managed trading without written permission.
+
+Commercial licenses are available from the copyright owner.
+
+All commercial rights are reserved.
+
+Copyright Owner:
+Krush Pasho
+
+Commercial inquiries:
+https://github.com/kaew0000
