@@ -45,6 +45,8 @@ proof the import is safe: main.py's module-level code is guarded by
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
 
 from data.binance_provider import BinanceDataProvider
 from decision.confidence_engine import ConfidenceEngine
@@ -56,6 +58,26 @@ from regime.regime_engine import RegimeEngine
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class SignalWithContext:
+    """V16 Phase 4B Step 3B (Part B): everything get_signal() computes,
+    plus the intermediate market_context/confidence_result it currently
+    throws away — so a caller building a CEODecisionContext
+    (agents/decision_context.py) never has to recompute
+    MarketContextBuilder/ConfidenceEngine a second time. `signal` is
+    None under the exact same conditions get_signal() itself returns
+    None for (no MTF consensus, no valid entry, or a WAIT/SKIP/BLOCKED
+    ConfidenceEngine action) — market_context/confidence_result are
+    still populated in the WAIT case (there IS a confidence_result,
+    it's just not a tradeable one), which is genuinely useful context
+    for a CEOAgent-based caller even when there's no ExecutionSignal to
+    execute."""
+
+    signal:            ExecutionSignal | None
+    market_context:     dict
+    confidence_result:  Any  # decision.confidence_engine's ConfidenceResult
 
 
 class PortfolioSignalProvider:
@@ -100,17 +122,41 @@ class PortfolioSignalProvider:
         main.py's live single-symbol loop uses, pointed at an arbitrary
         symbol instead of settings.SYMBOL. Never raises — any failure
         anywhere in the pipeline (bad data, a transient engine error) is
-        logged and treated as "no signal this cycle" for this symbol,
+        logged and treated as \"no signal this cycle\" for this symbol,
         so one bad symbol in a multi-symbol batch can never take down
-        the whole cycle. Matches this project's own "safety wrapping at
-        every touchpoint" rule."""
+        the whole cycle. Matches this project's own \"safety wrapping at
+        every touchpoint\" rule.
+
+        V16 Phase 4B Step 3B: delegates to get_signal_with_context() and
+        returns just its .signal — the two methods share ONE computation
+        path (_compute_signal_with_context below), so this method's
+        behavior is byte-for-byte unchanged from before this phase."""
+        result = self.get_signal_with_context(symbol)
+        return result.signal if result is not None else None
+
+    def get_signal_with_context(self, symbol: str) -> SignalWithContext | None:
+        """V16 Phase 4B Step 3B (Part B): same computation as get_signal(),
+        but also returns the market_context (MarketContextBuilder's
+        output) and confidence_result (ConfidenceEngine's output) that
+        were already computed along the way, instead of discarding them.
+        Exists so a caller building a CEODecisionContext for CEOAgent
+        (agents/multi_symbol_adapter.py) never has to call
+        MarketContextBuilder.build() or ConfidenceEngine.score() a
+        second time — there is exactly one call to each per symbol,
+        shared by both this method and get_signal().
+
+        Returns None under the exact same conditions get_signal() does
+        (incomplete OHLCV, no MTF consensus, no valid entry price) —
+        parity with get_signal() matters more here than trying to
+        salvage a partial context from an unusable pipeline run. Never
+        raises — same reasoning as get_signal()."""
         try:
-            return self._compute_signal(symbol)
+            return self._compute_signal_with_context(symbol)
         except Exception as exc:
-            logger.error(f"PortfolioSignalProvider: signal computation failed for {symbol}: {exc}")
+            logger.error(f"PortfolioSignalProvider: signal+context computation failed for {symbol}: {exc}")
             return None
 
-    def _compute_signal(self, symbol: str) -> ExecutionSignal | None:
+    def _compute_signal_with_context(self, symbol: str) -> SignalWithContext | None:
         from main import _derive_levels  # see module docstring
 
         market = self.data_provider.get_market_data_for(symbol)
@@ -151,13 +197,17 @@ class PortfolioSignalProvider:
             mtf_aligned=ctx.get("mtf_aligned", False),
         )
 
+        signal: ExecutionSignal | None = None
         if decision.action == "LONG":
-            return ExecutionSignal(direction=1, entry_price=entry, stop_loss=stop_loss, take_profit=take_profit)
-        if decision.action == "SHORT":
-            return ExecutionSignal(direction=-1, entry_price=entry, stop_loss=stop_loss, take_profit=take_profit)
-        # WAIT / SKIP / BLOCKED all mean "no trade this symbol, this cycle" — identical
-        # to how main.py's own single-symbol loop treats these three outcomes.
-        return None
+            signal = ExecutionSignal(direction=1, entry_price=entry, stop_loss=stop_loss, take_profit=take_profit)
+        elif decision.action == "SHORT":
+            signal = ExecutionSignal(direction=-1, entry_price=entry, stop_loss=stop_loss, take_profit=take_profit)
+        # WAIT / SKIP / BLOCKED all mean "no ExecutionSignal this cycle" — identical to how
+        # main.py's own single-symbol loop treats these three outcomes. market_context and
+        # confidence_result are still returned below regardless — see this method's caller,
+        # get_signal_with_context()'s docstring, for why that's useful even on a WAIT.
+
+        return SignalWithContext(signal=signal, market_context=ctx, confidence_result=decision)
 
     def __call__(self, symbol: str) -> ExecutionSignal | None:
         return self.get_signal(symbol)

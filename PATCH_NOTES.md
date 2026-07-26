@@ -1,78 +1,105 @@
-# PATCH NOTES — V16 Phase 4B Step 2: Execution Attribution + Portfolio Integration
+# PATCH NOTES — V16 Phase 4B Step 3B: CEO Decision Context + Multi-Symbol Signal Integration
 
-Branch: `feature/ensemble-learning-4b-step2`
-Base: `main` (post Phase 4B proper merge, PR #11, 1556 passing)
+Branch: `feature/phase4b-step3b-ceo-context`
+Base: `main` (post Phase 4B Step 3A merge, PR #13, 1626 passing)
 
 ## Summary
 
-Wires `execution/execution_orchestrator.py` to the journal on both open
-and close for the V16 multi-symbol path — the gap §27/§28 both flagged
-as "still open" and "the single biggest gap standing between Phase 4B
-and it actually mattering for V16's primary multi-symbol path." Adds a
-reusable `record_trade_outcome()` API (`journal/trade_attribution.py`)
-so callers never touch SQLite directly, and makes
-`PortfolioManager.notify_position_closed()` the one place any current
-or future closing path persists a completed trade's attribution.
+Builds the missing bridge between the multi-symbol signal pipeline
+(`PortfolioSignalProvider`) and `CEOAgent` — reusing the existing
+pipeline's already-computed `market_context`/`confidence_result`
+instead of recalculating market analysis. No execution, journal,
+portfolio-allocation, or trade-attribution behavior changes; this phase
+prepares integration only.
 
 ## Discovery — read before writing any code
 
-1. **Multi-symbol trades have no agent votes to attribute.**
-   `execution/portfolio_signal_provider.py` never runs
-   `agents/ceo_agent.py`'s CEOAgent — per-agent attribution is only
-   real for the legacy single-symbol loop. `get_trade_attribution()`
-   returns an honestly empty `agent_participation: []` for V16
-   multi-symbol trades rather than fabricating votes.
-2. **Only replacement-triggered closes exist today** for the
-   multi-symbol path — no natural SL/TP close monitor exists anywhere.
-   This phase wires the real path that exists.
-3. **Paper mode (the default) has no `close_position()` at all** —
-   confirmed by reading `paper/paper_execution.py`. Close-side
-   attribution needs testnet/live mode to observe end-to-end.
-4. **Fees aren't computable anywhere in this codebase today** —
-   Binance commission needs a separate API call nothing here makes.
-   The field exists on the API for a future caller; every current call
-   site passes `fees=None` honestly. Slippage, by contrast, IS wired
-   for real (fill price vs. requested price, direction-adjusted).
+1. `CEOAgent.decide()` already takes a plain `market_context` dict and
+   runs its 6 sub-agents against it directly — none of them call
+   MarketContextBuilder/ConfidenceEngine/RegimeEngine/SMCEngine/
+   VolumeEngine themselves. "No duplicate computation" was only ever at
+   risk from new glue code between `PortfolioSignalProvider` and
+   `CEOAgent`, which is exactly what Part B's `get_signal_with_context()`
+   removes the risk from.
+2. Step 3A's per-symbol HMM capability (`RegimeEngine.classify(df, symbol=)`)
+   is NOT yet wired into `PortfolioSignalProvider` — that phase's own
+   comment says wiring a real caller was explicitly out of scope for
+   it. `PortfolioSignalProvider` still calls `classify(ohlcv["h1"])`
+   with no `symbol=`, so cross-symbol HMM contamination — the exact
+   issue Step 3A exists to fix — is still live on the multi-symbol path
+   today. **Not fixed in this phase either** — would be an execution-
+   behavior change, explicitly out of scope here.
+3. `TraderAgent` is registered but isn't a `CEOAgent.WEIGHTS` key —
+   pre-existing, unrelated, noted only for the record while confirming
+   "preserve existing vote logic" actually holds.
+4. Sub-agents hold small amounts of per-instance state between calls
+   (`RegimeAnalyst._prev_regime`, `BaseAgent._memory`/`_last`). Fine for
+   one CEOAgent per symbol (today). A future phase reusing one shared
+   CEOAgent across many symbols in a loop needs a decision here first —
+   not addressed by this phase's adapter, which doesn't itself create
+   that sharing pattern.
 
-## New module
+## New modules
 
 | File | Purpose |
 |---|---|
-| `journal/trade_attribution.py` | `record_trade_outcome(journal, trade_id, **fields)` — Task 5's reusable API, every field optional, covers open- and close-side calls with one function. `agent_attribution_from_ceo_decision(ceo_decision)` — Task 4's per-agent extraction using the real `CEOAgent.WEIGHTS` keys plus a `"ceo"` aggregate entry. |
+| `agents/decision_context.py` | Part A. `CEODecisionContext` — frozen dataclass (symbol, market_context, confidence_result, portfolio_state, existing_positions, risk_snapshot). Last three: plumbing for a future phase, not consumed here. |
+| `agents/multi_symbol_adapter.py` | Part D. `MultiSymbolCEOAdapter(signal_provider, ceo_agent).decide(symbol)` — the full bridge, ends at `CEODecision`. Imports nothing from execution/, portfolio/portfolio_manager.py, or journal/. |
 
 ## Changes to existing modules (all additive)
 
 | File | Change |
 |---|---|
-| `journal/journal_v2.py` | +`save_execution_attribution()` (merges into `trades.extra_data`, no schema migration), +`get_trade_attribution()` (Task 1+4 combined read), +`get_ensemble_learning_dataset()` (Task 6/7 clean dataset export). |
-| `portfolio/portfolio_models.py` | `PortfolioPosition` +`trade_id: int \| None = None`. |
-| `execution/execution_orchestrator.py` | +optional `journal=None`. Open success: persists signal+trade+attribution, threads `trade_id` onto the position. Close success (replacement path): computes exit/pnl/result honestly, hands to `notify_position_closed()`. |
-| `portfolio/portfolio_manager.py` | +optional `journal=None`. `notify_position_closed()` +10 new optional keyword-only params — every existing call site unchanged. Now the single place close-side attribution is persisted. |
-| `main.py` | Scheduler bootstrap now passes `journal=journal_v2` into both `PortfolioManager(...)` and `ExecutionOrchestrator(...)` — without this the wiring above would exist but never activate. |
+| `execution/portfolio_signal_provider.py` | Part B. `+SignalWithContext`, `+get_signal_with_context()`. `_compute_signal` replaced by `_compute_signal_with_context`, shared by both public methods — ONE computation path. `get_signal()`'s behavior is unchanged (12/12 pre-existing tests pass unmodified). |
+| `agents/ceo_agent.py` | Part C. `+decide_from_context(context)` — thin wrapper calling the existing `decide()` unchanged. No vote/score/weight/confidence logic touched. |
+| `agents/__init__.py` | `+CEODecisionContext`, `+MultiSymbolCEOAdapter` exports. |
 
-Neither `agents/ceo_agent.py`, `execution/portfolio_signal_provider.py`,
-nor `execution/strategy.py` were modified.
+`execution/execution_orchestrator.py`, `portfolio/portfolio_manager.py`,
+`execution/trade_manager.py`, `journal/`, `journal/trade_attribution.py`,
+`risk/risk_engine.py` — **not modified**.
 
-## Known limitations (documented, not hidden)
+## Compatibility analysis
 
-- Multi-symbol trades' `agent_participation` is genuinely `[]` today —
-  the agent layer doesn't run on that path (see "Discovery" #1).
-- Natural SL/TP closes aren't detected for multi-symbol positions
-  (see "Discovery" #2) — only replacement closes are wired.
-- `fees` is always `None` (see "Discovery" #4).
-- No weight-learning logic added — `get_ensemble_learning_dataset()`
-  only reads/shapes existing data, groundwork for a future Phase 4C,
-  not a replacement for §28's existing win-rate blend.
+`get_signal()`: same signature/return type/behavior. `CEOAgent.decide()`:
+untouched. `CEODecision`/`AgentReport`: untouched. No settings/schema
+changes, no new required dependencies for any existing caller.
 
 ## Testing
 
 ```
-pytest tests/ -q   → 1600 passed, 0 failed  (1556 baseline + 44 new)
+pytest tests/ -q   → 1652 passed, 0 failed  (1626 baseline + 26 new)
 ruff check .        → clean
 ```
 
-44 new tests: `tests/test_execution_attribution.py` (27),
-`tests/test_execution_orchestrator.py` (+11), `tests/test_portfolio_manager.py`
-(+6). 3 pre-existing tests needed their `FakePortfolioManager` test
-double updated to accept the new optional kwargs (not a behavior
-change — the fake's signature needed to keep up with the real one).
+26 new tests in `tests/test_multi_symbol_ceo_integration.py`: context
+construction/immutability, `get_signal_with_context()` parity +
+no-duplicate-computation, `decide_from_context()` regression parity,
+adapter single/multi-symbol behavior + error paths, full-pipeline
+duplicate-computation spies (BTCUSDT/ETHUSDT, each engine called
+exactly once per symbol).
+
+## Benchmark
+
+`MultiSymbolCEOAdapter.decide()` timed over N symbols (warm-up run
+first, excluding one-time HMM fit cost):
+
+```
+n= 5   per_symbol= 93.2ms
+n=10   per_symbol= 91.8ms
+n=20   per_symbol= 97.4ms
+n=40   per_symbol=100.7ms
+```
+
+Flat per-symbol cost from n=5 to n=40 — linear total complexity, no
+quadratic blowup. The adapter itself adds O(1) work per symbol beyond
+`get_signal_with_context()` (one dict construction, one
+`decide_from_context()` call).
+
+## Scope boundary
+
+CEOAgent is still NOT invoked anywhere in the live V16 multi-symbol
+path — `main.py`'s scheduler bootstrap still uses a bare
+`PortfolioSignalProvider`. This phase built the bridge; wiring it in is
+future work, per this phase's own "prepares integration only" brief.
+Cross-symbol HMM contamination (Discovery #2) remains unfixed. No
+Dynamic Weight Learning, journal, or attribution changes.

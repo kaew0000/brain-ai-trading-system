@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4B Step 3B: CEO Decision Context + Multi-Symbol Signal Integration
+
+### Added
+- **`agents/decision_context.py`**: `CEODecisionContext` — frozen
+  dataclass (symbol, market_context, confidence_result,
+  portfolio_state, existing_positions, risk_snapshot). The single
+  input `CEOAgent.decide_from_context()` accepts.
+- **`agents/multi_symbol_adapter.py`**: `MultiSymbolCEOAdapter(signal_provider,
+  ceo_agent).decide(symbol)` — `PortfolioSignalProvider` ->
+  `CEODecisionContext` -> `CEOAgent` -> `CEODecision`, zero duplicate
+  MarketContextBuilder/ConfidenceEngine computation. Does not execute
+  trades, allocate capital, or touch the journal.
+- **`execution/portfolio_signal_provider.py`**: `+SignalWithContext`,
+  `+get_signal_with_context(symbol)` — returns the already-computed
+  market_context/confidence_result alongside the signal, instead of
+  discarding them. `get_signal()` now delegates to the same internal
+  computation (`_compute_signal_with_context`) — one path, not two.
+- **`agents/ceo_agent.py`**: `+decide_from_context(context)` — thin
+  compatibility wrapper around the existing, unchanged `decide()`.
+- **`agents/__init__.py`**: exports `CEODecisionContext`,
+  `MultiSymbolCEOAdapter`.
+
+### Compatibility
+`get_signal()`, `CEOAgent.decide()`, `CEODecision`, `AgentReport` all
+unchanged. No settings/schema changes. `execution/execution_orchestrator.py`,
+`portfolio/portfolio_manager.py`, `execution/trade_manager.py`,
+`journal/`, `journal/trade_attribution.py`, `risk/risk_engine.py` not
+modified.
+
+### Known limitations
+CEOAgent is still not invoked anywhere in the live V16 multi-symbol
+path (this phase prepares integration only). Cross-symbol HMM
+contamination on `PortfolioSignalProvider`'s `RegimeEngine` usage
+remains unfixed (Step 3A's per-symbol capability exists; not yet
+passed `symbol=` by this caller). See PATCH_NOTES.md for full detail.
+
+### Testing
+`pytest tests/ -q` → 1652 passed, 0 failed (1626 baseline + 26 new).
+`ruff check .` → clean. Benchmark: flat ~91-101ms per symbol from
+n=5 to n=40 — linear complexity confirmed.
+
 ## [Unreleased] — V16 Phase 4B Step 2: Execution Attribution + Portfolio Integration
 
 ### Added
