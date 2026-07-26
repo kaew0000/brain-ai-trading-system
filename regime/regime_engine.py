@@ -77,7 +77,11 @@ class RegimeEngine:
     Parameters
     ----------
     use_hmm : bool
-        If True, fit a Gaussian HMM on first call and blend with rule output.
+        If True, fit a Gaussian HMM per symbol on that symbol's first
+        call to classify(), and blend with the rule-based output.
+        (Phase 4B Step 3A: previously fit once, globally, on whichever
+        symbol's data reached classify() first, and silently reused for
+        every other symbol — see self.models in __init__.)
     hmm_n_components : int
         Number of hidden states (3 recommended).
     """
@@ -94,9 +98,28 @@ class RegimeEngine:
         self.use_hmm         = use_hmm
         self.hmm_n_components = hmm_n_components
         self._scaler          = StandardScaler()
-        self._hmm_model: hmm.GaussianHMM | None = None
-        self._fitted          = False
+        # Phase 4B Step 3A: one fitted HMM per symbol, keyed by the
+        # `symbol` argument classify() now accepts. Presence of a key
+        # means "fitted for that symbol" — replaces the old single
+        # self._hmm_model/self._fitted pair, which meant a model fit on
+        # whichever symbol's data reached classify() first was silently
+        # reused forever for every other symbol (the audit finding this
+        # bundle addresses — see docs/architecture.md's Phase 4B Step 3A
+        # section for the empirical reproduction).
+        #
+        # Callers that don't pass `symbol` to classify() (every existing
+        # caller as of this commit — main.py's legacy single-symbol loop,
+        # execution/portfolio_signal_provider.py) all map to the same
+        # _DEFAULT_MODEL_KEY, reproducing the exact prior one-shared-model
+        # behavior byte-for-byte. This intentionally does NOT yet fix
+        # cross-symbol contamination for those callers — wiring an actual
+        # `symbol=` argument through them is explicitly out of scope for
+        # this bundle (see PATCH_NOTES.md's "Known limitation" section);
+        # this class only builds the capability.
+        self.models: dict[str, hmm.GaussianHMM] = {}
         logger.info(f"RegimeEngine | use_hmm={use_hmm} components={hmm_n_components}")
+
+    _DEFAULT_MODEL_KEY = "_default"
 
     # ── Feature engineering ───────────────────────────────────────────────
 
@@ -160,7 +183,7 @@ class RegimeEngine:
 
     # ── HMM ──────────────────────────────────────────────────────────────
 
-    def _fit_hmm(self, X: np.ndarray) -> None:
+    def _fit_hmm(self, X: np.ndarray, symbol_key: str) -> None:
         try:
             model = hmm.GaussianHMM(
                 n_components=self.hmm_n_components,
@@ -170,23 +193,23 @@ class RegimeEngine:
                 verbose=False,
             )
             model.fit(X)
-            self._hmm_model = model
-            self._fitted    = True
-            logger.info(f"HMM fitted | states={self.hmm_n_components}")
+            self.models[symbol_key] = model
+            logger.info(f"HMM fitted | symbol={symbol_key} states={self.hmm_n_components}")
         except Exception as exc:
             logger.warning(f"HMM fit failed ({exc}); using rule-based only")
             self.use_hmm = False
 
-    def _hmm_probabilities(self, X: np.ndarray) -> dict[str, float]:
-        if self._hmm_model is None or not self._fitted:
+    def _hmm_probabilities(self, X: np.ndarray, symbol_key: str) -> dict[str, float]:
+        model = self.models.get(symbol_key)
+        if model is None:
             return {}
         try:
-            _, posteriors = self._hmm_model.score_samples(X)
+            _, posteriors = model.score_samples(X)
             probs = posteriors[-1]                    # shape (n_components,)
 
             # Map HMM states → regime names by variance ordering
             # "diag" covars_ shape: (n_components, n_features)
-            state_var = [float(np.mean(self._hmm_model.covars_[i]))
+            state_var = [float(np.mean(model.covars_[i]))
                          for i in range(self.hmm_n_components)]
             order = np.argsort(state_var)             # lowest → highest variance
 
@@ -213,17 +236,29 @@ class RegimeEngine:
 
     # ── Public API ────────────────────────────────────────────────────────
 
-    def classify(self, df: pd.DataFrame) -> RegimeResult:
+    def classify(self, df: pd.DataFrame, symbol: str | None = None) -> RegimeResult:
         """
         Classify current market regime from OHLCV data.
 
         Recommended input: H1 or H4 OHLCV DataFrame.
+
+        Parameters
+        ----------
+        symbol : which symbol this OHLCV data is for. Optional — omit for
+            the existing single-symbol callers (main.py's legacy loop,
+            execution/portfolio_signal_provider.py as of this commit),
+            which all fall back to one shared model key, identical to
+            this class's behavior before Phase 4B Step 3A. Passing an
+            explicit symbol gives that symbol its own independently-fit
+            HMM, never reused for a different symbol (see self.models's
+            docstring in __init__ for the audit finding this addresses).
 
         Returns
         -------
         RegimeResult (never raises; falls back to RANGE on error)
         """
         result = RegimeResult()
+        symbol_key = symbol or self._DEFAULT_MODEL_KEY
 
         try:
             if len(df) < 50:
@@ -251,11 +286,11 @@ class RegimeEngine:
                 X_raw  = feat_df[feat_cols].values
                 X_scaled = self._scaler.fit_transform(X_raw)
 
-                if not self._fitted:
-                    self._fit_hmm(X_scaled)
+                if symbol_key not in self.models:
+                    self._fit_hmm(X_scaled, symbol_key)
 
-                if self._fitted:
-                    hmm_probs = self._hmm_probabilities(X_scaled)
+                if symbol_key in self.models:
+                    hmm_probs = self._hmm_probabilities(X_scaled, symbol_key)
                     result.probabilities = hmm_probs
 
                     if hmm_probs:

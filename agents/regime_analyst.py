@@ -88,6 +88,7 @@ class RegimeAnalyst(BaseAgent):
 
         return AgentReport(
             agent      = self.AGENT_NAME,
+            symbol     = market_context.get("symbol"),
             signal     = signal,
             confidence = conf,
             summary    = summary,

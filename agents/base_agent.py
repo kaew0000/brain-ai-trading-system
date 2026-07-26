@@ -52,6 +52,7 @@ class AgentReport:
         "raw",
         "signal",
         "summary",
+        "symbol",
         "timestamp",
     )
 
@@ -64,6 +65,7 @@ class AgentReport:
         factors:    list | None = None,
         raw:        dict | None = None,
         event_name: str | None = None,
+        symbol:     str | None = None,
     ) -> None:
         self.agent      = agent
         self.timestamp  = datetime.now(timezone.utc).isoformat()
@@ -79,6 +81,13 @@ class AgentReport:
         # holding LONG") rather than a fresh directional call avoid being
         # logged as a brand-new "LONG_SIGNAL"/"SHORT_SIGNAL" event.
         self.event_name = event_name
+        # Phase 4B Step 3A: which symbol this report was produced for.
+        # Optional, default None — every pre-existing single-symbol call
+        # site is unaffected. Populated by each analyse() from
+        # market_context.get("symbol") when available (never fabricated
+        # when it isn't — see docs/architecture.md's Phase 4B Step 3A
+        # section for the audit finding this addresses).
+        self.symbol     = symbol
 
     def to_dict(self) -> dict:
         return {
@@ -90,6 +99,7 @@ class AgentReport:
             "factors":    self.factors,
             "raw":        self.raw,
             "event_name": self.event_name,
+            "symbol":     self.symbol,
         }
 
     def answer(self, question: str) -> str:

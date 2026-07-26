@@ -71,6 +71,13 @@ class CEODecision:
     # visibility into which mode produced this decision.
     weights_used:    dict  = field(default_factory=dict)
     timestamp:       str   = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Phase 4B Step 3A: which symbol this decision was produced for.
+    # Preparation only for future multi-symbol CEOAgent integration — no
+    # voting/scoring/behavior change. Default None preserves every
+    # pre-existing call site untouched. Populated the same way
+    # AgentReport.symbol is (market_context.get("symbol"), never
+    # fabricated) at this dataclass's one construction site in decide().
+    symbol:          str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -83,6 +90,7 @@ class CEODecision:
             "agreement_score": self.agreement_score,
             "weights_used":    self.weights_used,
             "timestamp":       self.timestamp,
+            "symbol":          self.symbol,
         }
 
     def npc_speech(self) -> str:
@@ -259,6 +267,7 @@ class CEOAgent(BaseAgent):
                 confidence = ce_conf,
                 summary    = f"ConfidenceEngine: {ce_action} @ {ce_conf:.0f}%",
                 raw        = confidence_result.to_dict() if hasattr(confidence_result, "to_dict") else {},
+                symbol     = market_context.get("symbol"),
             )
 
         # ── Aggregate signals (weighted vote across every WEIGHTS key) ──────
@@ -365,6 +374,7 @@ class CEOAgent(BaseAgent):
             agent_reports   = {k: v.to_dict() for k, v in reports.items()},
             agreement_score = agreement_score,
             weights_used    = {k: round(v, 4) for k, v in weights.items()},
+            symbol          = market_context.get("symbol"),
         )
 
         self._last_ceo = dec
@@ -402,6 +412,7 @@ class CEOAgent(BaseAgent):
             confidence = dec.confidence,
             summary    = dec.npc_speech(),
             raw        = dec.to_dict(),
+            symbol     = market_context.get("symbol"),
         )
 
     def answer(self, question: str, market_context: dict | None = None) -> str:
