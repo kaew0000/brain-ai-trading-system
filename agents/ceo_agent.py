@@ -49,6 +49,7 @@ from reasoning.reasoning_stream import get_reasoning_stream
 from utils.logger import get_logger
 from config.settings import settings
 from .base_agent import BaseAgent, AgentReport
+from .decision_context import CEODecisionContext
 
 logger = get_logger("agents.ceo_agent")
 
@@ -402,6 +403,24 @@ class CEOAgent(BaseAgent):
         )
 
         return dec
+
+    def decide_from_context(self, context: CEODecisionContext) -> CEODecision:
+        """V16 Phase 4B Step 3B (Part C): accepts an
+        agents/decision_context.py CEODecisionContext instead of a bare
+        (market_context, confidence_result) pair. A thin compatibility
+        wrapper — unpacks context.market_context/context.confidence_result
+        and calls the EXISTING decide() unchanged below. Every vote,
+        score, weight, and confidence calculation in decide() is
+        untouched; this method changes nothing about how a decision is
+        reached, only how the caller hands in its inputs.
+
+        context.portfolio_state / .existing_positions / .risk_snapshot
+        are intentionally NOT read here — this phase's brief is "only
+        replace the input interface", not add portfolio-aware voting.
+        A future phase that wants CEOAgent to actually use them changes
+        decide()'s logic itself, not this wrapper.
+        """
+        return self.decide(context.market_context, context.confidence_result)
 
     def analyse(self, market_context: dict) -> AgentReport:
         """BaseAgent interface — wraps decide() without ConfidenceResult."""

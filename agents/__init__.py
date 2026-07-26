@@ -9,6 +9,8 @@ from .risk_manager    import RiskManagerAgent
 from .trader_agent    import TraderAgent
 from .journal_analyst import JournalAnalyst
 from .ceo_agent       import CEOAgent, CEODecision
+from .decision_context import CEODecisionContext
+from .multi_symbol_adapter import MultiSymbolCEOAdapter
 
 
 def build_agent_layer(risk_engine=None, journal=None) -> dict:
@@ -31,8 +33,10 @@ __all__ = [
     "BaseAgent",
     "CEOAgent",
     "CEODecision",
+    "CEODecisionContext",
     "FuturesAnalyst",
     "JournalAnalyst",
+    "MultiSymbolCEOAdapter",
     "RegimeAnalyst",
     "RiskManagerAgent",
     "SMCAnalyst",

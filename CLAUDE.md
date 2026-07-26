@@ -45,6 +45,15 @@ Completed
 - Ensemble Decision Engine Phase 4B Step 2 — execution attribution +
   portfolio integration (architecture.md §29 — `journal/trade_attribution.py`,
   `execution/execution_orchestrator.py`, `portfolio/portfolio_manager.py`)
+- Ensemble Decision Engine Phase 4B Step 3A — symbol isolation prep
+  (`AgentReport.symbol`, `CEODecision.symbol`, `RegimeEngine` per-symbol
+  HMM models — merged, not separately documented in architecture.md by
+  that PR; see §30's "Background" for the record)
+- Ensemble Decision Engine Phase 4B Step 3B — CEO decision context +
+  multi-symbol signal integration (architecture.md §30 —
+  `agents/decision_context.py`, `agents/multi_symbol_adapter.py`,
+  `execution/portfolio_signal_provider.py`'s `get_signal_with_context()`,
+  `CEOAgent.decide_from_context()`)
 
 In Progress
 
@@ -196,21 +205,24 @@ Strategy Plugin System — DONE (architecture.md §25)
 Priority 2
 
 Ensemble Decision Engine — Phase 4A DONE (architecture.md §26). Phase 4B
-Step 1 DONE (architecture.md §27: per-agent outcome attribution via
-`journal_v2.get_agent_performance()`). Phase 4B proper DONE (architecture.md
-§28: `CEOAgent` can now blend `WEIGHTS` toward measured win-rate, gated
-off by default via `DYNAMIC_AGENT_WEIGHTS_ENABLED`). Phase 4B Step 2 DONE
-(architecture.md §29: `execution/execution_orchestrator.py` now writes to
-the journal on both open and close for the multi-symbol path, via the new
-`journal/trade_attribution.py` reusable API — the gap this section used to
-describe as the pillar's only remaining open item). What's still open,
-scoped precisely in §29 "Next up" rather than re-described here:
-1) a natural SL/TP close monitor for the multi-symbol path (today only
-replacement-triggered closes call `notify_position_closed()`), 2) making
-`PortfolioSignalProvider` agent-aware (multi-symbol trades still get
-empty `agent_participation` — the agent layer never runs on that path),
-3) Phase 4C itself (consuming `get_ensemble_learning_dataset()` for
-something beyond §28's win-rate blend — explicitly not started).
+Step 1 DONE (architecture.md §27). Phase 4B proper DONE (architecture.md
+§28). Phase 4B Step 2 DONE (architecture.md §29: journal wiring for the
+multi-symbol execution path). Phase 4B Step 3A DONE (symbol isolation
+prep — `AgentReport.symbol`, `CEODecision.symbol`, per-symbol
+`RegimeEngine` HMM models). Phase 4B Step 3B DONE (architecture.md §30:
+`agents/multi_symbol_adapter.py` bridges `PortfolioSignalProvider` ->
+`CEODecisionContext` -> `CEOAgent` -> `CEODecision` with zero duplicate
+MarketContextBuilder/ConfidenceEngine computation — but CEOAgent is
+still NOT wired into `main.py`'s live scheduler bootstrap; the adapter
+exists, nothing calls it yet in production). What's still open, scoped
+precisely in §30 "Next up" rather than re-described here: 1) actually
+wiring `MultiSymbolCEOAdapter` into the live `ExecutionScheduler`
+bootstrap, 2) passing `symbol=` to `RegimeEngine.classify()` from
+`PortfolioSignalProvider` (Step 3A's per-symbol HMM capability exists
+but isn't used by the one caller that would need it — cross-symbol HMM
+contamination is still live on the multi-symbol path today), 3) giving
+CEOAgent's 6 sub-agents per-symbol instance state before one shared
+CEOAgent safely services many symbols in a loop, 4) Phase 4C itself.
 
 Priority 3
 
