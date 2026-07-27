@@ -255,6 +255,49 @@ def build_system() -> dict:
                     context_builder=context_builder,
                     confidence_engine=confidence_engine,
                 )
+
+                # V16 Phase 4B Step 3C (Live CEO Agent Integration) — off
+                # by default (see config/settings.py
+                # CEO_MULTI_SYMBOL_ENABLED). Wraps signal_provider with
+                # execution/ceo_gated_signal_provider.py's
+                # CEOGatedSignalProvider, which is itself a
+                # SignalProvider — ExecutionOrchestrator below is handed
+                # exactly one signal_provider either way and has no idea
+                # whether it's gated.
+                #
+                # Only strategies exposing get_signal_with_context()
+                # (PortfolioSignalProvider — the default STRATEGY_NAME)
+                # can be CEO-gated; agents.multi_symbol_adapter.
+                # MultiSymbolCEOAdapter needs that method to get the
+                # already-computed market_context/confidence_result
+                # without recomputing them (see that module's own
+                # docstring). "smc_oi_regime" and any future strategy
+                # that doesn't expose it are logged and left unwrapped
+                # — CEO_MULTI_SYMBOL_ENABLED=true silently has no effect
+                # for those rather than crashing startup, matching this
+                # phase's "backward compatibility is mandatory" brief.
+                if settings.CEO_MULTI_SYMBOL_ENABLED:
+                    if hasattr(signal_provider, "get_signal_with_context"):
+                        from agents.ceo_symbol_cache import CEOAgentSymbolCache, MultiSymbolCEODispatcher
+                        from execution.ceo_gated_signal_provider import CEOGatedSignalProvider
+
+                        ceo_agent_cache = CEOAgentSymbolCache(risk_engine=risk_engine, journal=journal_v2)
+                        ceo_dispatcher = MultiSymbolCEODispatcher(
+                            signal_provider=signal_provider, ceo_agent_cache=ceo_agent_cache,
+                        )
+                        signal_provider = CEOGatedSignalProvider(
+                            signal_provider=signal_provider,
+                            ceo_adapter=ceo_dispatcher,
+                            journal=journal_v2,
+                        )
+                        logger.info("ExecutionScheduler: CEO Agent gating ENABLED")
+                    else:
+                        logger.warning(
+                            f"CEO_MULTI_SYMBOL_ENABLED=true but strategy "
+                            f"'{settings.STRATEGY_NAME}' has no get_signal_with_context() "
+                            f"— CEO gating not applied for this strategy."
+                        )
+
                 portfolio_manager = PortfolioManager(journal=journal_v2)
                 # Reuse the SAME execution engine the single-symbol loop
                 # already built above (trade_manager) rather than calling

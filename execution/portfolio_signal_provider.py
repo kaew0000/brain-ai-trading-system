@@ -18,13 +18,20 @@ signals that don't match what the live bot actually does.
 Every one of the 6 pipeline classes used here is stateless / a pure
 function of the data passed to each call — confirmed by inspecting each
 one's __init__ and call signature, not assumed:
-  - RegimeEngine.classify(df), SMCEngine.analyze_mtf(ohlcv),
-    VolumeEngine.analyze(df): no symbol reference anywhere.
+  - SMCEngine.analyze_mtf(ohlcv), VolumeEngine.analyze(df): no symbol
+    reference anywhere.
   - TrendEngine.analyse(df, ...), FuturesIntelEngine.analyse(market_data):
     same.
+  - RegimeEngine.classify(df, symbol=None): as of V16 Phase 4B Step 3A,
+    holds an internal per-symbol-keyed HMM model cache (fit-once-per-
+    symbol, not global) — passing `symbol` explicitly (V16 Phase 4B
+    Step 3C, Part D) is what actually activates that per-symbol cache
+    for this multi-symbol caller; omitting it (as this file did before
+    Step 3C) silently fell back to one shared/global model across every
+    symbol.
   - MarketContextBuilder.build(...): was the ONE place a symbol leaked in
     implicitly (hardcoded settings.SYMBOL into the output dict) — fixed
-    additively in this same phase by giving build() an optional `symbol`
+    additively in V16 Phase 2F by giving build() an optional `symbol`
     parameter; single-symbol callers that omit it are completely
     unaffected.
   - ConfidenceEngine.score(...): pure function of a market_context dict.
@@ -165,7 +172,7 @@ class PortfolioSignalProvider:
             logger.warning(f"PortfolioSignalProvider: incomplete OHLCV for {symbol} (have: {list(ohlcv.keys())})")
             return None
 
-        regime = self.regime_engine.classify(ohlcv["h1"])
+        regime = self.regime_engine.classify(ohlcv["h1"], symbol=symbol)
         smc_signals = self.smc_engine.analyze_mtf(ohlcv)
         volume_signals = self.volume_engine.analyze(ohlcv["m15"])
 

@@ -59,18 +59,21 @@ npm run dev
 pytest tests/ -q
 ```
 
-1512 tests, all passing as of V16 Phase 2F (see `docs/architecture.md`
-§24) — grown from 1478 after the Bundle Manager + Phase 2E merge (§21,
-§23), which itself grew from the earlier V16.5.0 merge baseline in
-`TEST_REPORT.md`.
+1717 tests, all passing as of V16 Phase 4B Step 3C (see
+`docs/architecture.md` §31) — grown steadily through Phase 3A/4A/4B
+Steps 1-3B since the count in `TEST_REPORT.md`'s earlier V16.5.0 merge
+baseline; each phase section in `docs/architecture.md` records the
+exact before/after count for that phase.
 
 ## Repository layout
 
-Key backend packages: `agents/`, `api/` (incl. `portfolio_api.py`/`portfolio_ws.py`
+Key backend packages: `agents/` (incl. `ceo_agent.py`/`multi_symbol_adapter.py`/
+`ceo_symbol_cache.py` — CEO Agent, V16 Phase 4B), `api/` (incl. `portfolio_api.py`/`portfolio_ws.py`
 from V16 Phase 2C and `execution_api.py` from V16 Phase 2E), `commander/`, `config/`, `data/`,
 `decision/`, `execution/` (incl. `execution_orchestrator.py`/`execution_state.py`/
-`execution_events.py`/`execution_metrics.py` from V16 Phase 2E, and
-`execution_scheduler.py`/`portfolio_signal_provider.py` from V16 Phase 2F),
+`execution_events.py`/`execution_metrics.py` from V16 Phase 2E,
+`execution_scheduler.py`/`portfolio_signal_provider.py` from V16 Phase 2F,
+and `ceo_gated_signal_provider.py` from V16 Phase 4B Step 3C),
 `features/`, `intelligence/`, `journal/`,
 `ml/`, `paper/`, `pipeline/`, `portfolio/` (V16 Phase 2A/2B), `ranking/`
 (V16 Phase 2), `regime/`, `risk/`, `scanner/` (V16 Phase 2),

@@ -1,0 +1,192 @@
+"""
+execution/ceo_gated_signal_provider.py — V16 Phase 4B Step 3C: Live CEO
+Agent Integration into Multi-Symbol Decision Pipeline
+
+Target pipeline (this phase's brief):
+    PortfolioSignalProvider -> SignalWithContext -> MultiSymbolCEOAdapter
+    -> CEOAgent -> CEODecision -> Execution Decision -> Trade Execution
+
+This class IS that "Execution Decision" step, and is a drop-in
+replacement for a bare PortfolioSignalProvider in
+execution/execution_orchestrator.py's ExecutionOrchestrator.signal_provider
+slot — it implements the exact same
+SignalProvider = Callable[[str], ExecutionSignal | None] contract
+(execution_orchestrator.py) unchanged. Zero changes to
+ExecutionOrchestrator itself: "Execution order must remain unchanged"
+(this phase's brief) is satisfied by construction, not by care taken
+inside execute() — execute() has no idea this wrapper exists.
+
+Part A — why CEO can only confirm or veto, never invent a trade
+------------------------------------------------------------------------
+agents/ceo_agent.py's CEODecision carries action/direction/confidence/
+reasons — it does NOT carry entry_price/stop_loss/take_profit (reading
+that dataclass confirms this, not assumed). Those prices only exist on
+the ExecutionSignal PortfolioSignalProvider's existing ConfidenceEngine-
+based pipeline already computed. So "CEOAgent becomes the final decision
+authority before execution" (this phase's brief) can only mean: CEOAgent
+confirms or vetoes the ALREADY-PRICED signal, never independently
+manufactures a new one with prices it has no way to compute. Building
+independent CEO-sourced price-level logic would be inventing decision
+logic this phase's brief explicitly rules out ("No behavioral
+refactoring. Only integrate the already-built CEO pipeline.").
+
+Part B — centralized decision mapping
+------------------------------------------------------------------------
+The brief's own mapping table names a "REJECT" action. Reading
+agents/ceo_agent.py's decide()/decide_from_context() confirms CEOAgent
+can only ever produce exactly four actions: LONG, SHORT, WAIT, BLOCKED
+— there is no REJECT anywhere in that class. map_ceo_decision_to_signal()
+below uses the real fourth action, BLOCKED, for the "cancel candidate"
+case the brief's REJECT was describing.
+
+    CEODecision.action  | underlying_signal | -> ExecutionSignal
+    --------------------|-------------------|-------------------
+    BLOCKED             | (irrelevant)       | None  (hard veto)
+    WAIT                | (irrelevant)       | None  (skip)
+    LONG                | None               | None  (nothing to confirm)
+    LONG                | direction=1        | underlying_signal (confirmed)
+    LONG                | direction=-1       | None  (CEO disagrees -> veto)
+    SHORT               | (mirror of LONG)   | (mirror of LONG)
+
+This is the ONE place this mapping is computed — no duplicated decision
+logic anywhere else in this module or its callers.
+
+Part C — feature flag
+------------------------------------------------------------------------
+settings.CEO_MULTI_SYMBOL_ENABLED, default False. False:
+get_signal(symbol) delegates straight to the wrapped
+PortfolioSignalProvider.get_signal(symbol) — byte-identical to every
+call site that existed before this phase (see this module's own tests
+verifying byte-identical output against a pre-phase baseline). True:
+routes through MultiSymbolCEOAdapter.decide_with_signal() and the
+mapping above.
+
+Part E — journal (optional, best-effort, non-fatal)
+------------------------------------------------------------------------
+"Do NOT redesign the journal. Simply include ceo_action, ceo_confidence,
+ceo_reason when available." journal/journal_v2.py's TradeJournalV2
+already has save_agent_decision(agent, decision, symbol, score, details,
+signal_id) (Phase 4B Step 1's own per-agent attribution table,
+agent_decisions) — a perfect, zero-schema-change fit: agent="CEO_AGENT"
+(CEOAgent.AGENT_NAME), decision=ceo_decision.action, score=confidence,
+details={"reasons": ..., "agreement_score": ...}. No new table, no
+schema change. If CEO is disabled, or no journal was supplied, nothing
+is stored — matches the brief exactly. A journal-write failure is
+logged and never raised, matching TradeJournalV2/portfolio_history's
+own "persistence failure must never take down the decision cycle"
+convention.
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+from agents.multi_symbol_adapter import MultiSymbolCEOAdapter
+from execution.execution_orchestrator import ExecutionSignal
+from execution.portfolio_signal_provider import PortfolioSignalProvider
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def map_ceo_decision_to_signal(
+    ceo_decision,                              # agents.ceo_agent.CEODecision | None
+    underlying_signal: Optional[ExecutionSignal],
+) -> Optional[ExecutionSignal]:
+    """Part B — the ONE centralized CEO-action -> execution-decision
+    mapping. See module docstring's table. Pure function, no I/O, no
+    side effects — safe to call from tests or a dashboard "what would
+    this decision have done" preview without touching anything live."""
+    if ceo_decision is None:
+        return None
+    if ceo_decision.action in ("BLOCKED", "WAIT"):
+        return None
+    if underlying_signal is None:
+        return None  # nothing priced to confirm, regardless of CEO's own vote
+
+    ceo_direction = 1 if ceo_decision.action == "LONG" else -1 if ceo_decision.action == "SHORT" else 0
+    if ceo_direction == 0:
+        # Not one of the four known actions — treat as a veto rather
+        # than guessing; never execute on an action this mapping
+        # doesn't recognize.
+        logger.warning(f"map_ceo_decision_to_signal: unrecognized CEO action {ceo_decision.action!r} — treating as veto")
+        return None
+
+    if ceo_direction == underlying_signal.direction:
+        return underlying_signal
+    return None  # CEO disagrees with the already-priced direction -> veto
+
+
+class CEOGatedSignalProvider:
+    """Callable matching execution/execution_orchestrator.py's
+    SignalProvider contract exactly — construct once, pass directly as
+    ExecutionOrchestrator(signal_provider=...). See module docstring
+    for the full design.
+    """
+
+    def __init__(
+        self,
+        signal_provider: PortfolioSignalProvider,
+        ceo_adapter: MultiSymbolCEOAdapter,
+        journal=None,
+        enabled: Optional[bool] = None,
+    ) -> None:
+        self.signal_provider = signal_provider
+        self.ceo_adapter = ceo_adapter
+        self.journal = journal
+        # None (default) means "read settings.CEO_MULTI_SYMBOL_ENABLED
+        # live on every call" — so flipping the setting at runtime takes
+        # effect on the next cycle without reconstructing this object.
+        # An explicit True/False (mainly for tests) pins the behavior
+        # regardless of settings.
+        self._enabled_override = enabled
+        logger.info(f"CEOGatedSignalProvider ready | enabled_override={enabled}")
+
+    @property
+    def enabled(self) -> bool:
+        if self._enabled_override is not None:
+            return self._enabled_override
+        from config.settings import settings
+        return settings.CEO_MULTI_SYMBOL_ENABLED
+
+    def get_signal(self, symbol: str) -> Optional[ExecutionSignal]:
+        """Part C: the feature flag gate. False -> byte-identical
+        passthrough to the wrapped PortfolioSignalProvider.get_signal()
+        (this phase's mandatory backward-compatibility requirement).
+        True -> CEO-gated pipeline (see module docstring)."""
+        if not self.enabled:
+            return self.signal_provider.get_signal(symbol)
+        return self._get_signal_ceo_enabled(symbol)
+
+    def _get_signal_ceo_enabled(self, symbol: str) -> Optional[ExecutionSignal]:
+        try:
+            ceo_decision, underlying_signal = self.ceo_adapter.decide_with_signal(symbol)
+        except Exception as exc:
+            logger.error(f"CEOGatedSignalProvider: CEO decision failed for {symbol}: {exc}")
+            return None
+
+        final_signal = map_ceo_decision_to_signal(ceo_decision, underlying_signal)
+        self._journal_ceo_decision(symbol, ceo_decision)
+        return final_signal
+
+    def _journal_ceo_decision(self, symbol: str, ceo_decision) -> None:
+        """Part E — best-effort, non-fatal. Stores nothing if there's no
+        journal, or no decision was produced this cycle."""
+        if self.journal is None or ceo_decision is None:
+            return
+        try:
+            self.journal.save_agent_decision(
+                agent="CEO_AGENT",  # matches agents.ceo_agent.CEOAgent.AGENT_NAME
+                decision=ceo_decision.action,
+                symbol=symbol,
+                score=ceo_decision.confidence,
+                details={
+                    "reasons": ceo_decision.reasons,
+                    "agreement_score": ceo_decision.agreement_score,
+                    "direction": ceo_decision.direction,
+                },
+            )
+        except Exception as exc:
+            logger.error(f"CEOGatedSignalProvider: journal write failed for {symbol} (non-fatal): {exc}")
+
+    def __call__(self, symbol: str) -> Optional[ExecutionSignal]:
+        return self.get_signal(symbol)

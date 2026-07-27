@@ -13,6 +13,15 @@ wraps them in a CEODecisionContext (Part A), and calls
 agents.ceo_agent.CEOAgent.decide_from_context() (Part C) — never calling
 MarketContextBuilder or ConfidenceEngine a second time.
 
+decide_with_signal(symbol) (V16 Phase 4B Step 3C) is the same
+computation, additionally returning the underlying priced
+ExecutionSignal (SignalWithContext.signal) alongside the CEODecision —
+for a caller (execution/ceo_gated_signal_provider.py) that needs to
+confirm/veto against the already-computed signal rather than
+re-fetching it, which would duplicate the same computation decide()
+itself is careful not to duplicate. decide() now delegates to it
+internally; behavior is unchanged.
+
 Its responsibility ends the moment it returns a CEODecision. This
 module does not execute trades, allocate capital, touch the journal, or
 modify portfolio state — none of execution/execution_orchestrator.py,
@@ -84,13 +93,36 @@ class MultiSymbolCEOAdapter:
         caller looping over many symbols in one cycle, matching this
         project's "safety wrapping at every touchpoint" rule (see e.g.
         PortfolioSignalProvider.get_signal()'s own docstring)."""
+        decision, _signal = self.decide_with_signal(
+            symbol, portfolio_state=portfolio_state,
+            existing_positions=existing_positions, risk_snapshot=risk_snapshot,
+        )
+        return decision
+
+    def decide_with_signal(
+        self,
+        symbol: str,
+        portfolio_state=None,
+        existing_positions=None,
+        risk_snapshot=None,
+    ):
+        """V16 Phase 4B Step 3C: same computation as decide(), but also
+        returns the already-priced ExecutionSignal
+        (SignalWithContext.signal) the CEODecision was reasoned about —
+        for a caller (execution/ceo_gated_signal_provider.py) that needs
+        BOTH without calling signal_provider.get_signal_with_context()
+        a second time, which would duplicate the MarketContextBuilder/
+        ConfidenceEngine/RegimeEngine computation get_signal_with_context()
+        already did once. Returns (None, None) under the same "nothing
+        usable this cycle" conditions decide() returns None for. Never
+        raises, same reasoning as decide()."""
         try:
             result = self.signal_provider.get_signal_with_context(symbol)
         except Exception as exc:
             logger.error(f"MultiSymbolCEOAdapter: signal computation failed for {symbol}: {exc}")
-            return None
+            return None, None
         if result is None:
-            return None
+            return None, None
 
         context = CEODecisionContext(
             symbol=symbol,
@@ -102,10 +134,12 @@ class MultiSymbolCEOAdapter:
         )
 
         try:
-            return self.ceo_agent.decide_from_context(context)
+            decision = self.ceo_agent.decide_from_context(context)
         except Exception as exc:
             logger.error(f"MultiSymbolCEOAdapter: CEOAgent.decide_from_context failed for {symbol}: {exc}")
-            return None
+            return None, None
+
+        return decision, result.signal
 
     def __call__(self, symbol: str, **kwargs):
         return self.decide(symbol, **kwargs)
