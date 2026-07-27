@@ -413,3 +413,63 @@ class TestNoDuplicateComputationThroughAdapter:
         assert len(seen_contexts) == 1
         assert seen_contexts[0]["symbol"] == "BTCUSDT"
         assert "mtf_direction" in seen_contexts[0]  # a real MarketContextBuilder.build() field
+
+
+class TestDecideWithSignal:
+    """V16 Phase 4B Step 3C: decide_with_signal() — the additive method
+    a caller needing BOTH the CEODecision AND the underlying priced
+    ExecutionSignal (execution/ceo_gated_signal_provider.py) uses
+    instead of calling decide() and then re-fetching the signal
+    separately, which would duplicate MarketContextBuilder/
+    ConfidenceEngine/RegimeEngine computation."""
+
+    def test_matches_decide_for_the_same_input(self):
+        dp = FakeDataProvider(data_by_symbol={"BTCUSDT": _full_market_data(trend="up")})
+        provider = PortfolioSignalProvider(data_provider=dp)
+        agent = CEOAgent(agents={"smc": FakeAgent("SMC_ANALYST")})
+        adapter_a = MultiSymbolCEOAdapter(signal_provider=provider, ceo_agent=agent)
+        adapter_b = MultiSymbolCEOAdapter(signal_provider=provider, ceo_agent=agent)
+
+        decision_only = adapter_a.decide("BTCUSDT")
+        decision_and_signal, signal = adapter_b.decide_with_signal("BTCUSDT")
+
+        assert decision_and_signal.action == decision_only.action
+        assert decision_and_signal.confidence == decision_only.confidence
+
+    def test_returns_the_underlying_execution_signal(self):
+        dp = FakeDataProvider(data_by_symbol={"BTCUSDT": _full_market_data(trend="up")})
+        provider = PortfolioSignalProvider(data_provider=dp)
+        adapter = MultiSymbolCEOAdapter(signal_provider=provider,
+                                         ceo_agent=CEOAgent(agents={"smc": FakeAgent("SMC_ANALYST")}))
+        decision, signal = adapter.decide_with_signal("BTCUSDT")
+        # signal may legitimately be None (no MTF consensus this cycle)
+        # or an ExecutionSignal — either way it must be the SAME object
+        # get_signal_with_context() already produced, not re-derived.
+        result = provider.get_signal_with_context("BTCUSDT")
+        assert signal == result.signal or (signal is None and result.signal is None)
+
+    def test_returns_none_none_for_unusable_symbol(self):
+        dp = FakeDataProvider(data_by_symbol={
+            "BTCUSDT": {"ohlcv": {"h4": _full_market_data()["ohlcv"]["h4"]}, "mark_price": 100.0},
+        })
+        provider = PortfolioSignalProvider(data_provider=dp)
+        adapter = MultiSymbolCEOAdapter(signal_provider=provider,
+                                         ceo_agent=CEOAgent(agents={"smc": FakeAgent("SMC_ANALYST")}))
+        decision, signal = adapter.decide_with_signal("BTCUSDT")
+        assert decision is None
+        assert signal is None
+
+    def test_does_not_duplicate_market_context_builder_computation(self):
+        calls = []
+
+        class SpyContextBuilder(MarketContextBuilder):
+            def build(self, *a, **kw):
+                calls.append(kw.get("symbol"))
+                return super().build(*a, **kw)
+
+        dp = FakeDataProvider(data_by_symbol={"BTCUSDT": _full_market_data(trend="up")})
+        provider = PortfolioSignalProvider(data_provider=dp, context_builder=SpyContextBuilder())
+        adapter = MultiSymbolCEOAdapter(signal_provider=provider,
+                                         ceo_agent=CEOAgent(agents={"smc": FakeAgent("SMC_ANALYST")}))
+        adapter.decide_with_signal("BTCUSDT")
+        assert calls == ["BTCUSDT"]  # exactly once, not twice

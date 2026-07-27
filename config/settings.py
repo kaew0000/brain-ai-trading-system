@@ -260,6 +260,17 @@ class Settings(BaseSettings):
     # deliberately look at fewer/more without changing what gets logged.
     SCHEDULER_CANDIDATE_LIMIT: int = Field(default=20, alias="SCHEDULER_CANDIDATE_LIMIT")
 
+    # ── V16 Phase 4B Step 3C: Live CEO Agent Integration ────────────────
+    # Off by default — same posture as SCHEDULER_ENABLED/
+    # DYNAMIC_AGENT_WEIGHTS_ENABLED above. False = ExecutionScheduler's
+    # signal_provider behaves byte-identically to before this phase
+    # (PortfolioSignalProvider.get_signal(), unchanged). True = CEOAgent
+    # becomes a confirm/veto gate on top of that same signal — see
+    # execution/ceo_gated_signal_provider.py's module docstring for why
+    # it can only confirm or veto, never independently invent a trade
+    # the underlying pipeline didn't already price out.
+    CEO_MULTI_SYMBOL_ENABLED: bool = Field(default=False, alias="CEO_MULTI_SYMBOL_ENABLED")
+
     # ── V16 Phase 3A: Strategy Plugin System ─────────────────────────────
     # Selects which execution/strategy_registry.py strategy main.py's
     # ExecutionScheduler bootstrap resolves signal_provider to. Default

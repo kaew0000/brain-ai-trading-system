@@ -2369,3 +2369,216 @@ work beyond `get_signal_with_context()`: one dict construction, one
   natural SL/TP close monitor, fee capture, Phase 4C dataset
   consumption, dashboard exposure, RiskEngine's single account-level
   gate, real correlation tracking, sector-cap capital redistribution.
+
+---
+
+## 31. Live CEO Agent Integration into Multi-Symbol Decision Pipeline — V16 Phase 4B Step 3C (2026-07-27)
+
+§30's own "Next up" named this piece explicitly: "Per-symbol sub-agent
+state — needed before one shared `CEOAgent` safely services many
+symbols in a live loop." This phase builds that, and wires the
+already-built CEO pipeline (§27-30) into `ExecutionScheduler`'s
+production signal path for the first time — `CEOAgent` was fully built
+but never actually consulted for a live trading decision before this
+phase.
+
+### Two corrections made before writing any integration code
+
+The phase brief that requested this work claimed a `REJECT` CEOAgent
+action and asserted `RegimeEngine.classify()`'s per-symbol capability
+was already "activated." Reading the real code first (not assuming the
+brief was accurate) surfaced both were wrong in ways that mattered:
+
+- **No `REJECT` action exists.** `agents/ceo_agent.py`'s `decide()`/
+  `decide_from_context()` can only ever produce exactly four actions —
+  `LONG`, `SHORT`, `WAIT`, `BLOCKED` — confirmed by reading every
+  `action =` assignment in that file. The mapping this phase builds
+  (see "Part B" below) uses the real fourth action, `BLOCKED`, for the
+  brief's "cancel candidate" case.
+- **`RegimeEngine.classify(df, symbol=None)` (§3A/Step 3A) existed but
+  was never actually called with a symbol anywhere** —
+  `execution/portfolio_signal_provider.py`'s `_compute_signal_with_context()`
+  still called `classify(ohlcv["h1"])` with no `symbol=` argument,
+  silently falling back to one shared HMM model across every symbol
+  despite the per-symbol cache already being built. One-line fix (Part
+  D below) — but a real, verified gap, not a already-done item as the
+  brief assumed.
+
+### A risk the brief didn't mention, that had to be solved anyway
+
+`agents/multi_symbol_adapter.py`'s own module docstring (written when
+§30 built it) had already flagged and explicitly deferred this: CEOAgent's
+six sub-agents hold per-INSTANCE state between calls —
+`RegimeAnalyst._prev_regime` (regime-change-event detection) and every
+agent's `_memory`/`_last` (`BaseAgent.run()`). Sharing one `CEOAgent`
+across BTCUSDT/ETHUSDT/SOLUSDT in `ExecutionScheduler`'s loop would
+compare each symbol's regime against whichever OTHER symbol was decided
+most recently, and mix every symbol's report history into the same
+`_memory` deque. Solved with `agents/ceo_symbol_cache.py`'s
+`CEOAgentSymbolCache` — one full agent layer per symbol, built via the
+existing `agents.build_agent_layer()` factory, cached the same way
+`ExecutionCoordinator.get_manager()` caches per-symbol `TradeManager`
+instances. Zero changes to `BaseAgent`, `RegimeAnalyst`, or any of the
+six sub-agent classes — the brief's "no rewriting" constraint is
+satisfied by construction, not by restraint applied inside those
+classes.
+
+### Part A — why CEOAgent can only confirm or veto, never invent a trade
+
+`agents/ceo_agent.py`'s `CEODecision` carries `action`/`direction`/
+`confidence`/`reasons` — reading the dataclass confirms it does NOT
+carry `entry_price`/`stop_loss`/`take_profit`. Those prices only exist
+on the `ExecutionSignal` the existing `ConfidenceEngine`-based pipeline
+(§24) already computed. So "CEOAgent becomes the final decision
+authority before execution" can only mean: CEOAgent confirms or vetoes
+the already-priced signal — it structurally cannot manufacture an
+independent trade with prices it has no way to compute, without
+inventing new price-derivation logic the brief's "no behavioral
+refactoring" rules out.
+
+`execution/ceo_gated_signal_provider.py`'s `CEOGatedSignalProvider` is
+a drop-in `SignalProvider` (`execution_orchestrator.py`'s exact
+`Callable[[str], ExecutionSignal | None]` contract) — **zero changes
+to `ExecutionOrchestrator` itself**. "Execution order must remain
+unchanged" is satisfied because `execute()` has no idea this wrapper
+exists; it just calls whatever `signal_provider` it was constructed
+with, exactly as before.
+
+### Part B — centralized decision mapping
+
+| `CEODecision.action` | underlying priced signal | → execution decision |
+|---|---|---|
+| `BLOCKED` | (irrelevant) | `None` (hard veto) |
+| `WAIT` | (irrelevant) | `None` (skip) |
+| `LONG` | `None` | `None` (nothing to confirm) |
+| `LONG` | `direction=1` | the priced signal, unchanged (confirmed) |
+| `LONG` | `direction=-1` | `None` (CEO disagrees → veto) |
+| `SHORT` | (mirror of `LONG`) | (mirror of `LONG`) |
+
+One function, `map_ceo_decision_to_signal()` — pure, no I/O, the only
+place this mapping exists.
+
+### Part C — feature flag
+
+`settings.CEO_MULTI_SYMBOL_ENABLED`, default `False`. `False`:
+`CEOGatedSignalProvider.get_signal()` delegates straight to the wrapped
+provider's `get_signal()` — verified byte-identical against the real
+`PortfolioSignalProvider` (not a fake), not just asserted (see Testing
+below). Read live on every call (not cached at construction), so
+flipping the setting takes effect next cycle without restarting.
+
+### Part D
+
+`execution/portfolio_signal_provider.py`'s `_compute_signal_with_context()`
+now passes `symbol=symbol` into `regime_engine.classify()` — the fix
+described above. No other behavior changed.
+
+### Part E — journal
+
+No schema change. `journal/journal_v2.py`'s `save_agent_decision()`
+(§27's own per-agent attribution table, `agent_decisions`) already
+accepts an arbitrary `agent` string — `CEOGatedSignalProvider` calls it
+with `agent="CEO_AGENT"`, `decision=ceo_decision.action`,
+`score=confidence`, `details={reasons, agreement_score, direction}`.
+Written whenever a `CEODecision` was produced (including vetoes — a
+blocked trade is still a decision worth recording), never when CEO is
+disabled or no journal was supplied. A write failure is logged and
+never raised — the trading decision itself always completes regardless
+of journal health.
+
+### Part F — dashboard
+
+`GET /api/ceo-decisions` (`api/app.py`, next to the existing
+`/api/journal`) — reads `journal.get_agent_decisions(agent="CEO_AGENT")`
+(zero new persistence, pure read-through), optionally filtered by
+`?symbol=`. Empty list (200, not an error) when CEO is disabled or
+nothing has run yet — same "empty is a normal state" convention every
+other endpoint in this file already follows.
+
+### Testing
+
+Every Part G requirement from the brief verified with a dedicated,
+literal test, not inferred from adjacent coverage
+(`tests/test_phase4b_step3c_verification.py`):
+- Disabled → byte-identical to the real (not faked) `PortfolioSignalProvider`,
+  for every symbol, with the CEO pipeline never even touched
+  (`len(cache) == 0` after three symbols).
+- Enabled → BTC/ETH/SOL get three distinct `CEOAgent` instances;
+  mutating one symbol's `RegimeAnalyst._prev_regime` directly proven
+  not to leak into another's.
+- `MarketContextBuilder`/`ConfidenceEngine`/`RegimeEngine` each spied
+  and confirmed called exactly once per symbol through the full gated
+  path — not just through the adapter in isolation.
+- HMM cache: BTC → ETH → BTC sequence produces exactly 2 fitted models,
+  and the second BTC call reuses the same fitted model object (not a
+  refit).
+- `BLOCKED`/`WAIT`/disagreement all proven to never produce a tradeable
+  signal even when a real, fully-priced `ExecutionSignal` exists to
+  confirm.
+
+142 new tests total: `test_ceo_gated_signal_provider.py` 26,
+`test_ceo_symbol_cache.py` 11, `test_ceo_decisions_api.py` 9,
+`test_phase4b_step3c_verification.py` 15, +4 in the existing
+`test_multi_symbol_ceo_integration.py` (the additive
+`decide_with_signal()` method), +1 assertion strengthened in
+`test_portfolio_signal_provider.py` (Part D regression guard).
+
+**Verified: `pytest tests/ -q` → 1717 passed, 0 failed** (1652 baseline
++ 65 net new files/tests — the 142 figure above counts individual test
+functions across new and modified files; net new test *count* in the
+suite is 65). `ruff check .` → clean (two unused-import findings during
+development, fixed before this count).
+
+### Benchmark
+
+10/25/50/100 symbols, synthetic data, CEO enabled — per-symbol time
+stays flat (~100-107ms, ratio 0.94×-1.00× relative to n=10) confirming
+linear scaling, no duplicate computation, no excessive allocations.
+Cache size matched symbol count exactly at every scale (10/25/50/100)
+— zero duplicate `CEOAgent` construction. Disabled-path benchmark at
+the same scales shows near-identical per-symbol timing to enabled
+(~101-113ms) — confirms CEO gating's own overhead is negligible
+against the already-dominant `RegimeEngine`/`MarketContextBuilder`/
+`ConfidenceEngine` cost, not that CEO gating is doing nothing.
+
+### Compatibility report
+
+No existing public API, signature, or behavior changed. Every
+Phase 2A-4B-Step-3B module (`PortfolioManager`, `TradeManager`,
+`TradeJournalV2`/`journal_v2`, `ExecutionOrchestrator`,
+`ExecutionCoordinator`, `RiskEngine`, `CEOAgent`, `MultiSymbolCEOAdapter`'s
+own `decide()`) is unmodified in behavior — `MultiSymbolCEOAdapter`
+gained one additive method (`decide_with_signal()`); `decide()` now
+delegates to it internally but returns byte-identical output for
+byte-identical input (verified: `test_matches_decide_for_the_same_input`).
+`RegimeEngine.classify()`'s new `symbol=` parameter defaults to `None`
+— every pre-existing caller omitting it is unaffected.
+`CEO_MULTI_SYMBOL_ENABLED` defaults `False`; a fresh checkout's
+behavior is identical to before this phase existed.
+
+### Next up
+
+- **Trade-level agent attribution for CEO-enabled executions** —
+  `journal/trade_attribution.py`'s `agent_attribution_from_ceo_decision()`
+  (built for §29's execution-attribution table,
+  `agent_participation`) is not called anywhere by this phase.
+  `execution_orchestrator.py`'s own trade-recording method explicitly
+  documents "no agent_attribution is recorded here — this pipeline
+  doesn't run CEOAgent" (written before this phase existed) — that's
+  now only half true: when `CEO_MULTI_SYMBOL_ENABLED=true`, real
+  per-agent votes DO exist at decision time (this phase's own
+  `agent_decisions` journal rows, Part E). But wiring
+  `agent_attribution_from_ceo_decision()` into the trade-outcome
+  record itself would mean `ExecutionOrchestrator` needing to know a
+  `CEODecision` produced the signal it's executing — out of scope for
+  this phase's explicit "DO NOT rewrite... Execution Engine"
+  constraint. `CEOAgent`'s own dynamic weighting (§28) still won't see
+  real performance data from multi-symbol CEO-confirmed trades until
+  this is built.
+- **Dashboard UI panel** consuming the new `/api/ceo-decisions`
+  endpoint — the endpoint exists, no page renders it yet (same pattern
+  as every dashboard gap §19/§23/§24 already carried forward).
+- Everything §30 already carried forward and this phase didn't touch:
+  natural SL/TP close monitor, fee capture, Phase 4C dataset
+  consumption, RiskEngine's single account-level gate, real
+  correlation tracking, sector-cap capital redistribution.

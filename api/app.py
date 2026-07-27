@@ -824,6 +824,37 @@ async def journal(
     })
 
 
+@app.get("/api/ceo-decisions")
+async def ceo_decisions(
+    limit:  int = Query(default=50, ge=1, le=500),
+    symbol: str = Query(default="", description="Filter to one symbol; omit for every symbol"),
+):
+    """V16 Phase 4B Step 3C (Part F) — CEO Decision / Confidence /
+    Consensus / Top Reasons / Symbol for every candidate CEOAgent has
+    ruled on, newest first.
+
+    Zero new persistence: reads journal_v2's existing agent_decisions
+    table (Phase 4B Step 1's own per-agent attribution table) filtered
+    to agent="CEO_AGENT" — the exact row
+    execution/ceo_gated_signal_provider.py's CEOGatedSignalProvider
+    writes via save_agent_decision() when CEO_MULTI_SYMBOL_ENABLED=true
+    (see that module's Part E). "details" carries reasons/
+    agreement_score/direction; "score" is confidence; "decision" is the
+    action (LONG/SHORT/WAIT/BLOCKED).
+
+    Returns an honest empty list — not an error — when CEO_MULTI_SYMBOL_
+    ENABLED=false (nothing was ever journaled) or the scheduler simply
+    hasn't run yet. "Dashboard must remain functional when CEO is
+    disabled" (this phase's brief) is satisfied by this being a normal,
+    documented empty state, same convention as every other endpoint in
+    this file when its underlying data hasn't been produced yet."""
+    jrn = _journal()
+    rows = jrn.get_agent_decisions(limit=limit, agent="CEO_AGENT")
+    if symbol:
+        rows = [r for r in rows if r.get("symbol") == symbol]
+    return _ok(rows)
+
+
 @app.get("/api/paper")
 async def paper():
     """Paper trading metrics + open positions + equity curve."""

@@ -140,15 +140,16 @@ class TestSharedEngineInjection:
         calls = []
 
         class SpyRegimeEngine:
-            def classify(self, df):
-                calls.append(df)
+            def classify(self, df, symbol=None):
+                calls.append((df, symbol))
                 from regime.regime_engine import RegimeResult
                 return RegimeResult(regime="RANGE", confidence=0.5)
 
         provider = PortfolioSignalProvider(data_provider=FakeDataProvider(), regime_engine=SpyRegimeEngine())
         provider.get_signal("BTCUSDT")
         assert len(calls) == 1
-        assert isinstance(calls[0], pd.DataFrame)
+        assert isinstance(calls[0][0], pd.DataFrame)
+        assert calls[0][1] == "BTCUSDT"  # V16 Phase 4B Step 3C Part D: symbol must reach RegimeEngine
 
     def test_default_engines_constructed_when_not_provided(self):
         # Must not raise — every engine should have a sensible default.
