@@ -121,6 +121,36 @@ Never bypass this pipeline.
 
 ---
 
+# Repository Track Separation Policy
+
+This repository is split into two independent development tracks.
+Full policy: `docs/architecture/SEPARATION_POLICY.md`.
+
+**Track A — Brain AI Trading System** (production trading engine: CEO
+Agent, Portfolio Manager, Risk Engine, Execution Engine, Journal,
+Ensemble Learning, Market Intelligence, Binance Integration, Database,
+API, Scheduler, Recovery, Monitoring). Continues all existing phases
+(4B, 4C, 5, 6, ...). Never place sprites, game assets, world maps, LPC
+characters, animations, NPC logic, lore, visual effects, or dashboard
+artwork here unless explicitly requested.
+
+**Track B — Brain AI Command World** (visualization layer only:
+World, Districts, Characters, LPC Sprites, Portraits, Buildings,
+Dashboard Base UI, Animations, Lore, Story, Visual Effects, Camera,
+World Events — lives under `dashboard_src/`). Must never modify
+Trading Engine, CEO logic, Portfolio, Risk Engine, Execution, Journal,
+Database, Exchange API, or Learning Engine. Strictly a presentation
+layer.
+
+**Contract:** the Trading Engine exports JSON (`agent_status.json`,
+`portfolio.json`, `signals.json`, `missions.json`, `telemetry.json`,
+`dashboard_state.json`); the Command World may only read these files,
+never write back. The Trading Engine must never depend on sprites,
+animations, world assets, or dashboard resources. One-way dependency:
+Trading Engine → Stable JSON/API → Command World, never the reverse.
+
+---
+
 # Engineering Principles
 
 Always preserve backwards compatibility.
@@ -265,6 +295,10 @@ Do not silently change business logic.
 Do not disable tests.
 
 Do not ignore failed tests.
+
+Do not let Track B (Command World) import from or modify Track A
+(Trading Engine) packages — see
+`docs/architecture/SEPARATION_POLICY.md`.
 
 ---
 

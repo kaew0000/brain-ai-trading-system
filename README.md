@@ -19,6 +19,20 @@ Intelligence, Manager, API, and Execution Orchestrator — see
 `docs/architecture.md` §17-21). See `MERGE_REPORT.md` for exactly what
 was merged from where and why.
 
+## Architecture
+
+This repository is split into two independent tracks: **Track A —
+Brain AI Trading System** (the production trading engine covered by
+the rest of this README and by `docs/architecture.md`) and **Track B
+— Brain AI Command World** (the visualization layer under
+`dashboard_src/`, including `src/game/`, `src/pages/world/`, and
+`public/assets/world/`). Track B is presentation-only: it may read the
+Trading Engine's exported JSON (`agent_status.json`, `portfolio.json`,
+`signals.json`, `missions.json`, `telemetry.json`,
+`dashboard_state.json`) but never writes back, and the Trading Engine
+never depends on Track B's sprites, animations, or world assets. Full
+policy: `docs/architecture/SEPARATION_POLICY.md`.
+
 ## Requirements
 
 - Python 3.12+

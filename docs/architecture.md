@@ -2582,3 +2582,28 @@ behavior is identical to before this phase existed.
   natural SL/TP close monitor, fee capture, Phase 4C dataset
   consumption, RiskEngine's single account-level gate, real
   correlation tracking, sector-cap capital redistribution.
+
+## 32. Repository Track Separation Policy — documentation only (2026-07-28)
+
+Formalizes a permanent split between **Track A — Brain AI Trading
+System** (this file's subject: `agents/`, `portfolio/`, `risk/`,
+`execution/`, `journal/`, `intelligence/`, Binance integration,
+`database/`, `api/`, scheduler, recovery, monitoring — continues
+existing phases: 4B, 4C, 5, 6, ...) and **Track B — Brain AI Command
+World** (`dashboard_src/src/game/`, `dashboard_src/src/pages/world/`,
+`dashboard_src/public/assets/world/` — World, Districts, Characters,
+LPC Sprites, Portraits, Buildings, Dashboard Base UI, Animations,
+Lore, Story, Visual Effects, Camera, World Events).
+
+Track B is strictly a presentation layer and must never modify Track
+A code. The contract is one-way: the Trading Engine exports JSON
+(`agent_status.json`, `portfolio.json`, `signals.json`,
+`missions.json`, `telemetry.json`, `dashboard_state.json`); the
+Command World may only read those files. The Trading Engine must
+never depend on sprites, animations, or world/dashboard assets.
+
+Full policy (canonical source): `docs/architecture/SEPARATION_POLICY.md`.
+
+**No production code, tests, or APIs changed by this entry** — the
+dependency graph in §1 and every verified section above it (§1-§31)
+remains accurate as of the commit that added this entry.
