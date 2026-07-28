@@ -1,0 +1,1 @@
+Brain AI Command World is permanently locked as a Modern Corporate Office Headquarters. Future phases MUST NOT redesign it into a fantasy city, medieval town, RPG kingdom, or similar environment. This decision is final unless explicitly superseded by a new approved architecture decision record (ADR).
