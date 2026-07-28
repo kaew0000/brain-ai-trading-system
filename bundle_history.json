@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-20T11:43:54Z",
+  "updated_at": "2026-07-27T11:26:48Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -17,6 +17,105 @@
       "bundle_filename": "brain-ai-os-master-constitution.bundle",
       "status": "applied",
       "imported_at": "2026-07-20T11:43:54Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "3979585f93c59b29d74c8d3d55127d830e094ec1",
+      "branch": "fix/docs-merge-conflict-cleanup",
+      "bundle_filename": "fix-docs-merge-conflict-cleanup.bundle.txt",
+      "status": "applied",
+      "imported_at": "2026-07-21T07:57:33Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "c9fa72b070e20423d385d9627e1856a29fd87f01",
+      "branch": "feature/execution-scheduler-multi-symbol-signals",
+      "bundle_filename": "execution-scheduler-multi-symbol-signals.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-22T11:59:18Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "152637142742a0f2033e4d9847c4f5f517856567",
+      "branch": "feature/strategy-plugin-system",
+      "bundle_filename": "strategy-plugin-system.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-23T06:28:00Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "ee40cbe9c74d165354e9563b69d51d3f4dbde1b8",
+      "branch": "feature/ensemble-decision-engine-4a",
+      "bundle_filename": "ensemble-decision-engine-4a.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-23T07:03:03Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "a610944a618499d133d115dac5478aecd8786749",
+      "branch": "feature/ensemble-decision-engine-4b",
+      "bundle_filename": "ensemble-decision-engine-4b.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-24T00:09:08Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "5ba05b3eabd5aafc8d39437bfc05a60bfada8490",
+      "branch": "feature/ensemble-decision-engine-4b",
+      "bundle_filename": "ensemble-decision-engine-4b-lintfix.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-24T00:31:43Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "bbf6267b38096c83d6fe6e5ef34b8a9855229586",
+      "branch": "feature/ensemble-decision-engine-4b",
+      "bundle_filename": "ensemble-decision-engine-4b-lintfix-v2.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-24T01:23:52Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "e52a1a48be5baf53ad787a357c8dd18be73c981d",
+      "branch": "feature/ensemble-learning-4b-step2",
+      "bundle_filename": "ensemble-learning-4b-step2.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-24T23:24:57Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "c759becf319cad670266bffef9e5460503a3ea14",
+      "branch": "feature/phase4b-step3a-symbol-isolation",
+      "bundle_filename": "phase4b-step3a-symbol-isolation.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-26T01:16:55Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "3e01cb19224840b638fa36fae74b288ee3cbf45b",
+      "branch": "feature/phase4b-step3b-ceo-context",
+      "bundle_filename": "phase4b-step3b-ceo-context.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-26T07:03:52Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "1677653350ecd7197fc08a021378abf60a28ec69",
+      "branch": "feature/phase4b-step3c-live-ceo-integration",
+      "bundle_filename": "phase4b-step3c-live-ceo-integration.bundle",
+      "status": "applied",
+      "imported_at": "2026-07-27T11:26:48Z",
       "pushed": true,
       "reason": null
     }
