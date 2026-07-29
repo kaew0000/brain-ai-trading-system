@@ -47,7 +47,7 @@ logger = get_logger(__name__)
 
 class ExecutionCoordinator:
 
-    def __init__(self, data_provider, symbols: list[str] | None = None) -> None:
+    def __init__(self, data_provider, symbols: list[str] | None = None, lifecycle=None) -> None:
         """
         Parameters
         ----------
@@ -60,6 +60,16 @@ class ExecutionCoordinator:
             settings.symbol_list, which itself falls back to [settings.SYMBOL]
             — so `ExecutionCoordinator(data_provider)` with no symbols arg
             behaves exactly like today's single-symbol setup.
+        lifecycle : execution.trade_lifecycle.TradeLifecycle, optional
+            V16 Phase 4B Step 3D (Part E: "ExecutionCoordinator must
+            notify lifecycle"). Optional, unused by default. This class
+            itself makes no lifecycle-relevant decisions — it's a pure
+            per-symbol TradeManager factory/router (get_manager() below,
+            close_position() forwarding) — so satisfying Part E here
+            means threading this through to every TradeManager it
+            constructs (get_manager()), so EMERGCLOSE reporting (see
+            TradeManager.__init__) works for every coordinator-managed
+            symbol, not just a manually-constructed one.
         """
         self._data_provider = data_provider
         self._symbols: list[str] = list(symbols) if symbols else list(settings.symbol_list)
@@ -68,6 +78,7 @@ class ExecutionCoordinator:
 
         self._default_symbol: str = self._symbols[0]
         self._managers: dict[str, TradeManager] = {}
+        self._lifecycle = lifecycle
         # Guards _managers. main.py's trading loop and api/app.py's dashboard
         # thread can both reach a coordinator instance (e.g. via a future
         # health/status endpoint) — cheap insurance against two threads
@@ -107,7 +118,7 @@ class ExecutionCoordinator:
             # re-check inside the lock in case another thread won the race
             manager = self._managers.get(symbol)
             if manager is None:
-                manager = TradeManager(self._data_provider, symbol=symbol)
+                manager = TradeManager(self._data_provider, symbol=symbol, lifecycle=self._lifecycle)
                 self._managers[symbol] = manager
         return manager
 

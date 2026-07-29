@@ -1,5 +1,60 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4B Step 3D: Unified Trade Lifecycle & Trade Attribution
+
+### Added
+- **`execution/trade_lifecycle.py`**: `TradeLifecycle` — single
+  orchestration point every open/close path routes through.
+  `PENDING → EXECUTING → OPEN → MONITORING → EXIT_REQUESTED →
+  EXIT_EXECUTING → CLOSED` (or `FAILED`) state machine, no back-
+  transitions (this alone is the entire duplicate-close guard).
+  `CloseSource` enum for all 12 requested close sources — honestly
+  labeled which have a real automatic trigger in this codebase today
+  vs. which are supported-but-not-yet-triggered-by-anything (see
+  `docs/architecture.md` §32, Part B's table).
+- **`api/lifecycle_api.py`**: `GET /api/lifecycle/state`,
+  `GET /api/lifecycle/state/{symbol}` — read-only dashboard exposure.
+  New process-wide `get_default_trade_lifecycle()` singleton (mirrors
+  `execution_state.py`'s own pattern).
+- `journal/trade_attribution.py::record_trade_outcome()`:
+  +reason/+source/+symbol/+duration_seconds/+confidence, all optional,
+  no schema change.
+- `portfolio_manager.py::notify_position_closed()`: +`record_attribution`
+  flag (default `True`, unchanged behavior for any pre-existing caller).
+- `ExecutionOrchestrator`/`ExecutionCoordinator`/`TradeManager`: new
+  optional `lifecycle` constructor parameter. Open side, replacement-
+  close, and (newly) exchange-reject-on-close all routed through
+  `TradeLifecycle`. `main.py`'s legacy SL/TP monitor and
+  `system_health/recovery_engine.py`'s reconciliation cleanup routed
+  the same way.
+- 66 new tests across 5 files (unit, API, integration covering all 10
+  requested Part H scenarios, concurrency stress tests at 25/50/100/250
+  simultaneous positions, bug-regression tests). Full suite:
+  1717 → 1783 passed, 0 failed.
+- `docs/architecture.md` §32 — full design rationale, two real bugs
+  found and fixed by this phase's own tests (documented in full, not
+  glossed over), benchmark and stress-test results.
+
+### Fixed (found by this phase's own tests, before reaching production)
+- `TradeLifecycle` originally popped a handle from its internal dict on
+  every terminal transition, which broke its own duplicate-close guard
+  for a *second* close attempt against an already-closed symbol.
+- `TradeLifecycle` defines `__len__`; without an explicit `__bool__`,
+  a freshly-constructed empty instance was falsy, silently breaking
+  `ExecutionOrchestrator`'s `lifecycle or TradeLifecycle(...)`
+  constructor fallback — exactly `main.py`'s real bootstrap ordering.
+  Fixed with an explicit `is not None` check plus a defensive
+  `__bool__` override.
+
+### Known limitation — not fixed this phase
+- `execution/execution_factory.py::build_execution_engine()` (the
+  3-mode paper/testnet/live factory `main.py` actually calls) isn't
+  threaded with the shared lifecycle singleton yet — EMERGCLOSE
+  reporting works for any directly-constructed `TradeManager`/
+  `ExecutionCoordinator` but not yet the real bootstrap path.
+
+---
+
 ## [Unreleased] — V16 Phase 4B Step 3C: Live CEO Agent Integration into Multi-Symbol Decision Pipeline
 
 ### Added

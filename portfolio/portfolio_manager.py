@@ -245,6 +245,7 @@ class PortfolioManager:
         slippage: float | None = None,
         latency_seconds: float | None = None,
         agent_attribution: list[dict] | None = None,
+        record_attribution: bool = True,
     ) -> None:
         """Hook for ANY closing path (stop-loss, take-profit, manual, an
         executed replacement) to report that a position was closed, so
@@ -270,10 +271,30 @@ class PortfolioManager:
         first — attribution is diagnostic data layered on top, and a
         failure recording it must never be able to skip or undo the
         cooldown a real closed position always needs.
+
+        V16 Phase 4B Step 3D: +record_attribution (default True,
+        preserving every word of the paragraph above unchanged for any
+        existing or future caller that doesn't pass it). Set False by
+        execution/trade_lifecycle.py's TradeLifecycle specifically —
+        once that module exists as the caller, it already called
+        record_trade_outcome() itself (this phase's own Part C: "becomes
+        the only write path"), so this method's job for a
+        lifecycle-routed close narrows to exactly what this phase's
+        Part D asks for — cooldown registration and PortfolioState
+        bookkeeping — without writing to the journal a second time.
+        Deliberately a flag, not a removal of the call below, so this
+        method's default (unflagged) behavior for any caller that
+        predates or bypasses TradeLifecycle is provably unchanged — see
+        docs/architecture.md's Phase 4B Step 3D section for why that
+        tension (Part D's "PortfolioManager must never mutate journal
+        directly" vs. this project's "no behavior regressions") is
+        resolved this way rather than by deleting the call outright.
         """
         now = now if now is not None else time.time()
         self._register_cooldown(symbol, now)
 
+        if not record_attribution:
+            return
         if self.journal is None or trade_id is None:
             return
         try:

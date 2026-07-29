@@ -2582,3 +2582,257 @@ behavior is identical to before this phase existed.
   natural SL/TP close monitor, fee capture, Phase 4C dataset
   consumption, RiskEngine's single account-level gate, real
   correlation tracking, sector-cap capital redistribution.
+
+---
+
+## 32. Unified Trade Lifecycle & Trade Attribution — V16 Phase 4B Step 3D (2026-07-29)
+
+### Why this phase exists
+
+§29's own audit (the design report preceding this phase, chat-only —
+not merged) found exactly one of four real close paths in this
+codebase fully wired to `record_trade_outcome()` — the rest wrote to
+the journal directly or bypassed attribution entirely. This phase
+builds the single orchestration point (`execution/trade_lifecycle.py`'s
+`TradeLifecycle`) every open and close path routes through, so that
+gap can't recur.
+
+### Part A — `TradeLifecycle`
+
+New module. State machine:
+`PENDING → EXECUTING → OPEN → MONITORING → EXIT_REQUESTED → EXIT_EXECUTING → CLOSED`
+(`FAILED` reachable from `EXECUTING` or `EXIT_EXECUTING`). The brief's
+own diagram shows "OPEN" twice (once before `EXECUTING` too) — the
+first one is named `PENDING` here, documented rather than silently
+renamed. No back-transitions, ever — this table alone is the entire
+duplicate-close guard (Part I): a second exit request against an
+already-terminal handle has no valid transition to move to, rejected
+deterministically by one dict lookup, no separate lock needed.
+
+**A real bug was found and fixed during this phase's own testing**,
+before it reached anywhere near production: the first implementation
+popped a handle from its internal dict on every terminal transition
+(`CLOSED`/`FAILED`), which destroyed the very state the duplicate-close
+guard needs — a *second* close attempt against an already-closed
+symbol found no handle, and was (incorrectly) treated as "a position
+this lifecycle never saw open," constructing a fresh synthetic handle
+and allowing the duplicate through. Fixed by keeping terminal handles
+(excluded from `snapshot()`, replaced automatically the next time
+`open_pending()` is called for that symbol) instead of popping them —
+caught by this phase's own smoke test before any integration wiring
+existed, not by an external review.
+
+**A second real bug was found**, again by this phase's own tests:
+`TradeLifecycle` defines `__len__` (for Part I's live-position counts),
+which — without an explicit `__bool__` — makes Python treat a
+freshly-constructed, *empty* instance as falsy. `ExecutionOrchestrator`'s
+constructor originally used `lifecycle or TradeLifecycle(...)`, which
+silently discarded any caller-supplied lifecycle with zero open
+positions at construction time — exactly `main.py`'s real bootstrap
+ordering. Fixed two ways: the constructor now uses an explicit
+`is not None` check, and `TradeLifecycle.__bool__` now always returns
+`True`, so the same mistake can't silently recur anywhere else this
+class is used the same way.
+
+### Part B — Close-source inventory (honest, not aspirational)
+
+| Requested source | Real trigger exists? | Where |
+|---|---|---|
+| SL / TP | Yes | `main.py::monitor_open_trades()` (threshold heuristic, unchanged by this phase) |
+| Replacement / Portfolio Rotation | Yes (same mechanism) | `execution_orchestrator.py::_execute_replacement_close()` |
+| Reconciliation / Recovery | Yes (same mechanism) | `system_health/recovery_engine.py::attempt_reconciliation_recovery()`, `PRESENCE_MISMATCH` branch |
+| Emergency Close | Yes | `execution/trade_manager.py`'s in-flight SL-placement-failure abort ("EMERGCLOSE") |
+| Exchange Reject (on close) | Yes — **added by this phase** | `_execute_replacement_close()`'s `order is None` branch, previously untouched by any lifecycle/attribution code at all |
+| CEO BLOCKED | Modeled, not auto-triggered | `CEOGatedSignalProvider` (§31) doesn't call `TradeLifecycle` — a block just means no signal, nothing to close. Proven at the lifecycle level only |
+| Manual Close | Modeled, not auto-triggered | No manual-close endpoint exists anywhere in this codebase (re-confirmed this phase) |
+| Liquidation | Modeled, not auto-triggered | No liquidation-event handler exists (re-confirmed this phase — every "liquidation" hit in this codebase is about *displaying* risk info, never detecting an event) |
+| Risk Close | Not modeled as a distinct path | `RiskEngine` has no `close_position` call anywhere — it only blocks new allocations |
+
+### Part C — Unified attribution
+
+`journal/trade_attribution.py::record_trade_outcome()` extended
+additively: `+reason`, `+source`, `+symbol`, `+duration_seconds`,
+`+confidence` — all optional, folded into the same arbitrary-kwargs
+`save_execution_attribution()` passthrough that already existed (§29),
+no schema change. `TradeLifecycle` is now this function's only caller
+across the entire codebase for close-side writes (verified: `grep -rn
+"record_trade_outcome(" --include="*.py" .` shows exactly two call
+sites, both inside `trade_lifecycle.py` itself).
+
+### Part D — Portfolio integration
+
+`portfolio_manager.py::notify_position_closed()` gains
+`record_attribution: bool = True` — default preserves every pre-
+existing caller's behavior unchanged. `TradeLifecycle.exit_confirmed()`
+passes `record_attribution=False`, since it already wrote the outcome
+itself — `PortfolioManager`'s job for a lifecycle-routed close narrows
+to exactly cooldown registration and `PortfolioState` bookkeeping, per
+the brief's own "PortfolioManager must never mutate journal directly."
+
+### Part E — Execution integration
+
+`ExecutionOrchestrator` (open + replacement-close + the newly-added
+exchange-reject-on-close path), `ExecutionCoordinator` (threads
+`lifecycle` through to every per-symbol `TradeManager` it constructs),
+`TradeManager` (EMERGCLOSE reports an open-side `FAILED` transition —
+wrapped in its own `try/except` so a lifecycle bug can never weaken the
+safety-critical close itself, verified by a dedicated test using a
+deliberately-broken lifecycle). **Known gap, not fixed this phase**:
+`execution/execution_factory.py::build_execution_engine()` (the
+3-mode paper/testnet/live factory `main.py` actually calls) isn't
+threaded with the shared lifecycle singleton — EMERGCLOSE reporting
+works for any directly-constructed `TradeManager`/`ExecutionCoordinator`
+(proven by this phase's own tests) but not yet for the actual bootstrap
+path, since that would mean modifying a shared 3-mode factory for a
+rarely-triggered edge case. Flagged rather than silently left implied.
+
+### Part F — Recovery integration
+
+`system_health/recovery_engine.py`'s ghost-row cleanup routes through
+`sys.get("trade_lifecycle")` the same way, falling back to the
+pre-existing direct `jrn.update_trade_result()` call if no lifecycle is
+present in `sys` (defensive — an older test harness building its own
+`sys` dict without this key still works unchanged).
+
+### Part G — Dashboard
+
+`api/lifecycle_api.py` — `GET /api/lifecycle/state`,
+`GET /api/lifecycle/state/{symbol}`. Reads
+`execution.trade_lifecycle.get_default_trade_lifecycle()`, a new
+process-wide singleton (mirrors `execution_state.py`'s own
+`get_execution_state()` double-checked-locking pattern exactly).
+`main.py`'s bootstrap now constructs this singleton once and shares it
+between the legacy single-symbol pipeline and the multi-symbol
+`ExecutionOrchestrator` — **this required its own fix**: the singleton
+is first constructed before `portfolio_manager` exists in `main.py`'s
+bootstrap order (with `portfolio_manager=None`), so
+`trade_lifecycle.portfolio_manager` is explicitly attached once
+`portfolio_manager` is actually constructed, later in the same
+function — otherwise the multi-symbol path's close notifications would
+have silently no-op'd against a `None` portfolio_manager forever.
+
+### Part H — Tests (10 scenarios)
+
+`tests/test_trade_lifecycle_integration.py`, 13 tests. Per Part B's
+table: 7 scenarios exercise the REAL production function directly
+(`main.monitor_open_trades`, `ExecutionOrchestrator.execute`,
+`RecoveryEngine.attempt_reconciliation_recovery`,
+`TradeManager.execute_trade`) — not a mock standing in for it. 3
+scenarios (Manual Close, CEO BLOCKED, Liquidation) exercise
+`TradeLifecycle` directly with that `CloseSource`, since no automatic
+trigger exists for them — labeled as such in both the test file and
+this section, not presented as more than they are.
+
+Writing these tests found two of the three real bugs this phase fixed
+(see Part A) plus a fake-exchange-client bug in the test fixtures
+themselves (a `ClientError`-shaped SL rejection is required to reach
+`EMERGCLOSE` — `place_stop_loss()` only treats a caught `ClientError`
+as failure, an empty-dict return is not a failure signal to it — and a
+corrected understanding of `execute_trade()`'s actual contract: its
+own outer `except Exception` catches the EMERGCLOSE `RuntimeError`
+and returns it as `result["error"]` rather than letting it propagate
+to the caller, contrary to this phase's own initial assumption while
+writing the wiring code — the *production* code was unaffected by this
+misunderstanding since the lifecycle-notify call runs unconditionally
+before the raise either way, but the *test* needed correcting to match
+reality rather than an assumption).
+
+### Part I — Stress tests
+
+`tests/test_trade_lifecycle_stress.py`, 16 tests, real `threading`
+against a shared `TradeLifecycle` + a real file-backed SQLite journal
+(not `:memory:` — that's a shared cached connection across the whole
+test process, less representative of genuine concurrent file access).
+
+**25/50/100/250 simultaneous open+close cycles, measured:**
+
+| N | Wall time | Per-symbol |
+|---|---|---|
+| 25 | 517.2 ms | 20.69 ms |
+| 50 | 1085.6 ms | 21.71 ms |
+| 100 | 1977.5 ms | 19.77 ms |
+| 250 | 3887.5 ms | 15.55 ms |
+
+Zero errors, zero orphaned live handles, zero journal corruption at
+every scale — per-symbol cost stays roughly flat (dominated by real
+SQLite file I/O, not by `TradeLifecycle`'s own overhead), no lock-
+contention degradation as concurrency increases.
+
+**Duplicate-close race, 5/10/25 threads simultaneously racing to close
+the SAME symbol** (using a `threading.Barrier` to maximize actual
+simultaneous contention, not just "started around the same time"):
+exactly one winner every single run, confirmed both by assertion and
+by the N−1 "duplicate/invalid close request ignored" log lines each
+run produced.
+
+### Part J — Performance
+
+Isolated exactly the overhead `TradeLifecycle`'s orchestration layer
+adds per trade (old direct-call pattern vs. new lifecycle-routed
+pattern, 2000 iterations each, same fake journal/portfolio manager):
+
+```
+OLD (direct calls, no lifecycle):    0.0048 ms/trade
+NEW (routed through TradeLifecycle): 0.0084 ms/trade
+Delta: +0.00355 ms/trade (+73.3% relative)
+```
+
+Reported plainly rather than only the flattering number: **+73%
+relative is real**, but the **absolute delta (3.5 microseconds/trade)
+is roughly four orders of magnitude smaller than a single real Binance
+API round-trip** (this codebase's own `RegimeEngine.classify()`
+benchmark, Phase 4B Step 3A, measured ~16ms just for one indicator
+computation; a real `execute_trade()` call involves multiple network
+round-trips at 50–200ms+ each). Not a measurable regression in any
+practically meaningful sense for this system, even though the relative
+percentage alone would suggest otherwise if reported without the
+absolute figure alongside it.
+
+### Compatibility report
+
+Every new field (`AgentReport`... no — `record_trade_outcome()`'s 5 new
+kwargs, `notify_position_closed()`'s `record_attribution` flag,
+`ExecutionOrchestrator`/`ExecutionCoordinator`/`TradeManager`'s new
+`lifecycle` constructor parameters) is optional with a default that
+reproduces prior behavior exactly. Wiring the open/replacement-close
+paths through `TradeLifecycle` changed 3 pre-existing
+`test_execution_orchestrator.py` assertions — investigated before
+touching anything, confirmed to be checking an aspect of behavior
+(which object's kwargs carry the full attribution payload) that Part D
+*deliberately* changes, not a regression — fixed to check the journal
+directly (the new correct location for that data) instead, with the
+underlying values proven identical to before. Full suite: **1717 →
+1783 passed, 0 failed** (66 new tests: 28 unit + 6 API + 13 integration
++ 16 stress + 3 bug-regression, split across the files listed in
+`PATCH_NOTES.md`).
+
+### Rollback procedure
+
+Every change is additive at the interface level (new module, new
+optional parameters/fields, new API router). A full revert of this
+phase's single commit removes: `execution/trade_lifecycle.py`,
+`api/lifecycle_api.py`, all 5 new test files, and reverts the small
+edits to `journal/trade_attribution.py`, `portfolio_manager.py`,
+`execution_orchestrator.py`, `execution_coordinator.py`,
+`trade_manager.py`, `main.py`, `recovery_engine.py`, `api/app.py` —
+every one of those edits is either a net-new optional parameter/field
+or a call-site redirect, none altered a function's meaning for a
+caller that doesn't pass the new parameter. No database schema change,
+no data migration, nothing to undo in already-persisted journal rows
+(the new attribution fields are additive keys in the same JSON blob
+`save_execution_attribution()` already wrote to).
+
+### Next up
+
+- Wire `build_execution_engine()`'s bootstrap path to the shared
+  `TradeLifecycle` singleton, closing Part E's one documented gap.
+- The natural SL/TP close monitor for the *multi-symbol* path — §29's
+  own "Next up" already named this; this phase's unification makes it
+  a smaller lift once built (it would just call `TradeLifecycle` like
+  everything else now does), but building the detection itself remains
+  out of scope here.
+- Everything §31 already carried forward and this phase didn't touch:
+  per-agent attribution for CEO-confirmed multi-symbol trades, the
+  dashboard UI panel for `/api/ceo-decisions` and now `/api/lifecycle/*`
+  too, fee capture, RiskEngine's single account-level gate, real
+  correlation tracking.

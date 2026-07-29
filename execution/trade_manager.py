@@ -74,7 +74,7 @@ def _is_duplicate_order_error(exc: ClientError) -> bool:
 
 class TradeManager:
 
-    def __init__(self, data_provider, symbol: str | None = None) -> None:
+    def __init__(self, data_provider, symbol: str | None = None, lifecycle=None) -> None:
         """
         Parameters
         ----------
@@ -89,9 +89,20 @@ class TradeManager:
             instance. Defaults to settings.SYMBOL when omitted, which
             reproduces pre-V16 behavior exactly — every existing call site
             (`TradeManager(data_provider)`, no second arg) is unaffected.
+        lifecycle : execution.trade_lifecycle.TradeLifecycle, optional
+            V16 Phase 4B Step 3D (Part E: "TradeManager must notify
+            lifecycle"). Optional and unused by default — every existing
+            call site (none of which pass it) behaves identically to
+            before this phase. When provided, execute_trade()'s in-flight
+            emergency-abort path (EMERGCLOSE, below) reports the failure
+            through it instead of only logging — see that code's own
+            comment for why this is modeled as an open-side FAILURE
+            rather than a close (no trade_id/journal row exists yet at
+            that point).
         """
         self.client: UMFutures = data_provider.client
         self.symbol             = symbol or settings.SYMBOL
+        self.lifecycle          = lifecycle
         logger.info(f"TradeManager ready | symbol={self.symbol}")
 
     # ── Exchange info helpers ─────────────────────────────────────────────
@@ -628,6 +639,29 @@ class TradeManager:
                     "closing naked position immediately to protect account"
                 )
                 self.close_position(direction, qty, client_order_id=new_client_order_id("EMERGCLOSE"))
+                # V16 Phase 4B Step 3D (Part E): notify the lifecycle,
+                # if one was provided, that this open attempt failed.
+                # Modeled as an open-side FAILURE (open_pending ->
+                # open_executing -> open_failed) rather than a close,
+                # because no trade_id/journal row exists yet at this
+                # point — main.py/execution_orchestrator.py's own
+                # trade-recording only happens AFTER execute_trade()
+                # returns successfully, and this path is, by
+                # construction, the opposite of that. Wrapped in its
+                # own try/except so a lifecycle bug can never weaken
+                # this safety-critical close or suppress the
+                # RuntimeError below — that raise must always happen
+                # regardless of what follows.
+                if self.lifecycle is not None:
+                    try:
+                        handle = self.lifecycle.open_pending(self.symbol)
+                        self.lifecycle.open_executing(handle)
+                        self.lifecycle.open_failed(
+                            handle, reason="sl_placement_failed_emergency_close",
+                            source="TRADE_MANAGER",
+                        )
+                    except Exception as lifecycle_exc:
+                        logger.error(f"TradeManager: EMERGCLOSE lifecycle notify failed: {lifecycle_exc}")
                 raise RuntimeError(
                     "SL order rejected by exchange (all tiers exhausted); "
                     "naked position closed for safety"

@@ -51,6 +51,7 @@ from events.event_bus import (
     brain_pub, conf_pub, risk_pub, regime_pub,
 )
 from execution.execution_factory import build_execution_engine
+from execution.trade_lifecycle import CloseSource
 from analytics.trade_journal import TradeJournal, TradeRecord
 from journal.journal_v2 import TradeJournalV2
 from risk.risk_engine import RiskEngine
@@ -164,6 +165,22 @@ def build_system() -> dict:
     logger.info("[6/9] Analytics / Risk Layer …")
     journal    = TradeJournal()
     journal_v2 = TradeJournalV2()
+    # V16 Phase 4B Step 3D: one TradeLifecycle for the legacy
+    # single-symbol loop specifically (no PortfolioState/PortfolioManager
+    # involved on this path — see monitor_open_trades()'s own call site
+    # below). The multi-symbol ExecutionScheduler path further down
+    # constructs its own ExecutionOrchestrator, which auto-builds its
+    # OWN TradeLifecycle (wired to that path's real PortfolioManager)
+    # when none is passed — see execution/execution_orchestrator.py's
+    # __init__. Two TradeLifecycle instances, matching this file's own
+    # pre-existing two-separate-pipelines shape (main.py §1.2 in
+    # docs/architecture.md's Phase 4B Step 3D section explains why one
+    # shared instance was rejected — the two pipelines already track
+    # completely disjoint position state (PortfolioState vs. none), so
+    # a shared lifecycle would gain nothing and risks one pipeline's
+    # symbol keys colliding with the other's).
+    from execution.trade_lifecycle import get_default_trade_lifecycle
+    trade_lifecycle = get_default_trade_lifecycle(journal=journal_v2)
     # RiskEngine only needs get_today_pnl / get_consecutive_losses / get_daily_stats,
     # all of which TradeJournalV2 implements as a drop-in superset of v1 —
     # wiring it here keeps risk gating and the dashboard reading the same store.
@@ -299,6 +316,14 @@ def build_system() -> dict:
                         )
 
                 portfolio_manager = PortfolioManager(journal=journal_v2)
+                # trade_lifecycle was constructed earlier (before
+                # portfolio_manager existed) via get_default_trade_lifecycle(),
+                # which only uses its arguments on the very FIRST call —
+                # attach portfolio_manager to it now so the multi-symbol
+                # close path's TradeLifecycle.exit_confirmed() can
+                # actually call notify_position_closed() (Part D) instead
+                # of silently no-op'ing against a None portfolio_manager.
+                trade_lifecycle.portfolio_manager = portfolio_manager
                 # Reuse the SAME execution engine the single-symbol loop
                 # already built above (trade_manager) rather than calling
                 # build_execution_engine() a second time — that would spin
@@ -312,6 +337,7 @@ def build_system() -> dict:
                     portfolio_manager=portfolio_manager,
                     signal_provider=signal_provider,
                     journal=journal_v2,
+                    lifecycle=trade_lifecycle,
                 )
                 execution_scheduler = ExecutionScheduler(
                     opportunity_ranker=OpportunityRanker(market_scanner),
@@ -354,6 +380,7 @@ def build_system() -> dict:
         "causal_explainer":      causal_explainer,
         "journal":               journal,
         "journal_v2":            journal_v2,
+        "trade_lifecycle":       trade_lifecycle,
         "risk_engine":           risk_engine,
         "event_bus":             event_bus,
         "trade_manager":         trade_manager,
@@ -938,6 +965,12 @@ def monitor_open_trades(sys: dict) -> None:
     dp  = sys["data_provider"]
     jrn = sys["journal_v2"]
     bus = sys["event_bus"]
+    # V16 Phase 4B Step 3D: optional so this function still works
+    # unchanged (falls back to the pre-existing direct jrn.update_trade_result()
+    # call below) against a `sys` dict built without going through
+    # build_system()'s new "trade_lifecycle" key — e.g. an older test
+    # harness. build_system() itself always provides it.
+    lifecycle = sys.get("trade_lifecycle")
 
     try:
         open_trades = jrn.get_open_trades()
@@ -958,6 +991,7 @@ def monitor_open_trades(sys: dict) -> None:
             tp        = float(trade["take_profit"])
             direction = trade["direction"]
             qty       = float(trade.get("quantity", 0.0))
+            symbol    = trade.get("symbol") or settings.SYMBOL
 
             # Signed PnL — positive for profit, negative for loss
             if direction == "LONG":
@@ -971,7 +1005,36 @@ def monitor_open_trades(sys: dict) -> None:
             # qty itself was sized using risk_pct and NOT pre-multiplied by leverage,
             # so we must NOT apply leverage again here — that would double-count it.
             pnl = raw_pnl
-            jrn.update_trade_result(tid, result, mark, pnl)
+
+            # V16 Phase 4B Step 3D: routed through TradeLifecycle (Part
+            # C: "the only write path") instead of calling
+            # jrn.update_trade_result() directly. This threshold-based
+            # WIN/LOSS heuristic (unchanged above) is the closest signal
+            # this function has to "which close source fired" — it does
+            # NOT truly distinguish a TP-hit from any other reason the
+            # position closed while in profit, nor an SL-hit from any
+            # other reason it closed at a loss (Binance's SL/TP orders
+            # aren't individually queried here) — TAKE_PROFIT/STOP_LOSS
+            # below is this function's existing implicit assumption,
+            # carried forward exactly as-is, not a new claim of
+            # precision this phase adds.
+            source = CloseSource.TAKE_PROFIT if result == "WIN" else CloseSource.STOP_LOSS
+            if lifecycle is not None:
+                handle = lifecycle.request_exit(symbol, source, f"{result.lower()}_threshold_heuristic", trade_id=tid)
+                if handle is not None:
+                    lifecycle.exit_executing(handle)
+                    lifecycle.exit_confirmed(handle, result=result, exit_price=mark, pnl=pnl)
+                else:
+                    # Duplicate-close guard fired (Part I) — this trade_id
+                    # was already closed through the lifecycle by another
+                    # path (e.g. reconciliation) between get_open_trades()
+                    # and this loop iteration. Falling back to the direct
+                    # write below keeps this loop's own long-standing
+                    # "always close what the exchange says is closed"
+                    # guarantee intact rather than silently dropping it.
+                    jrn.update_trade_result(tid, result, mark, pnl)
+            else:
+                jrn.update_trade_result(tid, result, mark, pnl)
             logger.info(f"Trade #{tid} closed → {result} pnl={pnl:.2f} U")
 
             brain_pub.info(

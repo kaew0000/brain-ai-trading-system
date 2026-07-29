@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timezone
 from utils.logger import get_logger
+from execution.trade_lifecycle import CloseSource
 logger = get_logger(__name__)
 
 _COOLDOWN_S = 30.0
@@ -93,7 +94,35 @@ class RecoveryEngine:
                 tid = jv.get("trade_id")
                 if not jrn or tid is None:
                     return "missing_journal_or_trade_id"
-                jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
+                # V16 Phase 4B Step 3D: routed through TradeLifecycle
+                # (Part C/F: "Recovery must never update journal
+                # directly. Recovery must call lifecycle."). jv (this
+                # reconciliation check's own _read_journal() output) has
+                # no symbol key — reconciliation is inherently scoped to
+                # this bot's one configured symbol (same reasoning
+                # applied to this exact code path in V16 Phase 4B
+                # Step 3A), so settings.SYMBOL is the real value here,
+                # not a fabricated placeholder.
+                lifecycle = sys.get("trade_lifecycle")
+                if lifecycle is not None:
+                    from config.settings import settings
+                    handle = lifecycle.request_exit(
+                        settings.SYMBOL, CloseSource.RECONCILIATION,
+                        "presence_mismatch_ghost_row", trade_id=tid,
+                    )
+                    if handle is not None:
+                        lifecycle.exit_executing(handle)
+                        lifecycle.exit_confirmed(handle, result="CANCELLED", exit_price=0.0, pnl=0.0)
+                    else:
+                        # Duplicate-close guard fired — already closed
+                        # through the lifecycle by another path. Fall
+                        # back to the direct write so this recovery
+                        # action's own long-standing guarantee (a
+                        # detected ghost row always gets cleared) isn't
+                        # silently dropped.
+                        jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
+                else:
+                    jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
                 self._record("recon_recovery", f"trade_id={tid}", "closed_ghost_row")
                 logger.warning(f"Recon recovery: closed ghost journal trade #{tid}")
                 return "closed_ghost_journal_row"

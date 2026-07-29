@@ -796,10 +796,22 @@ class TestCloseSideAttribution:
         assert pm.closed_symbols == ["SOLUSDT"]
 
     def test_close_passes_trade_id_and_execution_id_to_portfolio_manager(self):
+        """V16 Phase 4B Step 3D: Part D moves the full attribution
+        payload's write destination from PortfolioManager to
+        TradeLifecycle (record_attribution=False is now passed to
+        notify_position_closed() for a lifecycle-routed close — see
+        docs/architecture.md's Phase 4B Step 3D section) — so this test
+        now checks the journal (where the data actually ends up) rather
+        than notify_position_closed()'s own kwargs (which deliberately
+        carry less than before this phase: just symbol/trade_id/
+        record_attribution). notify_position_closed() still gets
+        trade_id (asserted below) — execution_id/latency_seconds moved
+        to the journal write itself, which is the actual point of Part D."""
         pm = FakePortfolioManager()
+        jrn = FakeJournal()
         pstate = PortfolioState()
         pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0, trade_id=42))
-        orch = make_orchestrator(engine=FakeEngine(), pm=pm)
+        orch = make_orchestrator(engine=FakeEngine(), pm=pm, journal=jrn)
         proposal = ReplacementProposal(
             incoming_symbol="NEWUSDT", outgoing_symbol="SOLUSDT",
             incoming_score=90.0, outgoing_score=40.0, reason="x",
@@ -808,8 +820,16 @@ class TestCloseSideAttribution:
 
         assert len(pm.close_calls) == 1
         assert pm.close_calls[0]["trade_id"] == 42
-        assert pm.close_calls[0]["execution_id"]
-        assert pm.close_calls[0]["latency_seconds"] is not None
+        assert pm.close_calls[0]["record_attribution"] is False  # Part D
+
+        attribution = [c for c in jrn.attribution_calls if c[0] == "save_execution_attribution"]
+        assert len(attribution) == 1
+        assert attribution[0][1] == 42  # trade_id
+        assert attribution[0][2]["execution_id"]
+        assert attribution[0][2]["latency_seconds"] is not None
+        assert attribution[0][2]["source"] == "REPLACEMENT"
+        assert attribution[0][2]["reason"] == "x"
+        assert attribution[0][2]["symbol"] == "SOLUSDT"
 
     def test_exit_price_and_pnl_computed_from_fill_price(self):
         class FillEngine(FakeEngine):
@@ -818,38 +838,56 @@ class TestCloseSideAttribution:
                 return {"avgPrice": "110.0", "orderId": 555}
 
         pm = FakePortfolioManager()
+        jrn = FakeJournal()
         pstate = PortfolioState()
         position = make_position("SOLUSDT", "LONG", qty=3.0, trade_id=42)  # entry_price=100.0
         pstate.add_position(position)
-        orch = make_orchestrator(engine=FillEngine(), pm=pm)
+        orch = make_orchestrator(engine=FillEngine(), pm=pm, journal=jrn)
         proposal = ReplacementProposal(
             incoming_symbol="NEWUSDT", outgoing_symbol="SOLUSDT",
             incoming_score=90.0, outgoing_score=40.0, reason="x",
         )
         orch.execute(make_decision(replacements=[proposal]), pstate, 1_000.0)
 
-        call = pm.close_calls[0]
-        assert call["exit_price"] == 110.0
-        assert call["pnl"] == pytest.approx((110.0 - 100.0) * 3.0)
-        assert call["result"] == "WIN"
-        assert call["order_id"] == "555"
+        # V16 Phase 4B Step 3D: result/exit_price/pnl now land via
+        # journal.update_trade_result() (called from inside
+        # TradeLifecycle.exit_confirmed()'s record_trade_outcome() call),
+        # not via notify_position_closed()'s kwargs — same underlying
+        # values, new correct location per Part D.
+        updates = [c for c in jrn.attribution_calls if c[0] == "update_trade_result"]
+        assert len(updates) == 1
+        _, trade_id, result, exit_price, pnl = updates[0]
+        assert trade_id == 42
+        assert exit_price == 110.0
+        assert pnl == pytest.approx((110.0 - 100.0) * 3.0)
+        assert result == "WIN"
+
+        attribution = [c for c in jrn.attribution_calls if c[0] == "save_execution_attribution"]
+        assert attribution[-1][2]["order_id"] == "555"
 
     def test_no_fill_price_gives_none_outcome_not_a_guess(self):
         """FakeEngine's default close_position() return has no
         avgPrice/price (matches this file's existing TestReplacementClose
-        fixtures) — exit_price/pnl/result must stay None, not 0.0."""
+        fixtures) — exit_price/pnl/result must stay None, not 0.0.
+
+        V16 Phase 4B Step 3D: with all three None, record_trade_outcome()
+        deliberately skips its update_trade_result() call entirely (see
+        journal/trade_attribution.py: "if result is not None and
+        exit_price is not None and pnl is not None") — so this asserts
+        NO update_trade_result call happened, rather than one with None
+        arguments, which is the more precise (and actually correct)
+        check for "not a guess"."""
         pm = FakePortfolioManager()
+        jrn = FakeJournal()
         pstate = PortfolioState()
-        pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0))
-        orch = make_orchestrator(engine=FakeEngine(), pm=pm)
+        pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0, trade_id=42))
+        orch = make_orchestrator(engine=FakeEngine(), pm=pm, journal=jrn)
         proposal = ReplacementProposal(
             incoming_symbol="NEWUSDT", outgoing_symbol="SOLUSDT",
             incoming_score=90.0, outgoing_score=40.0, reason="x",
         )
         orch.execute(make_decision(replacements=[proposal]), pstate, 1_000.0)
 
-        call = pm.close_calls[0]
-        assert call["exit_price"] is None
-        assert call["pnl"] is None
-        assert call["result"] is None
+        updates = [c for c in jrn.attribution_calls if c[0] == "update_trade_result"]
+        assert updates == []
 
