@@ -1,0 +1,25 @@
+{
+  "id": "forge",
+  "agentRef": "FORGE",
+  "displayName": "Forge",
+  "district": "execution-forge",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "forge_idle",
+      "walking": "forge_walk",
+      "working": "forge_work",
+      "celebration": "forge_celebrate",
+      "emergency": "forge_emergency"
+    }
+  },
+  "dialogueRole": "reports fills",
+  "animationRole": "hammers during working state",
+  "interactionRole": "sparks on trade execution"
+}

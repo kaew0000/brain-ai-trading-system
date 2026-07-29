@@ -1,0 +1,25 @@
+{
+  "id": "chameleon",
+  "agentRef": "CHAMELEON",
+  "displayName": "Chameleon",
+  "district": "ai-council",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "chameleon_idle",
+      "walking": "chameleon_walk",
+      "working": "chameleon_work",
+      "celebration": "chameleon_celebrate",
+      "emergency": "chameleon_emergency"
+    }
+  },
+  "dialogueRole": "debates strategy shifts",
+  "animationRole": "shifts posture/color with regime change",
+  "interactionRole": "leads council debate"
+}

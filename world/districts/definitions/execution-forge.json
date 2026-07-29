@@ -1,0 +1,18 @@
+{
+  "id": "execution-forge",
+  "name": "Execution Forge",
+  "description": "An industrial forge where sparks fly to represent order fills.",
+  "purpose": "Reflects order execution activity",
+  "connectedDistricts": [
+    "risk-fortress",
+    "portfolio-garden"
+  ],
+  "assignedAgents": [
+    "FORGE"
+  ],
+  "visualTheme": "industrial, glowing embers",
+  "musicTheme": "rhythmic-percussion",
+  "futureExpansionHooks": [
+    "sub-district hook for Execution Forge (Phase W2+)"
+  ]
+}

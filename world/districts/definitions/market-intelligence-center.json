@@ -1,0 +1,18 @@
+{
+  "id": "market-intelligence-center",
+  "name": "Market Intelligence Center",
+  "description": "A watchtower scanning market data streams.",
+  "purpose": "External market watch reflection",
+  "connectedDistricts": [
+    "research-district",
+    "data-center"
+  ],
+  "assignedAgents": [
+    "WATCHER"
+  ],
+  "visualTheme": "watchtower, scanning beams",
+  "musicTheme": "alert-ambient",
+  "futureExpansionHooks": [
+    "sub-district hook for Market Intelligence Center (Phase W2+)"
+  ]
+}

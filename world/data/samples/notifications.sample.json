@@ -1,0 +1,9 @@
+[
+  {
+    "id": "notif-0001",
+    "timestamp": "2026-07-28T00:00:00Z",
+    "message": "Sample notification for schema validation.",
+    "severity": "info",
+    "read": false
+  }
+]

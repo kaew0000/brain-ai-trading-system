@@ -1,0 +1,25 @@
+{
+  "id": "phoenix",
+  "agentRef": "PHOENIX",
+  "displayName": "Phoenix",
+  "district": "recovery-center",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "phoenix_idle",
+      "walking": "phoenix_walk",
+      "working": "phoenix_work",
+      "celebration": "phoenix_celebrate",
+      "emergency": "phoenix_emergency"
+    }
+  },
+  "dialogueRole": "reassures during drawdown",
+  "animationRole": "rises/rebuilds after emergency",
+  "interactionRole": "restores district brightness"
+}

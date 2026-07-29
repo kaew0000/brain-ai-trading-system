@@ -1,0 +1,25 @@
+{
+  "id": "primus",
+  "agentRef": "PRIMUS",
+  "displayName": "Primus",
+  "district": "ceo-tower",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "primus_idle",
+      "walking": "primus_walk",
+      "working": "primus_work",
+      "celebration": "primus_celebrate",
+      "emergency": "primus_emergency"
+    }
+  },
+  "dialogueRole": "commands and synthesizes",
+  "animationRole": "authoritative oversight",
+  "interactionRole": "issues city-wide directives"
+}

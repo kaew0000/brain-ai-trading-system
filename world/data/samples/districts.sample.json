@@ -1,0 +1,38 @@
+[
+  {
+    "id": "ceo-tower",
+    "name": "CEO Tower",
+    "description": "A glass spire overlooking the whole city; where the highest-level state is reflected.",
+    "purpose": "Top-level oversight and final synthesis of engine status",
+    "connectedDistricts": [
+      "command-hall",
+      "ai-council"
+    ],
+    "assignedAgents": [
+      "PRIMUS"
+    ],
+    "visualTheme": "glass-and-light spire, ambient orchestral",
+    "musicTheme": "ambient-orchestral-calm",
+    "futureExpansionHooks": [
+      "sub-district hook for CEO Tower (Phase W2+)"
+    ]
+  },
+  {
+    "id": "ai-council",
+    "name": "AI Council",
+    "description": "A round chamber where regime and strategy signals are visualized as debate.",
+    "purpose": "Strategy deliberation chamber",
+    "connectedDistricts": [
+      "ceo-tower",
+      "research-district"
+    ],
+    "assignedAgents": [
+      "CHAMELEON"
+    ],
+    "visualTheme": "round chamber, shifting light",
+    "musicTheme": "tense-deliberative",
+    "futureExpansionHooks": [
+      "sub-district hook for AI Council (Phase W2+)"
+    ]
+  }
+]

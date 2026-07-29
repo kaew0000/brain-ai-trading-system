@@ -1,0 +1,25 @@
+{
+  "id": "crucible",
+  "agentRef": "CRUCIBLE",
+  "displayName": "Crucible",
+  "district": "training-arena",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "crucible_idle",
+      "walking": "crucible_walk",
+      "working": "crucible_work",
+      "celebration": "crucible_celebrate",
+      "emergency": "crucible_emergency"
+    }
+  },
+  "dialogueRole": "critiques drills",
+  "animationRole": "runs sparring drills",
+  "interactionRole": "tests strategies before deployment"
+}

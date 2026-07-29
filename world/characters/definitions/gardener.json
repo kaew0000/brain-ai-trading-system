@@ -1,0 +1,25 @@
+{
+  "id": "gardener",
+  "agentRef": "GARDENER",
+  "displayName": "Gardener",
+  "district": "portfolio-garden",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "gardener_idle",
+      "walking": "gardener_walk",
+      "working": "gardener_work",
+      "celebration": "gardener_celebrate",
+      "emergency": "gardener_emergency"
+    }
+  },
+  "dialogueRole": "tends the portfolio",
+  "animationRole": "prunes/waters, celebrates on growth",
+  "interactionRole": "cultivates positions"
+}

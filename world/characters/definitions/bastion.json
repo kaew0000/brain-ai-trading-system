@@ -1,0 +1,25 @@
+{
+  "id": "bastion",
+  "agentRef": "BASTION",
+  "displayName": "Bastion",
+  "district": "risk-fortress",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "bastion_idle",
+      "walking": "bastion_walk",
+      "working": "bastion_work",
+      "celebration": "bastion_celebrate",
+      "emergency": "bastion_emergency"
+    }
+  },
+  "dialogueRole": "warns and defends",
+  "animationRole": "raises shield on emergency",
+  "interactionRole": "guards fortress gates"
+}

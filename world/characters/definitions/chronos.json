@@ -1,0 +1,25 @@
+{
+  "id": "chronos",
+  "agentRef": "CHRONOS",
+  "displayName": "Chronos",
+  "district": "command-hall",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "chronos_idle",
+      "walking": "chronos_walk",
+      "working": "chronos_work",
+      "celebration": "chronos_celebrate",
+      "emergency": "chronos_emergency"
+    }
+  },
+  "dialogueRole": "announces timing",
+  "animationRole": "manages the clock tower, ticks visibly",
+  "interactionRole": "schedules district activity"
+}

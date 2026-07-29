@@ -1,0 +1,11 @@
+[
+  {
+    "id": "evt-0001",
+    "timestamp": "2026-07-28T00:00:00Z",
+    "type": "trade_fill",
+    "district": "execution-forge",
+    "agent": "FORGE",
+    "severity": "success",
+    "message": "Sample fill event reflected for display purposes only."
+  }
+]

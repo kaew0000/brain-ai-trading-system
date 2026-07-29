@@ -1,0 +1,18 @@
+{
+  "id": "journal-library",
+  "name": "Journal Library",
+  "description": "An archive of scrolls, one per logged trade or decision.",
+  "purpose": "Trade history and logs reflection",
+  "connectedDistricts": [
+    "recovery-center",
+    "data-center"
+  ],
+  "assignedAgents": [
+    "SCRIBE"
+  ],
+  "visualTheme": "quiet archive, candlelight",
+  "musicTheme": "quiet-archival",
+  "futureExpansionHooks": [
+    "sub-district hook for Journal Library (Phase W2+)"
+  ]
+}

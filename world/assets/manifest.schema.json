@@ -1,0 +1,25 @@
+{
+  "$id": "manifest.schema.json",
+  "type": "object",
+  "description": "Reserved for Phase W4 \u2014 indexes asset files once LPC sprites/tilesets/audio are added.",
+  "properties": {
+    "characters": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "districts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "audio": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

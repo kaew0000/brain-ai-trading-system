@@ -1,0 +1,44 @@
+{
+  "$id": "events.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "timestamp",
+      "type",
+      "district",
+      "severity"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "timestamp": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "type": {
+        "type": "string"
+      },
+      "district": {
+        "type": "string"
+      },
+      "agent": {
+        "type": "string"
+      },
+      "severity": {
+        "type": "string",
+        "enum": [
+          "info",
+          "success",
+          "warning",
+          "critical"
+        ]
+      },
+      "message": {
+        "type": "string"
+      }
+    }
+  }
+}

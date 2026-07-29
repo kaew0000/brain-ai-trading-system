@@ -1,0 +1,25 @@
+{
+  "id": "mandelbrot",
+  "agentRef": "MANDELBROT",
+  "displayName": "Mandelbrot",
+  "district": "simulation-lab",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "mandelbrot_idle",
+      "walking": "mandelbrot_walk",
+      "working": "mandelbrot_work",
+      "celebration": "mandelbrot_celebrate",
+      "emergency": "mandelbrot_emergency"
+    }
+  },
+  "dialogueRole": "describes patterns",
+  "animationRole": "draws fractal diagrams while working",
+  "interactionRole": "projects simulated scenarios"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "oracle",
+  "agentRef": "ORACLE",
+  "displayName": "Oracle",
+  "district": "research-district",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "oracle_idle",
+      "walking": "oracle_walk",
+      "working": "oracle_work",
+      "celebration": "oracle_celebrate",
+      "emergency": "oracle_emergency"
+    }
+  },
+  "dialogueRole": "explains predictions",
+  "animationRole": "studies star-charts",
+  "interactionRole": "advises AI Council"
+}
