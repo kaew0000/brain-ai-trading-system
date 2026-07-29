@@ -1,9 +1,9 @@
 # Herald (HERALD)
 
-**District:** world-gateway
+**Department:** Reception
 **Dialogue role:** announces major events
-**Animation role:** blows horn on celebration/emergency
-**Interaction role:** greets and orients
+**Animation role:** greets visitors at the front desk
+**Interaction role:** greets and orients new arrivals
 
 This character is a visual/narrative representation of the existing
 `HERALD` agent. It does not redefine or alter that agent's

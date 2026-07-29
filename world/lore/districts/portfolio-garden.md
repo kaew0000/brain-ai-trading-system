@@ -1,8 +1,8 @@
-# Portfolio Garden
+# Garden
 
 **Purpose:** Visualizes holdings as living growth
 
-A garden where each plant reflects a position; growth mirrors performance.
+A glass atrium garden beside the Portfolio Department, where each plant reflects a position and growth mirrors performance.
 
 **Assigned agents:** GARDENER
-**Connected districts:** execution-forge, recovery-center
+**Connected departments:** Trading Floor, Recovery Center

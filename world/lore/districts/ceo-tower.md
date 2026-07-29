@@ -1,8 +1,8 @@
-# CEO Tower
+# CEO Office
 
 **Purpose:** Top-level oversight and final synthesis of engine status
 
-A glass spire overlooking the whole city; where the highest-level state is reflected.
+A glass corner office on the top floor overlooking the trading floor; where the highest-level state is reflected.
 
 **Assigned agents:** PRIMUS
-**Connected districts:** command-hall, ai-council
+**Connected departments:** Command Center, AI Department

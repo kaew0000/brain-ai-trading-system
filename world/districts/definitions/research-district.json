@@ -1,7 +1,7 @@
 {
   "id": "research-district",
-  "name": "Research District",
-  "description": "Libraries and observatories showing the engine's research/prediction activity.",
+  "name": "Research Lab",
+  "description": "An open research lab with monitor walls showing the engine's research and prediction activity.",
   "purpose": "Analysis and prediction reflection",
   "connectedDistricts": [
     "ai-council",
@@ -11,9 +11,9 @@
     "ORACLE",
     "MANDELBROT"
   ],
-  "visualTheme": "observatory, starlit",
+  "visualTheme": "research lab, monitor wall, whiteboards",
   "musicTheme": "curious-analytical",
   "futureExpansionHooks": [
-    "sub-district hook for Research District (Phase W2+)"
+    "sub-department hook for Research Lab (Phase W3+)"
   ]
 }

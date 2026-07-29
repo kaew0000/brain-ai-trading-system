@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "chameleon_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "debates strategy shifts",
-  "animationRole": "shifts posture/color with regime change",
-  "interactionRole": "leads council debate"
+  "animationRole": "updates the strategy whiteboard as regime shifts",
+  "interactionRole": "leads the strategy meeting"
 }

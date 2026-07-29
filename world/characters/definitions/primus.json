@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "primus_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "commands and synthesizes",
-  "animationRole": "authoritative oversight",
-  "interactionRole": "issues city-wide directives"
+  "animationRole": "authoritative oversight from the corner office",
+  "interactionRole": "issues company-wide directives"
 }

@@ -1,8 +1,8 @@
-# Data Center
+# Server Room
 
 **Purpose:** Data pipeline reflection
 
-Server racks woven together, visualizing data flow health.
+Server racks under cool LED lighting, visualizing data flow health.
 
 **Assigned agents:** WEBWEAVER
-**Connected districts:** market-intelligence-center, journal-library, training-arena
+**Connected departments:** Market Intelligence Center, Journal Department, Training Room

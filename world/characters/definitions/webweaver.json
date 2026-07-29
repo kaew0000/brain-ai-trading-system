@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "webweaver_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "describes data flow",
-  "animationRole": "weaves threads between racks",
-  "interactionRole": "connects data pipelines"
+  "animationRole": "checks server racks, monitors dashboards",
+  "interactionRole": "maintains data pipelines"
 }

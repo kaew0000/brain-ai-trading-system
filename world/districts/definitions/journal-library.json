@@ -1,7 +1,7 @@
 {
   "id": "journal-library",
-  "name": "Journal Library",
-  "description": "An archive of scrolls, one per logged trade or decision.",
+  "name": "Journal Department",
+  "description": "A records room with a digital archive wall, one entry per logged trade or decision.",
   "purpose": "Trade history and logs reflection",
   "connectedDistricts": [
     "recovery-center",
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "SCRIBE"
   ],
-  "visualTheme": "quiet archive, candlelight",
+  "visualTheme": "records room, digital archive wall",
   "musicTheme": "quiet-archival",
   "futureExpansionHooks": [
-    "sub-district hook for Journal Library (Phase W2+)"
+    "sub-department hook for Journal Department (Phase W3+)"
   ]
 }

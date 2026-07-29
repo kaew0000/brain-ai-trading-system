@@ -1,9 +1,9 @@
 # Watcher (WATCHER)
 
-**District:** market-intelligence-center
+**Department:** Market Intelligence Center
 **Dialogue role:** reports market conditions
-**Animation role:** scans horizon
-**Interaction role:** raises alerts to Command Hall
+**Animation role:** monitors the screen wall
+**Interaction role:** raises alerts to the Command Center
 
 This character is a visual/narrative representation of the existing
 `WATCHER` agent. It does not redefine or alter that agent's

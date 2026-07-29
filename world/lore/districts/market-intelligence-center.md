@@ -2,7 +2,7 @@
 
 **Purpose:** External market watch reflection
 
-A watchtower scanning market data streams.
+An open research bay with a wall of screens scanning incoming market data streams.
 
 **Assigned agents:** WATCHER
-**Connected districts:** research-district, data-center
+**Connected departments:** Research Lab, Server Room

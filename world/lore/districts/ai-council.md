@@ -1,8 +1,8 @@
-# AI Council
+# AI Department
 
-**Purpose:** Strategy deliberation chamber
+**Purpose:** Strategy deliberation meeting room
 
-A round chamber where regime and strategy signals are visualized as debate.
+A glass-walled meeting room where regime and strategy signals are visualized as a whiteboard discussion.
 
 **Assigned agents:** CHAMELEON
-**Connected districts:** ceo-tower, research-district
+**Connected departments:** CEO Office, Research Lab

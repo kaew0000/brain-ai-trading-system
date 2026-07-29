@@ -1,8 +1,8 @@
-# Risk Fortress
+# Risk Department
 
 **Purpose:** Defensive systems and risk-state reflection
 
-Stone ramparts that visualize risk posture; gates rise or fall with risk state.
+A glass risk-management office with dashboard gauges that rise or fall with risk state.
 
 **Assigned agents:** BASTION, SENTINEL
-**Connected districts:** execution-forge, command-hall
+**Connected departments:** Trading Floor, Command Center

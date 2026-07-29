@@ -1,7 +1,7 @@
 {
   "id": "recovery-center",
   "name": "Recovery Center",
-  "description": "A healing sanctuary that brightens as the engine recovers from drawdown.",
+  "description": "A calm wellness lounge that brightens as the engine recovers from drawdown.",
   "purpose": "Reflects drawdown recovery state",
   "connectedDistricts": [
     "portfolio-garden",
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "PHOENIX"
   ],
-  "visualTheme": "warm sanctuary, soft rising light",
+  "visualTheme": "calm lounge, soft rising light",
   "musicTheme": "soft-rising",
   "futureExpansionHooks": [
-    "sub-district hook for Recovery Center (Phase W2+)"
+    "sub-department hook for Recovery Center (Phase W3+)"
   ]
 }

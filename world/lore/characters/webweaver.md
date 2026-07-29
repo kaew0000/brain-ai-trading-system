@@ -1,9 +1,9 @@
 # Webweaver (WEBWEAVER)
 
-**District:** data-center
+**Department:** Server Room
 **Dialogue role:** describes data flow
-**Animation role:** weaves threads between racks
-**Interaction role:** connects data pipelines
+**Animation role:** checks server racks, monitors dashboards
+**Interaction role:** maintains data pipelines
 
 This character is a visual/narrative representation of the existing
 `WEBWEAVER` agent. It does not redefine or alter that agent's

@@ -1,7 +1,7 @@
 {
   "id": "portfolio-garden",
-  "name": "Portfolio Garden",
-  "description": "A garden where each plant reflects a position; growth mirrors performance.",
+  "name": "Garden",
+  "description": "A glass atrium garden beside the Portfolio Department, where each plant reflects a position and growth mirrors performance.",
   "purpose": "Visualizes holdings as living growth",
   "connectedDistricts": [
     "execution-forge",
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "GARDENER"
   ],
-  "visualTheme": "organic, seasonal",
-  "musicTheme": "pastoral",
+  "visualTheme": "glass atrium, indoor plants, natural light",
+  "musicTheme": "calm-atrium",
   "futureExpansionHooks": [
-    "sub-district hook for Portfolio Garden (Phase W2+)"
+    "sub-department hook for Garden (Phase W3+)"
   ]
 }

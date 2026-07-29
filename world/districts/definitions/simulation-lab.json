@@ -1,7 +1,7 @@
 {
   "id": "simulation-lab",
-  "name": "Simulation Lab",
-  "description": "A lab of shifting fractal projections representing simulated scenarios.",
+  "name": "Simulation Room",
+  "description": "A digital projection room with shifting holographic displays representing simulated scenarios.",
   "purpose": "Scenario/what-if reflection",
   "connectedDistricts": [
     "training-arena",
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "MANDELBROT"
   ],
-  "visualTheme": "fractal projections, cool light",
+  "visualTheme": "projection room, holographic displays",
   "musicTheme": "experimental-ambient",
   "futureExpansionHooks": [
-    "sub-district hook for Simulation Lab (Phase W2+)"
+    "sub-department hook for Simulation Room (Phase W3+)"
   ]
 }

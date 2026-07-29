@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "watcher_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "reports market conditions",
-  "animationRole": "scans horizon",
-  "interactionRole": "raises alerts to Command Hall"
+  "animationRole": "monitors the screen wall",
+  "interactionRole": "raises alerts to the Command Center"
 }

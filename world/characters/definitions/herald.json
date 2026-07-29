@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "herald_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "announces major events",
-  "animationRole": "blows horn on celebration/emergency",
-  "interactionRole": "greets and orients"
+  "animationRole": "greets visitors at the front desk",
+  "interactionRole": "greets and orients new arrivals"
 }
