@@ -1,8 +1,8 @@
 [
   {
     "id": "ceo-tower",
-    "name": "CEO Tower",
-    "description": "A glass spire overlooking the whole city; where the highest-level state is reflected.",
+    "name": "CEO Office",
+    "description": "A glass corner office on the top floor overlooking the trading floor; where the highest-level state is reflected.",
     "purpose": "Top-level oversight and final synthesis of engine status",
     "connectedDistricts": [
       "command-hall",
@@ -11,17 +11,17 @@
     "assignedAgents": [
       "PRIMUS"
     ],
-    "visualTheme": "glass-and-light spire, ambient orchestral",
-    "musicTheme": "ambient-orchestral-calm",
+    "visualTheme": "glass corner office, city view, minimal",
+    "musicTheme": "corporate-ambient-calm",
     "futureExpansionHooks": [
-      "sub-district hook for CEO Tower (Phase W2+)"
+      "sub-department hook for CEO Office (Phase W3+)"
     ]
   },
   {
     "id": "ai-council",
-    "name": "AI Council",
-    "description": "A round chamber where regime and strategy signals are visualized as debate.",
-    "purpose": "Strategy deliberation chamber",
+    "name": "AI Department",
+    "description": "A glass-walled meeting room where regime and strategy signals are visualized as a whiteboard discussion.",
+    "purpose": "Strategy deliberation meeting room",
     "connectedDistricts": [
       "ceo-tower",
       "research-district"
@@ -29,10 +29,10 @@
     "assignedAgents": [
       "CHAMELEON"
     ],
-    "visualTheme": "round chamber, shifting light",
-    "musicTheme": "tense-deliberative",
+    "visualTheme": "glass meeting room, whiteboards, wall screens",
+    "musicTheme": "focused-discussion",
     "futureExpansionHooks": [
-      "sub-district hook for AI Council (Phase W2+)"
+      "sub-department hook for AI Department (Phase W3+)"
     ]
   }
 ]
