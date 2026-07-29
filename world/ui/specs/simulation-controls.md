@@ -4,7 +4,7 @@
 
 ## Purpose
 
-UI for browsing Simulation Lab what-if scenarios (display only).
+UI for browsing Simulation Room what-if scenarios (display only).
 
 ## Data Sources (read-only)
 

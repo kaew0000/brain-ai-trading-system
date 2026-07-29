@@ -1,0 +1,64 @@
+{
+  "$id": "office_layout.schema.json",
+  "description": "Engine-neutral office layout contract for Brain AI Command World, Phase W2. Positions are abstract office units, not pixels — any renderer (PixiJS/Phaser/Godot/Unity/React Canvas) maps them to its own coordinate space.",
+  "type": "object",
+  "required": ["floors", "rooms"],
+  "properties": {
+    "floors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["floor", "name", "rooms"],
+        "properties": {
+          "floor": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "rooms": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "rooms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "floor",
+          "connections",
+          "spawnLocation",
+          "cameraAnchor"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Matches a world/districts/definitions id — a room IS the existing department."
+          },
+          "name": { "type": "string" },
+          "floor": { "type": "integer", "minimum": 1 },
+          "connections": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Room ids this room narratively connects to (mirrors districts.connectedDistricts)."
+          },
+          "spawnLocation": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          },
+          "cameraAnchor": {
+            "type": "object",
+            "required": ["x", "y", "zoom"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "zoom": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "id": "execution-forge",
-  "name": "Execution Forge",
-  "description": "An industrial forge where sparks fly to represent order fills.",
+  "name": "Trading Floor",
+  "description": "An open trading floor of multi-monitor desks that light up to represent order fills.",
   "purpose": "Reflects order execution activity",
   "connectedDistricts": [
     "risk-fortress",
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "FORGE"
   ],
-  "visualTheme": "industrial, glowing embers",
-  "musicTheme": "rhythmic-percussion",
+  "visualTheme": "open trading floor, multi-monitor desks",
+  "musicTheme": "energetic-productive",
   "futureExpansionHooks": [
-    "sub-district hook for Execution Forge (Phase W2+)"
+    "sub-department hook for Trading Floor (Phase W3+)"
   ]
 }

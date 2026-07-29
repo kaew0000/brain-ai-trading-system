@@ -1,0 +1,256 @@
+[
+  {
+    "id": "ai-council",
+    "name": "AI Department",
+    "floor": 3,
+    "connections": [
+      "ceo-tower",
+      "research-district"
+    ],
+    "spawnLocation": {
+      "x": 2.0,
+      "y": 16.0
+    },
+    "cameraAnchor": {
+      "x": 2.0,
+      "y": 15.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "ceo-tower",
+    "name": "CEO Office",
+    "floor": 3,
+    "connections": [
+      "command-hall",
+      "ai-council"
+    ],
+    "spawnLocation": {
+      "x": 6.0,
+      "y": 16.0
+    },
+    "cameraAnchor": {
+      "x": 6.0,
+      "y": 15.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "command-hall",
+    "name": "Command Center",
+    "floor": 2,
+    "connections": [
+      "ceo-tower",
+      "risk-fortress",
+      "simulation-lab",
+      "world-gateway"
+    ],
+    "spawnLocation": {
+      "x": 2.0,
+      "y": 11.0
+    },
+    "cameraAnchor": {
+      "x": 2.0,
+      "y": 10.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "data-center",
+    "name": "Server Room",
+    "floor": 2,
+    "connections": [
+      "market-intelligence-center",
+      "journal-library",
+      "training-arena"
+    ],
+    "spawnLocation": {
+      "x": 6.0,
+      "y": 11.0
+    },
+    "cameraAnchor": {
+      "x": 6.0,
+      "y": 10.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "execution-forge",
+    "name": "Trading Floor",
+    "floor": 2,
+    "connections": [
+      "risk-fortress",
+      "portfolio-garden"
+    ],
+    "spawnLocation": {
+      "x": 10.0,
+      "y": 11.0
+    },
+    "cameraAnchor": {
+      "x": 10.0,
+      "y": 10.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "journal-library",
+    "name": "Journal Department",
+    "floor": 2,
+    "connections": [
+      "recovery-center",
+      "data-center"
+    ],
+    "spawnLocation": {
+      "x": 14.0,
+      "y": 11.0
+    },
+    "cameraAnchor": {
+      "x": 14.0,
+      "y": 10.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "market-intelligence-center",
+    "name": "Market Intelligence Center",
+    "floor": 3,
+    "connections": [
+      "research-district",
+      "data-center"
+    ],
+    "spawnLocation": {
+      "x": 10.0,
+      "y": 16.0
+    },
+    "cameraAnchor": {
+      "x": 10.0,
+      "y": 15.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "portfolio-garden",
+    "name": "Garden",
+    "floor": 1,
+    "connections": [
+      "execution-forge",
+      "recovery-center"
+    ],
+    "spawnLocation": {
+      "x": 2.0,
+      "y": 6.0
+    },
+    "cameraAnchor": {
+      "x": 2.0,
+      "y": 5.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "recovery-center",
+    "name": "Recovery Center",
+    "floor": 1,
+    "connections": [
+      "portfolio-garden",
+      "journal-library"
+    ],
+    "spawnLocation": {
+      "x": 6.0,
+      "y": 6.0
+    },
+    "cameraAnchor": {
+      "x": 6.0,
+      "y": 5.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "research-district",
+    "name": "Research Lab",
+    "floor": 3,
+    "connections": [
+      "ai-council",
+      "data-center"
+    ],
+    "spawnLocation": {
+      "x": 14.0,
+      "y": 16.0
+    },
+    "cameraAnchor": {
+      "x": 14.0,
+      "y": 15.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "risk-fortress",
+    "name": "Risk Department",
+    "floor": 2,
+    "connections": [
+      "execution-forge",
+      "command-hall"
+    ],
+    "spawnLocation": {
+      "x": 18.0,
+      "y": 11.0
+    },
+    "cameraAnchor": {
+      "x": 18.0,
+      "y": 10.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "simulation-lab",
+    "name": "Simulation Room",
+    "floor": 3,
+    "connections": [
+      "training-arena",
+      "command-hall"
+    ],
+    "spawnLocation": {
+      "x": 18.0,
+      "y": 16.0
+    },
+    "cameraAnchor": {
+      "x": 18.0,
+      "y": 15.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "training-arena",
+    "name": "Training Room",
+    "floor": 1,
+    "connections": [
+      "data-center",
+      "simulation-lab"
+    ],
+    "spawnLocation": {
+      "x": 10.0,
+      "y": 6.0
+    },
+    "cameraAnchor": {
+      "x": 10.0,
+      "y": 5.0,
+      "zoom": 1.0
+    }
+  },
+  {
+    "id": "world-gateway",
+    "name": "Reception",
+    "floor": 1,
+    "connections": [
+      "command-hall"
+    ],
+    "spawnLocation": {
+      "x": 14.0,
+      "y": 6.0
+    },
+    "cameraAnchor": {
+      "x": 14.0,
+      "y": 5.0,
+      "zoom": 1.0
+    }
+  }
+]

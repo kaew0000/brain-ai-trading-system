@@ -1,8 +1,8 @@
-# Execution Forge
+# Trading Floor
 
 **Purpose:** Reflects order execution activity
 
-An industrial forge where sparks fly to represent order fills.
+An open trading floor of multi-monitor desks that light up to represent order fills.
 
 **Assigned agents:** FORGE
-**Connected districts:** risk-fortress, portfolio-garden
+**Connected departments:** Risk Department, Garden

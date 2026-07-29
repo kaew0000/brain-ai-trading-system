@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "bastion_idle",
@@ -19,7 +19,7 @@
       "emergency": "bastion_emergency"
     }
   },
-  "dialogueRole": "warns and defends",
-  "animationRole": "raises shield on emergency",
-  "interactionRole": "guards fortress gates"
+  "dialogueRole": "flags risk issues",
+  "animationRole": "raises an alert banner on emergency",
+  "interactionRole": "enforces risk controls"
 }

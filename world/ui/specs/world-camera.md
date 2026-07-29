@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Free/orbit camera controls for exploring the city.
+Free/orbit camera controls for exploring the office.
 
 ## Data Sources (read-only)
 

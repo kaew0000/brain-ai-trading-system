@@ -1,7 +1,7 @@
 {
   "id": "training-arena",
-  "name": "Training Arena",
-  "description": "A sparring ground where the engine's backtests are shown as training drills.",
+  "name": "Training Room",
+  "description": "A modern training room with screens and a whiteboard where the engine's backtests are reviewed like onboarding sessions.",
   "purpose": "Backtesting and drills reflection",
   "connectedDistricts": [
     "data-center",
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "CRUCIBLE"
   ],
-  "visualTheme": "training grounds, dust and torches",
-  "musicTheme": "determined-drums",
+  "visualTheme": "training room, screens and whiteboard",
+  "musicTheme": "upbeat-focused",
   "futureExpansionHooks": [
-    "sub-district hook for Training Arena (Phase W2+)"
+    "sub-department hook for Training Room (Phase W3+)"
   ]
 }

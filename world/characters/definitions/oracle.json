@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "oracle_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "explains predictions",
-  "animationRole": "studies star-charts",
-  "interactionRole": "advises AI Council"
+  "animationRole": "reviews model output on monitor",
+  "interactionRole": "advises the AI Department"
 }

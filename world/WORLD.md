@@ -1,13 +1,27 @@
 # Brain AI Command World — Phase W1: Foundation Architecture
 
-**Status:** Design/scaffolding only. Not implemented. Awaiting approval.
+**Status:** Implemented (W1, W1A). Superseded in part by Phase W2 — see note
+below.
 **Scope:** Everything below lives under `world/` in `brain-ai-trading-system`. Nothing in `agents/`, `execution/`, `portfolio/`, `journal/`, `risk/`, `api/`, `dashboard/`, or `main.py` is touched, referenced for writes, or assumed to change.
+
+> **Phase W2 update (2026-07-29):** the visual theme described below (city,
+> fortress, forge, castle-adjacent language) is retired. Brain AI Command
+> World is permanently a modern office headquarters — see
+> `docs/architecture/WORLD_OFFICE_POLICY.md` and `WORLD_DESIGN_LOCK.md`
+> (canonical, "this document wins" on any conflict) and
+> `world/docs/OFFICE_LAYOUT.md` / `world/docs/ROOM_SPECIFICATIONS.md` for the
+> current department names, floors, and navigation graph. The tables in
+> sections 4–5 below are kept for historical W1 design-intent context
+> (why each character/district exists, what it reflects) — for current
+> *names* and *theme*, the district/character JSON under
+> `world/districts/definitions/` and `world/characters/definitions/` is the
+> single source of truth.
 
 ---
 
 ## 1. Architecture Report
 
-Brain AI Command World is a **read-only visualization layer**. It observes the trading engine's state (via files/events it already emits, or a future thin adapter) and renders that state as a living city. It never calls into `execution/` or `risk/` and never issues orders. The boundary is one-directional:
+Brain AI Command World is a **read-only visualization layer**. It observes the trading engine's state (via files/events it already emits, or a future thin adapter) and renders that state as a living office headquarters (Phase W2). It never calls into `execution/` or `risk/` and never issues orders. The boundary is one-directional:
 
 ```
 Trading Engine (agents/, execution/, risk/, ...) 
@@ -29,7 +43,7 @@ world/
   README.md              # entry point, quick orientation
   WORLD.md                # full architecture doc (this report, refined)
   lore/
-    overview.md            # city-wide lore, cross-district narrative
+    overview.md            # building-wide lore, cross-department narrative
     districts/              # one lore file per district
     characters/              # one lore file per character
   assets/
@@ -231,51 +245,51 @@ All schemas are drafted as **JSON Schema (draft 2020-12)** for tooling compatibi
 
 Characters wrap **existing agents** — no responsibility redesign, only presentation. Suggested mapping (roles inferred from naming; Krush should confirm/correct against actual agent responsibilities before lore is finalized):
 
-| Character | Likely Agent Role (to confirm) | District | Animation Role |
+| Character | Likely Agent Role (to confirm) | Department (Phase W2) | Animation Role (Phase W2) |
 |---|---|---|---|
-| PRIMUS | Core/orchestrating intelligence | CEO Tower | Commands, oversees, idle-authoritative pose |
-| BASTION | Risk / defense | Risk Fortress | Guards gates, raises shield on `emergency` |
-| FORGE | Execution | Execution Forge | Hammers/builds during `working`, sparks on trade fill |
-| WATCHER | Monitoring/surveillance | Market Intelligence Center | Scans horizon, idle-alert pose |
-| SCRIBE | Journaling/logging | Journal Library | Writes continuously, files scrolls |
-| PHOENIX | Recovery | Recovery Center | Rises/rebuilds after `emergency` state |
-| ORACLE | Prediction/analysis | Research District | Studies charts, gestures during `working` |
-| ECHO | Signal propagation/comms | Command Hall | Relays messages between districts |
-| HERALD | Announcements/notifications | World Gateway | Blows horn on major events |
-| CHAMELEON | Adaptive strategy | AI Council | Shifts posture/color with regime changes |
-| CRUCIBLE | Testing/validation | Training Arena | Runs drills, sparring animations |
-| MANDELBROT | Pattern/quant analysis | Simulation Lab | Draws fractal-like diagrams while `working` |
-| SENTINEL | Security/auth | Risk Fortress | Stands watch at gate |
-| GARDENER | Portfolio tending | Portfolio Garden | Prunes/waters, celebration on profit growth |
-| WEBWEAVER | Data/API integration | Data Center | Weaves threads between server racks |
-| CHRONOS | Timing/scheduling | Command Hall | Manages clock tower, ticks visibly |
+| PRIMUS | Core/orchestrating intelligence | CEO Office | Authoritative oversight from the corner office |
+| BASTION | Risk / defense | Risk Department | Raises an alert banner on `emergency` |
+| FORGE | Execution | Trading Floor | Types rapidly at the desk during fills |
+| WATCHER | Monitoring/surveillance | Market Intelligence Center | Monitors the screen wall |
+| SCRIBE | Journaling/logging | Journal Department | Logs entries continuously at the terminal |
+| PHOENIX | Recovery | Recovery Center | Leads the recovery briefing after an `emergency` |
+| ORACLE | Prediction/analysis | Research Lab | Reviews model output on monitor |
+| ECHO | Signal propagation/comms | Command Center | Relays signals across departments |
+| HERALD | Announcements/notifications | Reception | Greets visitors at the front desk |
+| CHAMELEON | Adaptive strategy | AI Department | Updates the strategy whiteboard as regime shifts |
+| CRUCIBLE | Testing/validation | Training Room | Runs test sessions |
+| MANDELBROT | Pattern/quant analysis | Simulation Room | Runs scenario models on screen while `working` |
+| SENTINEL | Security/auth | Risk Department | Monitors the access log at the desk |
+| GARDENER | Portfolio tending | Garden | Waters plants, reviews the holdings board |
+| WEBWEAVER | Data/API integration | Server Room | Checks server racks, monitors dashboards |
+| CHRONOS | Timing/scheduling | Command Center | Manages the wall clock and schedule board |
 
 Each character definition JSON captures **only presentation**: `spriteMeta`, `animationRole`, `dialogueRole`, `interactionRole`, and `district`. No file references trading logic or parameters.
 
-**Standard animation states** (all characters): `idle`, `walking`, `working`, `celebration`, `emergency`. Equipment slots are generic and LPC-compatible: `head`, `body`, `weapon`, `accessory`, `aura` — populated later, empty in W1.
+**Standard animation states** (all characters): `idle`, `walking`, `working`, `celebration`, `emergency`. Equipment slots are generic and LPC-compatible: `head`, `body`, `tool`, `accessory`, `statusGlow` (Phase W2 — renamed from `weapon`/`aura` to match office character design; no armor/weapon slots per `WORLD_OFFICE_POLICY.md`) — populated later.
 
 ---
 
 ## 5. District Design
 
-Each of the 14 districts gets a definition file with: `name`, `description`, `purpose`, `connectedDistricts`, `assignedAgents`, `visualTheme`, `musicTheme`, `futureExpansionHooks`. Example (abbreviated):
+Each of the 14 districts gets a definition file with: `name`, `description`, `purpose`, `connectedDistricts`, `assignedAgents`, `visualTheme`, `musicTheme`, `futureExpansionHooks`. Example (abbreviated, **Phase W2 office names**):
 
-- **CEO Tower** — top-level oversight; connects to Command Hall, AI Council; agent PRIMUS; theme: glass spire, ambient orchestral.
-- **AI Council** — strategy deliberation; connects to CEO Tower, Research District; agent CHAMELEON.
-- **Research District** — analysis/prediction; agent ORACLE, MANDELBROT.
-- **Risk Fortress** — defensive systems; agents BASTION, SENTINEL; stone/metal theme, tense low drone.
-- **Execution Forge** — order execution reflection; agent FORGE; industrial theme, rhythmic percussion.
-- **Portfolio Garden** — holdings visualized as growth; agent GARDENER; organic theme, pastoral music.
+- **CEO Office** — top-level oversight; connects to Command Center, AI Department; agent PRIMUS; theme: glass corner office, city view.
+- **AI Department** — strategy deliberation; connects to CEO Office, Research Lab; agent CHAMELEON.
+- **Research Lab** — analysis/prediction; agent ORACLE, MANDELBROT.
+- **Risk Department** — defensive systems; agents BASTION, SENTINEL; glass office, risk dashboards.
+- **Trading Floor** — order execution reflection; agent FORGE; open trading floor, multi-monitor desks.
+- **Garden** — holdings visualized as growth; agent GARDENER; glass atrium, indoor plants.
 - **Market Intelligence Center** — external market watch; agent WATCHER.
-- **Recovery Center** — post-drawdown healing; agent PHOENIX; soft rising theme.
-- **Journal Library** — trade history; agent SCRIBE; quiet archival theme.
-- **Data Center** — data pipelines; agent WEBWEAVER; server-hum ambient.
-- **Training Arena** — backtesting/drills; agent CRUCIBLE.
-- **Simulation Lab** — what-if scenarios; agent MANDELBROT.
-- **World Gateway** — entry point/onboarding; agent HERALD.
-- **Command Hall** — cross-district comms; agents ECHO, CHRONOS.
+- **Recovery Center** — post-drawdown healing; agent PHOENIX; calm lounge theme.
+- **Journal Department** — trade history; agent SCRIBE; records room, digital archive wall.
+- **Server Room** — data pipelines; agent WEBWEAVER; server racks, cool blue LED.
+- **Training Room** — backtesting/drills; agent CRUCIBLE.
+- **Simulation Room** — what-if scenarios; agent MANDELBROT.
+- **Reception** — entry point/onboarding; agent HERALD.
+- **Command Center** — cross-department comms; agents ECHO, CHRONOS.
 
-`connectedDistricts` forms a graph used later by the minimap; `futureExpansionHooks` are free-text notes like `"add sub-district: Options Wing"`.
+`connectedDistricts` forms a graph used later by the minimap (materialized in Phase W2 as `world/data/navigation/graph.json`); `futureExpansionHooks` are free-text notes like `"sub-department hook for X (Phase W3+)"`.
 
 ---
 
@@ -303,21 +317,26 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 
 ## 7. Future Expansion Plan
 
-- Phase W2: pick a renderer (likely PixiJS or Phaser for 2D city view given LPC assets) and build the read-only ingestion adapter.
-- Phase W3: implement minimap + district navigation.
-- Phase W4: LPC sprite integration using `spriteMeta` already defined.
-- Phase W5: live event feed wired to real engine logs.
-- Phase W6: relationship viewer, mission panel, notification center UI.
-- Sub-districts and new characters can be added without breaking schemas, since arrays are additive.
+- Phase W2 (**done**): retcon to modern office HQ theme; add `world/data/layout`, `world/data/characters` (placement), `world/data/navigation` as a spatial layer.
+- Phase W2.1 (**done**): documentation synchronization — this document, roadmap, lore, ui/specs.
+- Phase W3: pick a renderer (React Canvas, PixiJS, Phaser, Godot, or Unity — all equally supported by the schemas) and build the read-only ingestion adapter.
+- Phase W4: static scene rendering with placeholder shapes using the Phase W2 layout/navigation data.
+- Phase W5: office-appropriate sprite integration using `spriteMeta` already defined (no LPC weapon/armor slots — see §4).
+- Phase W6: live event feed wired to real engine logs.
+- Phase W7: relationship viewer, mission panel, notification center UI.
+- Sub-departments and new characters can be added without breaking schemas, since arrays are additive.
 
 ## 8. Development Roadmap
 
-1. **W1 (this phase):** architecture, schemas, lore skeleton, docs — no code execution, no assets.
-2. **W2:** ingestion adapter design + choice of renderer, still no trading-code changes.
-3. **W3:** static scene rendering with placeholder shapes (no sprites yet).
-4. **W4:** asset pipeline activation (LPC sprites).
-5. **W5:** live data wiring (read-only).
-6. **W6:** full UI panel implementation.
+1. **W1:** architecture, schemas, lore skeleton, docs — no code execution, no assets.
+2. **W1A:** materialize the folder structure and placeholder files in-repo.
+3. **W2 (done):** retcon fantasy theme to modern office HQ; add layout/placement/navigation data layer.
+4. **W2.1 (done):** documentation synchronization across `WORLD.md`, roadmap, lore, and ui/specs.
+5. **W3:** ingestion adapter design + choice of renderer, still no trading-code changes.
+6. **W4:** static scene rendering with placeholder shapes (no sprites yet).
+7. **W5:** asset pipeline activation (office-appropriate sprites).
+8. **W6:** live data wiring (read-only).
+9. **W7:** full UI panel implementation.
 
 ## 9. Risks
 
@@ -329,8 +348,13 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 
 ## 10. Suggested Next World Phase
 
-**Phase W2 — Read-Only Ingestion Adapter Design.** Define exactly which existing engine outputs (log files, state files, or a lightweight event bus) can be safely read without touching `agents/`, `execution/`, etc., and design the adapter contract that populates `world/data/*.json` on a schedule. Still design-only, no renderer chosen yet.
+**Phase W3 — Read-Only Ingestion Adapter Design.** Define exactly which existing engine outputs (log files, state files, or a lightweight event bus) can be safely read without touching `agents/`, `execution/`, etc., and design the adapter contract that populates `world/data/*.json` on a schedule. Still design-only, no renderer chosen yet.
 
 ---
 
-*This document is the Phase W1 deliverable. No files have been added to the actual repository; no sprites, maps, or trading-code changes were made. Awaiting approval to scaffold these folders/files for real.*
+*This document was the Phase W1 deliverable; W1 and W1A have since been*
+*implemented. Phase W2 (office HQ retcon + layout/navigation layer) and*
+*Phase W2.1 (this document's synchronization) are also complete — see*
+*`docs/architecture/WORLD_OFFICE_POLICY.md`, `WORLD_DESIGN_LOCK.md`, and*
+*`world/docs/OFFICE_LAYOUT.md` for current canon. No sprites, renderer, or*
+*trading-code changes have been made through Phase W2.1.*

@@ -1,0 +1,251 @@
+{
+  "nodes": [
+    {
+      "id": "ai-council",
+      "type": "room",
+      "floor": 3
+    },
+    {
+      "id": "ceo-tower",
+      "type": "room",
+      "floor": 3
+    },
+    {
+      "id": "command-hall",
+      "type": "room",
+      "floor": 2
+    },
+    {
+      "id": "data-center",
+      "type": "room",
+      "floor": 2
+    },
+    {
+      "id": "execution-forge",
+      "type": "room",
+      "floor": 2
+    },
+    {
+      "id": "journal-library",
+      "type": "room",
+      "floor": 2
+    },
+    {
+      "id": "market-intelligence-center",
+      "type": "room",
+      "floor": 3
+    },
+    {
+      "id": "portfolio-garden",
+      "type": "room",
+      "floor": 1
+    },
+    {
+      "id": "recovery-center",
+      "type": "room",
+      "floor": 1
+    },
+    {
+      "id": "research-district",
+      "type": "room",
+      "floor": 3
+    },
+    {
+      "id": "risk-fortress",
+      "type": "room",
+      "floor": 2
+    },
+    {
+      "id": "simulation-lab",
+      "type": "room",
+      "floor": 3
+    },
+    {
+      "id": "training-arena",
+      "type": "room",
+      "floor": 1
+    },
+    {
+      "id": "world-gateway",
+      "type": "room",
+      "floor": 1
+    },
+    {
+      "id": "elevator-floor-1",
+      "type": "elevator",
+      "floor": 1
+    },
+    {
+      "id": "elevator-floor-2",
+      "type": "elevator",
+      "floor": 2
+    },
+    {
+      "id": "elevator-floor-3",
+      "type": "elevator",
+      "floor": 3
+    }
+  ],
+  "edges": [
+    {
+      "from": "ai-council",
+      "to": "ceo-tower",
+      "distance": 1.0
+    },
+    {
+      "from": "ai-council",
+      "to": "research-district",
+      "distance": 1.0
+    },
+    {
+      "from": "ceo-tower",
+      "to": "command-hall",
+      "distance": 1.0
+    },
+    {
+      "from": "command-hall",
+      "to": "risk-fortress",
+      "distance": 1.0
+    },
+    {
+      "from": "command-hall",
+      "to": "simulation-lab",
+      "distance": 1.0
+    },
+    {
+      "from": "command-hall",
+      "to": "world-gateway",
+      "distance": 1.0
+    },
+    {
+      "from": "data-center",
+      "to": "market-intelligence-center",
+      "distance": 1.0
+    },
+    {
+      "from": "data-center",
+      "to": "journal-library",
+      "distance": 1.0
+    },
+    {
+      "from": "data-center",
+      "to": "training-arena",
+      "distance": 1.0
+    },
+    {
+      "from": "execution-forge",
+      "to": "risk-fortress",
+      "distance": 1.0
+    },
+    {
+      "from": "execution-forge",
+      "to": "portfolio-garden",
+      "distance": 1.0
+    },
+    {
+      "from": "journal-library",
+      "to": "recovery-center",
+      "distance": 1.0
+    },
+    {
+      "from": "market-intelligence-center",
+      "to": "research-district",
+      "distance": 1.0
+    },
+    {
+      "from": "portfolio-garden",
+      "to": "recovery-center",
+      "distance": 1.0
+    },
+    {
+      "from": "research-district",
+      "to": "data-center",
+      "distance": 1.0
+    },
+    {
+      "from": "simulation-lab",
+      "to": "training-arena",
+      "distance": 1.0
+    },
+    {
+      "from": "elevator-floor-1",
+      "to": "portfolio-garden",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-1",
+      "to": "recovery-center",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-1",
+      "to": "training-arena",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-1",
+      "to": "world-gateway",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-2",
+      "to": "command-hall",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-2",
+      "to": "data-center",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-2",
+      "to": "execution-forge",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-2",
+      "to": "journal-library",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-2",
+      "to": "risk-fortress",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-3",
+      "to": "ai-council",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-3",
+      "to": "ceo-tower",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-3",
+      "to": "market-intelligence-center",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-3",
+      "to": "research-district",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-3",
+      "to": "simulation-lab",
+      "distance": 0.5
+    },
+    {
+      "from": "elevator-floor-1",
+      "to": "elevator-floor-2",
+      "distance": 1.0
+    },
+    {
+      "from": "elevator-floor-2",
+      "to": "elevator-floor-3",
+      "distance": 1.0
+    }
+  ]
+}

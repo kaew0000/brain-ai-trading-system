@@ -1,7 +1,7 @@
 {
   "id": "ceo-tower",
-  "name": "CEO Tower",
-  "description": "A glass spire overlooking the whole city; where the highest-level state is reflected.",
+  "name": "CEO Office",
+  "description": "A glass corner office on the top floor overlooking the trading floor; where the highest-level state is reflected.",
   "purpose": "Top-level oversight and final synthesis of engine status",
   "connectedDistricts": [
     "command-hall",
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "PRIMUS"
   ],
-  "visualTheme": "glass-and-light spire, ambient orchestral",
-  "musicTheme": "ambient-orchestral-calm",
+  "visualTheme": "glass corner office, city view, minimal",
+  "musicTheme": "corporate-ambient-calm",
   "futureExpansionHooks": [
-    "sub-district hook for CEO Tower (Phase W2+)"
+    "sub-department hook for CEO Office (Phase W3+)"
   ]
 }

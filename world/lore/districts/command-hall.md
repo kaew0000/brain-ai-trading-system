@@ -1,8 +1,8 @@
-# Command Hall
+# Command Center
 
-**Purpose:** Cross-district communication hub
+**Purpose:** Cross-department communication hub
 
-A central hall where messages and timing between districts are visualized.
+An open-plan command center where messages and timing between departments are visualized on wall-mounted monitors.
 
 **Assigned agents:** ECHO, CHRONOS
-**Connected districts:** ceo-tower, risk-fortress, simulation-lab, world-gateway
+**Connected departments:** CEO Office, Risk Department, Simulation Room, Reception

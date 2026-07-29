@@ -9,7 +9,7 @@
     "from": "BASTION",
     "to": "SENTINEL",
     "type": "collaborates-with",
-    "description": "Joint defense of Risk Fortress"
+    "description": "Joint coverage of the Risk Department"
   },
   {
     "from": "FORGE",

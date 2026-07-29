@@ -1,0 +1,35 @@
+{
+  "$id": "navigation.schema.json",
+  "description": "Pure path graph for office navigation, Phase W2. No renderer, no pathfinding implementation — nodes/edges only.",
+  "type": "object",
+  "required": ["nodes", "edges"],
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["room", "elevator", "hallway"]
+          },
+          "floor": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "distance"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "distance": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

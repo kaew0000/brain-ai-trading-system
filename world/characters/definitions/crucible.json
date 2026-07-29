@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "crucible_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "critiques drills",
-  "animationRole": "runs sparring drills",
-  "interactionRole": "tests strategies before deployment"
+  "animationRole": "runs test sessions",
+  "interactionRole": "validates strategies before deployment"
 }

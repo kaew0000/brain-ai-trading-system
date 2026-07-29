@@ -11,7 +11,7 @@ deeper documentation (architecture, roadmap, conventions).
 
 ## Folder Map
 
-- `lore/` — narrative lore for the city, districts, and characters
+- `lore/` — narrative lore for the office, departments, and characters
 - `assets/` — reserved for future sprites/tilesets/audio (empty in Phase W1)
 - `characters/definitions/` — one JSON file per character (presentation only)
 - `districts/definitions/` — one JSON file per district
@@ -26,4 +26,8 @@ deeper documentation (architecture, roadmap, conventions).
 
 ## Status
 
-Phase W1A — Foundation materialized. No renderer chosen yet, no sprites, no maps.
+Phase W2.1 — Foundation materialized (W1A); office HQ theme locked and
+retconned (W2); documentation synchronized (W2.1). No renderer chosen yet,
+no sprites. See `docs/architecture/WORLD_OFFICE_POLICY.md` for the locked
+visual direction and `world/docs/OFFICE_LAYOUT.md` for the current floor
+plan.

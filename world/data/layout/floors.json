@@ -1,0 +1,34 @@
+[
+  {
+    "floor": 1,
+    "name": "Ground Floor \u2014 Reception & Support",
+    "rooms": [
+      "portfolio-garden",
+      "recovery-center",
+      "training-arena",
+      "world-gateway"
+    ]
+  },
+  {
+    "floor": 2,
+    "name": "Floor 2 \u2014 Trading & Operations",
+    "rooms": [
+      "command-hall",
+      "data-center",
+      "execution-forge",
+      "journal-library",
+      "risk-fortress"
+    ]
+  },
+  {
+    "floor": 3,
+    "name": "Floor 3 \u2014 Intelligence & Executive",
+    "rooms": [
+      "ai-council",
+      "ceo-tower",
+      "market-intelligence-center",
+      "research-district",
+      "simulation-lab"
+    ]
+  }
+]

@@ -1,7 +1,7 @@
 {
   "id": "risk-fortress",
-  "name": "Risk Fortress",
-  "description": "Stone ramparts that visualize risk posture; gates rise or fall with risk state.",
+  "name": "Risk Department",
+  "description": "A glass risk-management office with dashboard gauges that rise or fall with risk state.",
   "purpose": "Defensive systems and risk-state reflection",
   "connectedDistricts": [
     "execution-forge",
@@ -11,9 +11,9 @@
     "BASTION",
     "SENTINEL"
   ],
-  "visualTheme": "stone fortress, low drone",
-  "musicTheme": "tense-guard",
+  "visualTheme": "glass office, risk dashboards, status lights",
+  "musicTheme": "focused-vigilant",
   "futureExpansionHooks": [
-    "sub-district hook for Risk Fortress (Phase W2+)"
+    "sub-department hook for Risk Department (Phase W3+)"
   ]
 }

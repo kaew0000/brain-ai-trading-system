@@ -1,8 +1,8 @@
 {
   "id": "ai-council",
-  "name": "AI Council",
-  "description": "A round chamber where regime and strategy signals are visualized as debate.",
-  "purpose": "Strategy deliberation chamber",
+  "name": "AI Department",
+  "description": "A glass-walled meeting room where regime and strategy signals are visualized as a whiteboard discussion.",
+  "purpose": "Strategy deliberation meeting room",
   "connectedDistricts": [
     "ceo-tower",
     "research-district"
@@ -10,9 +10,9 @@
   "assignedAgents": [
     "CHAMELEON"
   ],
-  "visualTheme": "round chamber, shifting light",
-  "musicTheme": "tense-deliberative",
+  "visualTheme": "glass meeting room, whiteboards, wall screens",
+  "musicTheme": "focused-discussion",
   "futureExpansionHooks": [
-    "sub-district hook for AI Council (Phase W2+)"
+    "sub-department hook for AI Department (Phase W3+)"
   ]
 }

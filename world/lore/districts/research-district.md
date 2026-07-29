@@ -1,8 +1,8 @@
-# Research District
+# Research Lab
 
 **Purpose:** Analysis and prediction reflection
 
-Libraries and observatories showing the engine's research/prediction activity.
+An open research lab with monitor walls showing the engine's research and prediction activity.
 
 **Assigned agents:** ORACLE, MANDELBROT
-**Connected districts:** ai-council, data-center
+**Connected departments:** AI Department, Server Room

@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "chronos_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "announces timing",
-  "animationRole": "manages the clock tower, ticks visibly",
-  "interactionRole": "schedules district activity"
+  "animationRole": "manages the wall clock and schedule board",
+  "interactionRole": "schedules department activity"
 }

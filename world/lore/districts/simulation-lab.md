@@ -1,8 +1,8 @@
-# Simulation Lab
+# Simulation Room
 
 **Purpose:** Scenario/what-if reflection
 
-A lab of shifting fractal projections representing simulated scenarios.
+A digital projection room with shifting holographic displays representing simulated scenarios.
 
 **Assigned agents:** MANDELBROT
-**Connected districts:** training-arena, command-hall
+**Connected departments:** Training Room, Command Center

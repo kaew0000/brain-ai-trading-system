@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "phoenix_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "reassures during drawdown",
-  "animationRole": "rises/rebuilds after emergency",
-  "interactionRole": "restores district brightness"
+  "animationRole": "leads the recovery briefing after an incident",
+  "interactionRole": "restores team confidence"
 }

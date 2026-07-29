@@ -1,8 +1,8 @@
-# World Gateway
+# Reception
 
 **Purpose:** Entry point and onboarding
 
-The city gate where visitors (Krush) arrive and get oriented.
+The front-desk reception where visitors (Krush) arrive and get oriented.
 
 **Assigned agents:** HERALD
-**Connected districts:** command-hall
+**Connected departments:** Command Center

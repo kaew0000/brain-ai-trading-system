@@ -1,8 +1,8 @@
 {
   "id": "command-hall",
-  "name": "Command Hall",
-  "description": "A central hall where messages and timing between districts are visualized.",
-  "purpose": "Cross-district communication hub",
+  "name": "Command Center",
+  "description": "An open-plan command center where messages and timing between departments are visualized on wall-mounted monitors.",
+  "purpose": "Cross-department communication hub",
   "connectedDistricts": [
     "ceo-tower",
     "risk-fortress",
@@ -13,9 +13,9 @@
     "ECHO",
     "CHRONOS"
   ],
-  "visualTheme": "central hall, clock tower",
-  "musicTheme": "steady-pulse",
+  "visualTheme": "open-plan command center, wall monitors",
+  "musicTheme": "focused-productivity",
   "futureExpansionHooks": [
-    "sub-district hook for Command Hall (Phase W2+)"
+    "sub-department hook for Command Center (Phase W3+)"
   ]
 }

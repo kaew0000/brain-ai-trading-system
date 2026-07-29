@@ -1,8 +1,8 @@
-# Journal Library
+# Journal Department
 
 **Purpose:** Trade history and logs reflection
 
-An archive of scrolls, one per logged trade or decision.
+A records room with a digital archive wall, one entry per logged trade or decision.
 
 **Assigned agents:** SCRIBE
-**Connected districts:** recovery-center, data-center
+**Connected departments:** Recovery Center, Server Room

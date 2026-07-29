@@ -1,0 +1,43 @@
+{
+  "$id": "office_characters.schema.json",
+  "description": "Office placement metadata for existing world/characters/definitions characters, Phase W2. Presentation only — does not redefine agent responsibilities.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "characterId",
+      "agentRef",
+      "roomId",
+      "deskAnchor",
+      "idleBehavior",
+      "workingBehavior",
+      "emergencyBehavior"
+    ],
+    "properties": {
+      "characterId": {
+        "type": "string",
+        "description": "Matches world/characters/definitions id."
+      },
+      "agentRef": {
+        "type": "string",
+        "description": "Matches the existing agent name, e.g. PRIMUS."
+      },
+      "roomId": {
+        "type": "string",
+        "description": "Matches an id in world/data/layout rooms."
+      },
+      "deskAnchor": {
+        "type": "object",
+        "required": ["x", "y"],
+        "properties": {
+          "x": { "type": "number" },
+          "y": { "type": "number" }
+        }
+      },
+      "idleBehavior": { "type": "string" },
+      "workingBehavior": { "type": "string" },
+      "emergencyBehavior": { "type": "string" },
+      "dialogueProfile": { "type": "string" }
+    }
+  }
+}

@@ -1,0 +1,210 @@
+[
+  {
+    "characterId": "bastion",
+    "agentRef": "BASTION",
+    "roomId": "risk-fortress",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "raises an alert banner on emergency",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "flags risk issues"
+  },
+  {
+    "characterId": "chameleon",
+    "agentRef": "CHAMELEON",
+    "roomId": "ai-council",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "updates the strategy whiteboard as regime shifts",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "debates strategy shifts"
+  },
+  {
+    "characterId": "chronos",
+    "agentRef": "CHRONOS",
+    "roomId": "command-hall",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "manages the wall clock and schedule board",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "announces timing"
+  },
+  {
+    "characterId": "crucible",
+    "agentRef": "CRUCIBLE",
+    "roomId": "training-arena",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "runs test sessions",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "critiques drills"
+  },
+  {
+    "characterId": "echo",
+    "agentRef": "ECHO",
+    "roomId": "command-hall",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "relays signals across departments",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "relays messages"
+  },
+  {
+    "characterId": "forge",
+    "agentRef": "FORGE",
+    "roomId": "execution-forge",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "types rapidly at the desk during fills",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "reports fills"
+  },
+  {
+    "characterId": "gardener",
+    "agentRef": "GARDENER",
+    "roomId": "portfolio-garden",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "waters plants, reviews the holdings board",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "tends the portfolio"
+  },
+  {
+    "characterId": "herald",
+    "agentRef": "HERALD",
+    "roomId": "world-gateway",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "greets visitors at the front desk",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "announces major events"
+  },
+  {
+    "characterId": "mandelbrot",
+    "agentRef": "MANDELBROT",
+    "roomId": "simulation-lab",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "runs scenario models on screen",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "describes patterns"
+  },
+  {
+    "characterId": "oracle",
+    "agentRef": "ORACLE",
+    "roomId": "research-district",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "reviews model output on monitor",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "explains predictions"
+  },
+  {
+    "characterId": "phoenix",
+    "agentRef": "PHOENIX",
+    "roomId": "recovery-center",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "leads the recovery briefing after an incident",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "reassures during drawdown"
+  },
+  {
+    "characterId": "primus",
+    "agentRef": "PRIMUS",
+    "roomId": "ceo-tower",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "authoritative oversight from the corner office",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "commands and synthesizes"
+  },
+  {
+    "characterId": "scribe",
+    "agentRef": "SCRIBE",
+    "roomId": "journal-library",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "logs entries continuously at the terminal",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "narrates history"
+  },
+  {
+    "characterId": "sentinel",
+    "agentRef": "SENTINEL",
+    "roomId": "risk-fortress",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "monitors the access log at the desk",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "checks credentials"
+  },
+  {
+    "characterId": "watcher",
+    "agentRef": "WATCHER",
+    "roomId": "market-intelligence-center",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "monitors the screen wall",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "reports market conditions"
+  },
+  {
+    "characterId": "webweaver",
+    "agentRef": "WEBWEAVER",
+    "roomId": "data-center",
+    "deskAnchor": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idleBehavior": "seated at desk, screen glow",
+    "workingBehavior": "checks server racks, monitors dashboards",
+    "emergencyBehavior": "stands, moves toward department lead",
+    "dialogueProfile": "describes data flow"
+  }
+]

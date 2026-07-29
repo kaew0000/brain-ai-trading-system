@@ -1,8 +1,8 @@
 # Echo (ECHO)
 
-**District:** command-hall
+**Department:** Command Center
 **Dialogue role:** relays messages
-**Animation role:** carries signals between districts
+**Animation role:** relays signals across departments
 **Interaction role:** propagates events
 
 This character is a visual/narrative representation of the existing

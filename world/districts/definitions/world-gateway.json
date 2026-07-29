@@ -1,7 +1,7 @@
 {
   "id": "world-gateway",
-  "name": "World Gateway",
-  "description": "The city gate where visitors (Krush) arrive and get oriented.",
+  "name": "Reception",
+  "description": "The front-desk reception where visitors (Krush) arrive and get oriented.",
   "purpose": "Entry point and onboarding",
   "connectedDistricts": [
     "command-hall"
@@ -9,9 +9,9 @@
   "assignedAgents": [
     "HERALD"
   ],
-  "visualTheme": "grand gate, welcoming fanfare",
-  "musicTheme": "welcoming-fanfare",
+  "visualTheme": "modern reception desk, glass entrance",
+  "musicTheme": "welcoming-corporate",
   "futureExpansionHooks": [
-    "sub-district hook for World Gateway (Phase W2+)"
+    "sub-department hook for Reception (Phase W3+)"
   ]
 }

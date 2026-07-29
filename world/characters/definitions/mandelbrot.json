@@ -7,9 +7,9 @@
     "equipmentSlots": [
       "head",
       "body",
-      "weapon",
+      "tool",
       "accessory",
-      "aura"
+      "statusGlow"
     ],
     "animations": {
       "idle": "mandelbrot_idle",
@@ -20,6 +20,6 @@
     }
   },
   "dialogueRole": "describes patterns",
-  "animationRole": "draws fractal diagrams while working",
-  "interactionRole": "projects simulated scenarios"
+  "animationRole": "runs scenario models on screen",
+  "interactionRole": "presents simulated scenarios"
 }

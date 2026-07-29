@@ -1,8 +1,8 @@
-# Training Arena
+# Training Room
 
 **Purpose:** Backtesting and drills reflection
 
-A sparring ground where the engine's backtests are shown as training drills.
+A modern training room with screens and a whiteboard where the engine's backtests are reviewed like onboarding sessions.
 
 **Assigned agents:** CRUCIBLE
-**Connected districts:** data-center, simulation-lab
+**Connected departments:** Server Room, Simulation Room
