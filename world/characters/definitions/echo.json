@@ -1,0 +1,25 @@
+{
+  "id": "echo",
+  "agentRef": "ECHO",
+  "displayName": "Echo",
+  "district": "command-hall",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "echo_idle",
+      "walking": "echo_walk",
+      "working": "echo_work",
+      "celebration": "echo_celebrate",
+      "emergency": "echo_emergency"
+    }
+  },
+  "dialogueRole": "relays messages",
+  "animationRole": "carries signals between districts",
+  "interactionRole": "propagates events"
+}

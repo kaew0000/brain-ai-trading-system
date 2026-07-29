@@ -1,0 +1,18 @@
+{
+  "id": "training-arena",
+  "name": "Training Arena",
+  "description": "A sparring ground where the engine's backtests are shown as training drills.",
+  "purpose": "Backtesting and drills reflection",
+  "connectedDistricts": [
+    "data-center",
+    "simulation-lab"
+  ],
+  "assignedAgents": [
+    "CRUCIBLE"
+  ],
+  "visualTheme": "training grounds, dust and torches",
+  "musicTheme": "determined-drums",
+  "futureExpansionHooks": [
+    "sub-district hook for Training Arena (Phase W2+)"
+  ]
+}

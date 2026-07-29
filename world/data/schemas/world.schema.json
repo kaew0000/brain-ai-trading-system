@@ -1,0 +1,33 @@
+{
+  "$id": "world.schema.json",
+  "type": "object",
+  "required": [
+    "version",
+    "timestamp",
+    "engineStatus"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "engineStatus": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "active",
+        "recovering",
+        "halted"
+      ]
+    },
+    "activeDistricts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

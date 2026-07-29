@@ -1,0 +1,20 @@
+[
+  {
+    "from": "PRIMUS",
+    "to": "ECHO",
+    "type": "informs",
+    "description": "Primus relays directives through Echo"
+  },
+  {
+    "from": "BASTION",
+    "to": "SENTINEL",
+    "type": "collaborates-with",
+    "description": "Joint defense of Risk Fortress"
+  },
+  {
+    "from": "FORGE",
+    "to": "BASTION",
+    "type": "reports-to",
+    "description": "Execution reports risk checks to Bastion"
+  }
+]

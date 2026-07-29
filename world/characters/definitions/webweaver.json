@@ -1,0 +1,25 @@
+{
+  "id": "webweaver",
+  "agentRef": "WEBWEAVER",
+  "displayName": "Webweaver",
+  "district": "data-center",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "webweaver_idle",
+      "walking": "webweaver_walk",
+      "working": "webweaver_work",
+      "celebration": "webweaver_celebrate",
+      "emergency": "webweaver_emergency"
+    }
+  },
+  "dialogueRole": "describes data flow",
+  "animationRole": "weaves threads between racks",
+  "interactionRole": "connects data pipelines"
+}

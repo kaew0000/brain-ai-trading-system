@@ -1,0 +1,25 @@
+{
+  "id": "scribe",
+  "agentRef": "SCRIBE",
+  "displayName": "Scribe",
+  "district": "journal-library",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "scribe_idle",
+      "walking": "scribe_walk",
+      "working": "scribe_work",
+      "celebration": "scribe_celebrate",
+      "emergency": "scribe_emergency"
+    }
+  },
+  "dialogueRole": "narrates history",
+  "animationRole": "writes continuously",
+  "interactionRole": "files scrolls into archive"
+}

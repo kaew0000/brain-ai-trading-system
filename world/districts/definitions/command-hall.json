@@ -1,0 +1,21 @@
+{
+  "id": "command-hall",
+  "name": "Command Hall",
+  "description": "A central hall where messages and timing between districts are visualized.",
+  "purpose": "Cross-district communication hub",
+  "connectedDistricts": [
+    "ceo-tower",
+    "risk-fortress",
+    "simulation-lab",
+    "world-gateway"
+  ],
+  "assignedAgents": [
+    "ECHO",
+    "CHRONOS"
+  ],
+  "visualTheme": "central hall, clock tower",
+  "musicTheme": "steady-pulse",
+  "futureExpansionHooks": [
+    "sub-district hook for Command Hall (Phase W2+)"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "$id": "notifications.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "timestamp",
+      "message",
+      "severity"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "timestamp": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "message": {
+        "type": "string"
+      },
+      "severity": {
+        "type": "string",
+        "enum": [
+          "info",
+          "success",
+          "warning",
+          "critical"
+        ]
+      },
+      "read": {
+        "type": "boolean"
+      }
+    }
+  }
+}

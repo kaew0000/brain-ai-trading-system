@@ -1,0 +1,18 @@
+{
+  "id": "ceo-tower",
+  "name": "CEO Tower",
+  "description": "A glass spire overlooking the whole city; where the highest-level state is reflected.",
+  "purpose": "Top-level oversight and final synthesis of engine status",
+  "connectedDistricts": [
+    "command-hall",
+    "ai-council"
+  ],
+  "assignedAgents": [
+    "PRIMUS"
+  ],
+  "visualTheme": "glass-and-light spire, ambient orchestral",
+  "musicTheme": "ambient-orchestral-calm",
+  "futureExpansionHooks": [
+    "sub-district hook for CEO Tower (Phase W2+)"
+  ]
+}

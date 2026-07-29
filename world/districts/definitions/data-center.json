@@ -1,0 +1,19 @@
+{
+  "id": "data-center",
+  "name": "Data Center",
+  "description": "Server racks woven together, visualizing data flow health.",
+  "purpose": "Data pipeline reflection",
+  "connectedDistricts": [
+    "market-intelligence-center",
+    "journal-library",
+    "training-arena"
+  ],
+  "assignedAgents": [
+    "WEBWEAVER"
+  ],
+  "visualTheme": "server racks, cool blue glow",
+  "musicTheme": "server-hum-ambient",
+  "futureExpansionHooks": [
+    "sub-district hook for Data Center (Phase W2+)"
+  ]
+}

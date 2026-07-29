@@ -1,0 +1,69 @@
+{
+  "$id": "characters.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "agentRef",
+      "displayName",
+      "district",
+      "spriteMeta",
+      "dialogueRole"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "agentRef": {
+        "type": "string"
+      },
+      "displayName": {
+        "type": "string"
+      },
+      "district": {
+        "type": "string"
+      },
+      "spriteMeta": {
+        "type": "object",
+        "properties": {
+          "equipmentSlots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "animations": {
+            "type": "object",
+            "properties": {
+              "idle": {
+                "type": "string"
+              },
+              "walking": {
+                "type": "string"
+              },
+              "working": {
+                "type": "string"
+              },
+              "celebration": {
+                "type": "string"
+              },
+              "emergency": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "dialogueRole": {
+        "type": "string"
+      },
+      "animationRole": {
+        "type": "string"
+      },
+      "interactionRole": {
+        "type": "string"
+      }
+    }
+  }
+}

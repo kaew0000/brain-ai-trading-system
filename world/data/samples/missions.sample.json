@@ -1,0 +1,9 @@
+[
+  {
+    "id": "mission-0001",
+    "title": "Stabilize Recovery Center",
+    "description": "Narrative flavor only.",
+    "district": "recovery-center",
+    "status": "proposed"
+  }
+]

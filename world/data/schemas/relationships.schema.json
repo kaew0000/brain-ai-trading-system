@@ -1,0 +1,33 @@
+{
+  "$id": "relationships.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "from",
+      "to",
+      "type"
+    ],
+    "properties": {
+      "from": {
+        "type": "string"
+      },
+      "to": {
+        "type": "string"
+      },
+      "type": {
+        "type": "string",
+        "enum": [
+          "reports-to",
+          "collaborates-with",
+          "informs",
+          "guards",
+          "supplies-data-to"
+        ]
+      },
+      "description": {
+        "type": "string"
+      }
+    }
+  }
+}

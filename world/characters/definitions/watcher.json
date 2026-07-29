@@ -1,0 +1,25 @@
+{
+  "id": "watcher",
+  "agentRef": "WATCHER",
+  "displayName": "Watcher",
+  "district": "market-intelligence-center",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "watcher_idle",
+      "walking": "watcher_walk",
+      "working": "watcher_work",
+      "celebration": "watcher_celebrate",
+      "emergency": "watcher_emergency"
+    }
+  },
+  "dialogueRole": "reports market conditions",
+  "animationRole": "scans horizon",
+  "interactionRole": "raises alerts to Command Hall"
+}

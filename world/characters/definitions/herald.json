@@ -1,0 +1,25 @@
+{
+  "id": "herald",
+  "agentRef": "HERALD",
+  "displayName": "Herald",
+  "district": "world-gateway",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "herald_idle",
+      "walking": "herald_walk",
+      "working": "herald_work",
+      "celebration": "herald_celebrate",
+      "emergency": "herald_emergency"
+    }
+  },
+  "dialogueRole": "announces major events",
+  "animationRole": "blows horn on celebration/emergency",
+  "interactionRole": "greets and orients"
+}

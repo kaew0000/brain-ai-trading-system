@@ -1,0 +1,18 @@
+{
+  "id": "portfolio-garden",
+  "name": "Portfolio Garden",
+  "description": "A garden where each plant reflects a position; growth mirrors performance.",
+  "purpose": "Visualizes holdings as living growth",
+  "connectedDistricts": [
+    "execution-forge",
+    "recovery-center"
+  ],
+  "assignedAgents": [
+    "GARDENER"
+  ],
+  "visualTheme": "organic, seasonal",
+  "musicTheme": "pastoral",
+  "futureExpansionHooks": [
+    "sub-district hook for Portfolio Garden (Phase W2+)"
+  ]
+}

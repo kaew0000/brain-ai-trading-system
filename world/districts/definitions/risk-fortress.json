@@ -1,0 +1,19 @@
+{
+  "id": "risk-fortress",
+  "name": "Risk Fortress",
+  "description": "Stone ramparts that visualize risk posture; gates rise or fall with risk state.",
+  "purpose": "Defensive systems and risk-state reflection",
+  "connectedDistricts": [
+    "execution-forge",
+    "command-hall"
+  ],
+  "assignedAgents": [
+    "BASTION",
+    "SENTINEL"
+  ],
+  "visualTheme": "stone fortress, low drone",
+  "musicTheme": "tense-guard",
+  "futureExpansionHooks": [
+    "sub-district hook for Risk Fortress (Phase W2+)"
+  ]
+}

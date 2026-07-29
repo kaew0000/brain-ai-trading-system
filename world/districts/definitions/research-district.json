@@ -1,0 +1,19 @@
+{
+  "id": "research-district",
+  "name": "Research District",
+  "description": "Libraries and observatories showing the engine's research/prediction activity.",
+  "purpose": "Analysis and prediction reflection",
+  "connectedDistricts": [
+    "ai-council",
+    "data-center"
+  ],
+  "assignedAgents": [
+    "ORACLE",
+    "MANDELBROT"
+  ],
+  "visualTheme": "observatory, starlit",
+  "musicTheme": "curious-analytical",
+  "futureExpansionHooks": [
+    "sub-district hook for Research District (Phase W2+)"
+  ]
+}

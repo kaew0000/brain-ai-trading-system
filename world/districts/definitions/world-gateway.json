@@ -1,0 +1,17 @@
+{
+  "id": "world-gateway",
+  "name": "World Gateway",
+  "description": "The city gate where visitors (Krush) arrive and get oriented.",
+  "purpose": "Entry point and onboarding",
+  "connectedDistricts": [
+    "command-hall"
+  ],
+  "assignedAgents": [
+    "HERALD"
+  ],
+  "visualTheme": "grand gate, welcoming fanfare",
+  "musicTheme": "welcoming-fanfare",
+  "futureExpansionHooks": [
+    "sub-district hook for World Gateway (Phase W2+)"
+  ]
+}

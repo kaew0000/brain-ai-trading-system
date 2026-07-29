@@ -1,0 +1,55 @@
+{
+  "$id": "districts.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "name",
+      "description",
+      "purpose",
+      "connectedDistricts",
+      "assignedAgents",
+      "visualTheme",
+      "musicTheme"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "purpose": {
+        "type": "string"
+      },
+      "connectedDistricts": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "assignedAgents": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "visualTheme": {
+        "type": "string"
+      },
+      "musicTheme": {
+        "type": "string"
+      },
+      "futureExpansionHooks": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

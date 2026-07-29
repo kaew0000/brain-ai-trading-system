@@ -1,0 +1,18 @@
+{
+  "id": "ai-council",
+  "name": "AI Council",
+  "description": "A round chamber where regime and strategy signals are visualized as debate.",
+  "purpose": "Strategy deliberation chamber",
+  "connectedDistricts": [
+    "ceo-tower",
+    "research-district"
+  ],
+  "assignedAgents": [
+    "CHAMELEON"
+  ],
+  "visualTheme": "round chamber, shifting light",
+  "musicTheme": "tense-deliberative",
+  "futureExpansionHooks": [
+    "sub-district hook for AI Council (Phase W2+)"
+  ]
+}

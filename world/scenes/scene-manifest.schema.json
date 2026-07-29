@@ -1,0 +1,24 @@
+{
+  "$id": "scene-manifest.schema.json",
+  "type": "object",
+  "description": "Design-only. Maps a renderable scene to the districts/characters it contains.",
+  "required": [
+    "sceneId",
+    "districtId",
+    "characterIds"
+  ],
+  "properties": {
+    "sceneId": {
+      "type": "string"
+    },
+    "districtId": {
+      "type": "string"
+    },
+    "characterIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

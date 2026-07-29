@@ -1,0 +1,25 @@
+{
+  "id": "sentinel",
+  "agentRef": "SENTINEL",
+  "displayName": "Sentinel",
+  "district": "risk-fortress",
+  "spriteMeta": {
+    "equipmentSlots": [
+      "head",
+      "body",
+      "weapon",
+      "accessory",
+      "aura"
+    ],
+    "animations": {
+      "idle": "sentinel_idle",
+      "walking": "sentinel_walk",
+      "working": "sentinel_work",
+      "celebration": "sentinel_celebrate",
+      "emergency": "sentinel_emergency"
+    }
+  },
+  "dialogueRole": "checks credentials",
+  "animationRole": "stands watch at gate",
+  "interactionRole": "authorizes fortress access"
+}
