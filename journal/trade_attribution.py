@@ -98,6 +98,11 @@ def record_trade_outcome(
     slippage: float | None = None,
     latency_seconds: float | None = None,
     agent_attribution: list[dict] | None = None,
+    reason: str | None = None,
+    source: str | None = None,
+    symbol: str | None = None,
+    duration_seconds: float | None = None,
+    confidence: float | None = None,
 ) -> bool:
     """
     Task 5's reusable attribution API. Callers supply whatever they
@@ -106,6 +111,18 @@ def record_trade_outcome(
     slippage/latency_seconds known) and the close-side call
     (result/exit_price/pnl now known too) — without the caller needing
     two different functions or any knowledge of storage internals.
+
+    V16 Phase 4B Step 3D: +reason/source/symbol/duration_seconds/
+    confidence — additive, all optional, all None by default. Lets
+    execution/trade_lifecycle.py's TradeLifecycle be "the only write
+    path" (this phase's own Part C) for a close's full context (why it
+    closed, which of the close sources triggered it, how long the
+    position was held) without this function needing a second sibling
+    or its own signature growing unbounded — every new field is stored
+    the same way execution_id/order_id already are, via
+    save_execution_attribution()'s existing **fields passthrough
+    (journal/journal_v2.py — accepts and merges any keyword, no
+    schema change needed here either).
 
     Never raises: any storage failure is logged and reflected in the
     return value, matching this project's established "diagnostic/
@@ -134,6 +151,11 @@ def record_trade_outcome(
         "slippage":          slippage,
         "latency_seconds":   latency_seconds,
         "agent_attribution": agent_attribution,
+        "reason":            reason,
+        "source":            source,
+        "symbol":            symbol,
+        "duration_seconds":  duration_seconds,
+        "confidence":        confidence,
     }
     try:
         ok = bool(journal.save_execution_attribution(trade_id, **attribution_fields)) and ok

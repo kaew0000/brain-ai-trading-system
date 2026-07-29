@@ -76,7 +76,7 @@ from execution.execution_events import (
 )
 from execution.execution_metrics import ExecutionMetricsSnapshot, compute_metrics
 from execution.execution_state import ExecutionState, ExecutionStatus, get_execution_state
-from journal.trade_attribution import record_trade_outcome
+from execution.trade_lifecycle import CloseSource
 from portfolio.portfolio_models import (
     OrchestratedDecision,
     PortfolioAllocation,
@@ -260,14 +260,38 @@ class ExecutionOrchestrator:
         max_retries: int | None = None,
         retry_delay_seconds: float | None = None,
         journal=None,                # V16 Phase 4B Step 2: TradeJournalV2-compatible; None = attribution inert
+        lifecycle=None,              # V16 Phase 4B Step 3D: execution.trade_lifecycle.TradeLifecycle
     ) -> None:
         from config.settings import settings
+        from execution.trade_lifecycle import TradeLifecycle
 
         self.execution_engine = execution_engine
         self.portfolio_manager = portfolio_manager
         self.signal_provider = signal_provider
         self.state = state or get_execution_state()
         self.journal = journal
+        # Not passed by any caller as of this phase — auto-constructed
+        # from the same journal/portfolio_manager this orchestrator
+        # already has, so a fresh TradeLifecycle wraps exactly the same
+        # record_trade_outcome()/notify_position_closed() calls this
+        # class already made directly before this phase — same
+        # arguments, same order, just routed through one more layer.
+        # Every existing test/caller that constructs ExecutionOrchestrator
+        # without knowing `lifecycle` exists gets identical journal/
+        # portfolio output to before this phase (see
+        # docs/architecture.md's Phase 4B Step 3D compatibility report).
+        # V16 Phase 4B Step 3D: explicit `is not None` check — NOT
+        # `lifecycle or TradeLifecycle(...)`. TradeLifecycle defines
+        # __len__ (for Part I's "no orphan positions" assertions), which
+        # makes a freshly-constructed, EMPTY TradeLifecycle instance
+        # falsy in a plain `or` check — `lifecycle or default` would
+        # silently discard any caller-supplied lifecycle that happened
+        # to have zero open positions at construction time (exactly
+        # main.py's bootstrap ordering: trade_lifecycle is empty when
+        # first passed here). Found by this phase's own integration
+        # tests before it reached anywhere near production — see
+        # docs/architecture.md's Phase 4B Step 3D section.
+        self.lifecycle = lifecycle if lifecycle is not None else TradeLifecycle(journal=journal, portfolio_manager=portfolio_manager)
         self.max_retries = (
             max_retries if max_retries is not None else settings.EXECUTION_MAX_RETRIES
         )
@@ -497,19 +521,32 @@ class ExecutionOrchestrator:
             rec.order_id    = order_id
             trade_id = self.journal.save_trade(rec, signal_id=sig_id)
 
-            record_trade_outcome(
-                self.journal, trade_id,
+            # V16 Phase 4B Step 3D: routed through TradeLifecycle instead
+            # of calling record_trade_outcome() directly — same fields,
+            # same one journal write, now also enforcing the state
+            # machine (Part A) and adding +source/+symbol (previously
+            # not passed at all). PENDING/EXECUTING collapse into this
+            # same call because execute_trade() above already completed
+            # synchronously by the time this method runs — see
+            # trade_lifecycle.py's own module docstring for why that's a
+            # documented limitation, not new to this phase.
+            slippage = _compute_slippage(signal.direction, signal.entry_price, entry_order)
+            handle = self.lifecycle.open_pending(alloc.symbol)
+            self.lifecycle.open_executing(handle)
+            self.lifecycle.open_confirmed(
+                handle, trade_id,
                 execution_id=execution_id,
                 order_id=order_id or None,
-                slippage=_compute_slippage(signal.direction, signal.entry_price, entry_order),
+                slippage=slippage,
+                source="EXECUTION_ORCHESTRATOR",
                 # fees: not recorded — Binance Futures' market-order
                 # response doesn't include commission; that requires a
                 # separate userTrades/account API call this codebase
                 # doesn't make anywhere today. The field exists on
-                # record_trade_outcome()/save_execution_attribution() so
-                # a future caller that DOES fetch it can pass it
-                # straight in with zero API changes — see
-                # docs/architecture.md §29 "Scope boundary".
+                # TradeLifecycle.open_confirmed()/record_trade_outcome()/
+                # save_execution_attribution() so a future caller that
+                # DOES fetch it can pass it straight in with zero API
+                # changes — see docs/architecture.md §29 "Scope boundary".
             )
             return trade_id
         except Exception as exc:
@@ -621,25 +658,70 @@ class ExecutionOrchestrator:
             removed_position = portfolio_state.remove_position(symbol)
             close_outcome = self._compute_close_outcome(removed_position, order)
             record = self.state.get(execution_id)
-            # V16 Phase 4B Step 2 (docs/architecture.md §29): PortfolioManager
-            # is the single place close-side attribution is actually
-            # persisted (Task 3) — ExecutionOrchestrator's job here is only
-            # to compute the execution-level facts (Task 2) and hand them
-            # to the one hook every current AND future close path already
-            # calls, rather than this orchestrator writing to the journal
-            # a second time itself.
-            self.portfolio_manager.notify_position_closed(
-                symbol,
+            # V16 Phase 4B Step 3D: routed through TradeLifecycle (Part
+            # C: "the only write path"). TradeLifecycle itself calls
+            # notify_position_closed(..., record_attribution=False)
+            # afterward — same cooldown/PortfolioState bookkeeping as
+            # before this phase, journal write now owned by the
+            # lifecycle instead of by PortfolioManager directly writing
+            # it as a side effect (Part D). EXIT_REQUESTED/EXIT_EXECUTING
+            # collapse into this same call because close_position() above
+            # already completed synchronously — same documented
+            # limitation as the open side (trade_lifecycle.py's module
+            # docstring).
+            handle = self.lifecycle.request_exit(
+                symbol, CloseSource.REPLACEMENT, proposal.reason or "replacement",
                 trade_id=removed_position.trade_id if removed_position else None,
-                execution_id=execution_id,
-                latency_seconds=record.latency_seconds if record else None,
-                **close_outcome,
             )
+            if handle is not None:
+                self.lifecycle.exit_executing(handle)
+                self.lifecycle.exit_confirmed(
+                    handle,
+                    execution_id=execution_id,
+                    latency_seconds=record.latency_seconds if record else None,
+                    **close_outcome,
+                )
+            else:
+                # Duplicate-close guard fired (Part I) — this symbol was
+                # already closed through TradeLifecycle by another path
+                # in this same cycle. The exchange close order above
+                # still succeeded (order is not None), so this remains a
+                # COMPLETED ExecutionResult — only the redundant
+                # attribution write is skipped, exactly what Part C's
+                # "no duplicated writes" asks for.
+                logger.warning(
+                    f"ExecutionOrchestrator: replacement-close attribution skipped for "
+                    f"{symbol} — TradeLifecycle already has a terminal handle for it"
+                )
             publish_execution_event(
                 ExecutionEventType.COMPLETED, execution_id=execution_id, symbol=symbol,
                 payload={"replacement": True},
             )
             return ExecutionResult(execution_id, symbol, ExecutionStatus.COMPLETED, True, attempts, None, order, is_replacement=True)
+
+        # V16 Phase 4B Step 3D (Part B: "Exchange Reject" close source):
+        # the exchange rejected the close order (order is None) — no
+        # PortfolioState mutation happened above (remove_position() is
+        # only called in the order-is-not-None branch), so the position
+        # is STILL genuinely open; this is not a real close, just a
+        # failed attempt at one. Modeled as EXIT_EXECUTING -> FAILED —
+        # honestly documented rather than left implicit: FAILED here
+        # means "this close ATTEMPT failed", not "the position no
+        # longer exists" — PortfolioState remains the actual source of
+        # truth for that. A retry needs a fresh close attempt (this
+        # method's pre-existing behavior — it already didn't auto-retry
+        # before this phase either; the caller decides what to do with
+        # a FAILED ExecutionResult next cycle, unchanged).
+        try:
+            handle = self.lifecycle.request_exit(
+                symbol, CloseSource.EXCHANGE_CLOSE, proposal.reason or "replacement",
+                trade_id=position.trade_id if position else None,
+            )
+            if handle is not None:
+                self.lifecycle.exit_executing(handle)
+                self.lifecycle.exit_failed(handle, reason=f"exchange_rejected_close: {error}")
+        except Exception as exc:
+            logger.error(f"ExecutionOrchestrator: lifecycle notify failed for rejected close of {symbol}: {exc}")
 
         self.state.fail(execution_id, error)
         publish_execution_event(
