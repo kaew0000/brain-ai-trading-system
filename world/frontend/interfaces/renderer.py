@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from world.frontend.renderer.world_state import WorldState
+    from world.frontend.renderer.world_state import WorldState  # noqa
     from world.frontend.scene.scene import Scene
 
 
@@ -32,7 +32,7 @@ class Renderer(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def render(self, world_state: "WorldState") -> None:
+    def render(self, world_state: "WorldState") -> None:  # noqa
         """Render one frame/update using the given read-only
         `WorldState` snapshot against the currently loaded scene."""
         raise NotImplementedError

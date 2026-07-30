@@ -30,7 +30,7 @@ class AnimationController(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def advance(self, character_id: str, delta_seconds: float) -> None:
+    def advance(self, character_id: str, delta_seconds: float) -> None:  # noqa
         """Advance the character's current animation by
         `delta_seconds` (frame stepping). No implementation in W3."""
         raise NotImplementedError

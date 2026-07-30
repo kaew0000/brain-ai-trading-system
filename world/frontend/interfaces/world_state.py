@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from world.frontend.renderer.world_state import WorldState
+    from world.frontend.renderer.world_state import WorldState  # noqa
 
 
 class WorldStateProvider(ABC):

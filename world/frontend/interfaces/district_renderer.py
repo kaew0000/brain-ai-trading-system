@@ -14,7 +14,7 @@ class DistrictRenderer(ABC):
     presentation: walls, floor, connections to adjacent rooms."""
 
     @abstractmethod
-    def render_district(self, district_id: str, district_data: dict[str, Any]) -> None:
+    def render_district(self, district_id: str, district_data: dict[str, Any]) -> None:  # noqa
         """Render the static presentation of one district/room.
         `district_data` is the parsed content of
         `world/districts/definitions/<district_id>.json` merged with

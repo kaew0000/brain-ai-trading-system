@@ -13,7 +13,7 @@ class CharacterRenderer(ABC):
     that is `AnimationController`'s job."""
 
     @abstractmethod
-    def render_character(self, character_id: str, character_data: dict[str, Any], state: str) -> None:
+    def render_character(self, character_id: str, character_data: dict[str, Any], state: str) -> None:  # noqa
         """Render one character. `state` is one of the five standard
         animation states defined in `world/WORLD.md` §4: `idle`,
         `walking`, `working`, `celebration`, `emergency`."""

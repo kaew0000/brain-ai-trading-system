@@ -6,14 +6,14 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from world.frontend.asset_loader.sprite import Sprite
+    from world.frontend.asset_loader.sprite import Sprite  # noqa
 
 
 class SpriteRenderer(ABC):
     """Contract for drawing a single sprite instance."""
 
     @abstractmethod
-    def draw(self, sprite: "Sprite") -> None:
+    def draw(self, sprite: "Sprite") -> None:  # noqa
         """Draw one sprite at its current position/equipment/animation
         frame. Implementations must not mutate `sprite`."""
         raise NotImplementedError

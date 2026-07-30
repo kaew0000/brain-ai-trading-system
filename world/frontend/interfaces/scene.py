@@ -28,7 +28,7 @@ class SceneRenderer(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def update(self, scene: "Scene", delta_seconds: float) -> None:
+    def update(self, scene: "Scene", delta_seconds: float) -> None:  # noqa
         """Advance per-scene state (layer ordering, character
         placement) by `delta_seconds`. No trading logic — purely
         presentational timing."""

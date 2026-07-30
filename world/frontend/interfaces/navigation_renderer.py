@@ -19,7 +19,7 @@ class NavigationRenderer(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def highlight_path(self, node_ids: list[str]) -> None:
+    def highlight_path(self, node_ids: list[str]) -> None:  # noqa
         """Highlight an ordered sequence of already-known node ids
         (e.g. a route a character is walking). Computing that
         sequence is outside this interface's scope."""
