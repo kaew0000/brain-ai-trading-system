@@ -1,0 +1,9 @@
+{
+  "engine": "none",
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "scale": 32.0
+  },
+  "initialSceneId": "world-gateway"
+}

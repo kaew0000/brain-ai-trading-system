@@ -1,0 +1,29 @@
+{
+  "$id": "layer_config.schema.json",
+  "description": "The ordered list of Layer configs for one scene, matching world.frontend.scene.layer.Layer / LayerType.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["layerType", "zOrder"],
+    "properties": {
+      "layerType": {
+        "type": "string",
+        "enum": [
+          "background",
+          "floor",
+          "furniture",
+          "characters",
+          "effects",
+          "ui_overlay",
+          "notification"
+        ]
+      },
+      "zOrder": { "type": "integer" },
+      "entityIds": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "visible": { "type": "boolean" }
+    }
+  }
+}

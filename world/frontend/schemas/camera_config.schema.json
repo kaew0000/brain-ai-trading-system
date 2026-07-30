@@ -1,0 +1,19 @@
+{
+  "$id": "camera_config.schema.json",
+  "description": "Initial CameraState for a renderer bootstrap. Mirrors world.frontend.camera.camera.CameraState.",
+  "type": "object",
+  "required": ["x", "y", "zoom", "focusMode"],
+  "properties": {
+    "x": { "type": "number" },
+    "y": { "type": "number" },
+    "zoom": { "type": "number", "exclusiveMinimum": 0 },
+    "focusMode": {
+      "type": "string",
+      "enum": ["free", "room", "character", "follow_character"]
+    },
+    "focusTarget": {
+      "type": ["string", "null"],
+      "description": "room id or character id, depending on focusMode. Null when focusMode is 'free'."
+    }
+  }
+}

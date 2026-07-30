@@ -15,3 +15,7 @@ Consumes one or more of: `world.json`, `districts.json`, `characters.json`,
 
 Engine-neutral: implementable equally in React, PixiJS, Phaser, Godot, or
 Unity, since it only reads the JSON contracts in `data/schemas/`.
+
+## Phase W3 Renderer Mapping
+
+`CharacterRenderer` (`world/frontend/interfaces/character_renderer.py`) is what this panel's underlying scene uses to draw the selected character; this panel itself just reads `characters.json` + `AnimationController.current_state`.

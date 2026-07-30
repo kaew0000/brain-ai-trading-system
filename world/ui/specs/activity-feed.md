@@ -15,3 +15,7 @@ Consumes one or more of: `world.json`, `districts.json`, `characters.json`,
 
 Engine-neutral: implementable equally in React, PixiJS, Phaser, Godot, or
 Unity, since it only reads the JSON contracts in `data/schemas/`.
+
+## Phase W3 Renderer Mapping
+
+Rendered on the `ui_overlay` layer (`world/frontend/scene/layer.py`) via `LayerRenderer`.

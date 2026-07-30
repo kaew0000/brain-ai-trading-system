@@ -15,3 +15,7 @@ Consumes one or more of: `world.json`, `districts.json`, `characters.json`,
 
 Engine-neutral: implementable equally in React, PixiJS, Phaser, Godot, or
 Unity, since it only reads the JSON contracts in `data/schemas/`.
+
+## Phase W3 Renderer Mapping
+
+`NavigationRenderer` (`world/frontend/interfaces/navigation_renderer.py`) draws the graph this panel displays; node/edge data is `world/data/navigation/graph.json`.
