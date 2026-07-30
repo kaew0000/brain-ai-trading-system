@@ -352,8 +352,8 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 - Phase W3 (**done**): renderer foundation — engine-agnostic abstraction layer under `world/frontend/` (13 interfaces + concrete state-only Scene/Camera/Viewport/AssetRegistry/RoomType). No renderer chosen, no sprites, no live data.
 - Phase W4 (**done**): read-only ingestion adapter — `world/readers/` (5 generic readers behind a `DataSource`/`Reader` split), `world/watchers/` (2 change-detection strategies), `world/adapter/` (orchestration), `world/runtime/` (`RuntimeManager` + hash-based `SnapshotCache`, writes only `world/data/runtime/`). No `DataSource` points at a real engine path yet.
 - Phase W5 (**done**): World State Provider — `world/runtime/{models,state_builder,state_cache,update_manager,relationship_resolver,state_validator,statistics,world_state_provider,api}.py`. Merges the six Phase W4 runtime files with static W1/W2 canon into one immutable, in-memory `WorldState`. Deliberately not bound to the Phase W3 `WorldStateProvider` ABC or any renderer — see `world/docs/STATE_PROVIDER.md` §9.
-- Phase W6: (a) implement the Phase W3 `WorldStateProvider` ABC (`world/frontend/interfaces/world_state.py`) by projecting Phase W5's `WorldState` down to the renderer-facing shape; (b) pick a concrete renderer (React Canvas, PixiJS, Phaser, Godot, or Unity — all equally supported by the Phase W3 interfaces); (c) static scene rendering with placeholder shapes; (d) fold in the Phase W6 Asset Pipeline work (furniture/decoration/character-sprite metadata, built but never merged as its own branch) as part of actually rendering something with those assets.
-- Phase W7: interaction layer — wire click/hover/walk-to behavior against the chosen W6 renderer.
+- Phase W6 (**in progress**): Renderer Integration + Asset Pipeline. Asset Pipeline half **done**: four concrete `AssetLoader`s (OpenGameArt, LPC, Kenney, Custom) implementing `world/frontend/interfaces/asset_loader.py`, asset manifest/packs/compatibility layer, and full furniture + decoration population of every room plus sprite + spatial placement for every character — see `world/docs/ASSET_PIPELINE.md`. Renderer Integration half **outstanding**: (a) implement the Phase W3 `WorldStateProvider` ABC (`world/frontend/interfaces/world_state.py`) by projecting Phase W5's `WorldState` down to the renderer-facing shape; (b) pick a concrete renderer (React Canvas, PixiJS, Phaser, Godot, or Unity — all equally supported by the Phase W3 interfaces); (c) static scene rendering with placeholder shapes, now able to draw on the Phase W6 asset metadata instead of only placeholder shapes.
+- Phase W7: interaction layer — wire click/hover/walk-to behavior against the chosen W6 renderer, using the interaction metadata already defined in `world/data/interactions/`.
 - Phase W8: point real `DataSource` instances (Phase W4) at whatever the trading engine actually emits, schedule `RuntimeManager.run_once()`, and implement the full UI panel set already specified in `world/ui/specs/` against live data.
 - Sub-departments and new characters can be added without breaking schemas, since arrays are additive.
 
@@ -366,7 +366,7 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 5. **W3 (done):** renderer foundation — abstraction layer, no engine chosen.
 6. **W4 (done):** read-only ingestion adapter — generic readers/watchers/adapter/runtime pipeline, no real source wired.
 7. **W5 (done):** World State Provider — backend-only in-memory `WorldState`, caching, validation, relationship resolution, statistics.
-8. **W6:** Renderer Integration — `WorldStateProvider` ABC binding, renderer engine choice, static scene rendering, and folding in the not-yet-merged asset pipeline work.
+8. **W6 (in progress):** Renderer Integration + Asset Pipeline. Asset pipeline (four concrete `AssetLoader`s, asset manifest/packs, compatibility layer, full office population) is **done**. `WorldStateProvider` ABC binding, renderer engine choice, and static scene rendering are **outstanding**.
 9. **W7:** interaction layer against the W6 renderer.
 10. **W8:** live data wiring (real `DataSource`) + full UI panel implementation.
 
@@ -383,7 +383,7 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 
 ## 10. Suggested Next World Phase
 
-**Phase W6 — Renderer Integration.** (a) Implement the Phase W3 `WorldStateProvider` ABC (`world/frontend/interfaces/world_state.py`) by projecting Phase W5's `world.runtime.models.WorldState` down to the renderer-facing `world.frontend.renderer.world_state.WorldState` shape. (b) Pick a concrete renderer engine and implement the Phase W3 interfaces against it. (c) Static scene rendering with placeholder shapes. (d) Fold in the Phase W6 Asset Pipeline work delivered earlier as a bundle.
+**Phase W6 — Renderer Integration (remaining half).** The Asset Pipeline half of Phase W6 is complete (see above). What's left: (a) implement the Phase W3 `WorldStateProvider` ABC (`world/frontend/interfaces/world_state.py`) by projecting Phase W5's `world.runtime.models.WorldState` down to the renderer-facing `world.frontend.renderer.world_state.WorldState` shape; (b) pick a concrete renderer engine and implement the Phase W3 interfaces against it; (c) static scene rendering with placeholder shapes, now able to draw on the Phase W6 asset metadata (furniture, decorations, character sprites, spatial placement) instead of only placeholder shapes.
 
 ---
 
@@ -392,15 +392,15 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 *Phase W2.1 (this document's synchronization), Phase W3 (renderer*
 *foundation, `world/frontend/`), Phase W4 (read-only ingestion*
 *adapter, `world/adapter/` `world/readers/` `world/watchers/`*
-*`world/runtime/`), and Phase W5 (World State Provider,*
+*`world/runtime/`), Phase W5 (World State Provider,*
 *`world/runtime/{models,state_builder,state_cache,update_manager,*
 *relationship_resolver,state_validator,statistics,world_state_provider,*
-*api}.py`) are also complete — see*
+*api}.py`), and the Asset Pipeline half of Phase W6 (furniture/decoration/*
+*character-sprite metadata, four `AssetLoader`s, see*
+*`world/docs/ASSET_PIPELINE.md`) are also complete — see*
 *`docs/architecture/WORLD_OFFICE_POLICY.md`, `WORLD_DESIGN_LOCK.md`,*
 *`world/docs/INGESTION_ADAPTER.md`, and `world/docs/STATE_PROVIDER.md`*
 *for current canon. No renderer, sprites, live data source, or*
-*trading-code changes have been made through Phase W5. The Phase W6*
-*Asset Pipeline work (furniture/decoration/character-sprite metadata)*
-*was built and verified but never merged as its own branch — it is*
-*folded into Phase W6 (Renderer Integration)'s scope per Krush's*
-*decision, not lost.*
+*trading-code changes have been made through Phase W6. The Renderer*
+*Integration half of Phase W6 — `WorldStateProvider` ABC binding, renderer*
+*engine choice, and static scene rendering — remains outstanding.*

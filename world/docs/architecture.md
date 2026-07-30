@@ -31,6 +31,17 @@ are honest idle placeholders.
 implemented at `world/runtime/{models,state_builder,state_cache,
 update_manager,relationship_resolver,state_validator,statistics,
 world_state_provider,api}.py` — see `STATE_PROVIDER.md` in this folder.
-Pure backend, in-memory only; no renderer chosen or touched. That binding,
-plus folding in the still-unmerged Phase W6 Asset Pipeline work, is Phase
-W6 (Renderer Integration).
+Pure backend, in-memory only; no renderer chosen or touched.
+
+**Asset pipeline (Phase W6, done):** every department, plus lobby/hallway/
+elevator, is populated with furniture and decoration metadata; every
+character has sprite and spatial-placement metadata. Four concrete
+`AssetLoader`s (OpenGameArt, LPC, Kenney, Custom) resolve against
+`world/data/assets/asset_manifest.json` — see `ASSET_PIPELINE.md` in this
+folder.
+
+**Renderer integration (Phase W6, outstanding):** the final leg of the
+diagram above, `WorldState -> renderer`, is not yet built — the Phase W3
+`WorldStateProvider` ABC still needs to be implemented against Phase W5's
+`WorldState`, no renderer engine is chosen, and no binary asset files ship
+in this repo.

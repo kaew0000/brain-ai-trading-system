@@ -1,0 +1,62 @@
+{
+  "$id": "asset_manifest.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "category",
+      "source",
+      "version"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "category": {
+        "type": "string",
+        "enum": [
+          "character-sprite",
+          "furniture",
+          "decoration"
+        ]
+      },
+      "source": {
+        "type": "string",
+        "enum": [
+          "opengameart",
+          "lpc",
+          "kenney",
+          "custom"
+        ]
+      },
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "variants": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "dependencies": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "version": {
+        "type": "string"
+      },
+      "compatibleWith": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,202 @@
+[
+  {
+    "id": "furniture.desk",
+    "name": "Desk",
+    "manifestId": "furniture.desk",
+    "footprint": {
+      "width": 1.2,
+      "height": 0.7
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect",
+      "working"
+    ]
+  },
+  {
+    "id": "furniture.chair",
+    "name": "Chair",
+    "manifestId": "furniture.chair",
+    "footprint": {
+      "width": 0.5,
+      "height": 0.5
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "furniture.monitor",
+    "name": "Monitor",
+    "manifestId": "furniture.monitor",
+    "footprint": {
+      "width": 0.5,
+      "height": 0.3
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect",
+      "working"
+    ]
+  },
+  {
+    "id": "furniture.laptop",
+    "name": "Laptop",
+    "manifestId": "furniture.laptop",
+    "footprint": {
+      "width": 0.4,
+      "height": 0.3
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect",
+      "working"
+    ]
+  },
+  {
+    "id": "furniture.server-rack",
+    "name": "Server Rack",
+    "manifestId": "furniture.server-rack",
+    "footprint": {
+      "width": 0.8,
+      "height": 0.6
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect",
+      "working"
+    ]
+  },
+  {
+    "id": "furniture.whiteboard",
+    "name": "Whiteboard",
+    "manifestId": "furniture.whiteboard",
+    "footprint": {
+      "width": 1.5,
+      "height": 0.1
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect",
+      "meeting"
+    ]
+  },
+  {
+    "id": "furniture.meeting-table",
+    "name": "Meeting Table",
+    "manifestId": "furniture.meeting-table",
+    "footprint": {
+      "width": 2.0,
+      "height": 1.2
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "meeting"
+    ]
+  },
+  {
+    "id": "furniture.plants",
+    "name": "Plants",
+    "manifestId": "furniture.plants",
+    "footprint": {
+      "width": 0.4,
+      "height": 0.4
+    },
+    "interactable": false,
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "furniture.reception-desk",
+    "name": "Reception Desk",
+    "manifestId": "furniture.reception-desk",
+    "footprint": {
+      "width": 2.0,
+      "height": 0.8
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "talk",
+      "inspect"
+    ]
+  },
+  {
+    "id": "furniture.coffee-machine",
+    "name": "Coffee Machine",
+    "manifestId": "furniture.coffee-machine",
+    "footprint": {
+      "width": 0.5,
+      "height": 0.5
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "furniture.printer",
+    "name": "Printer",
+    "manifestId": "furniture.printer",
+    "footprint": {
+      "width": 0.6,
+      "height": 0.5
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect",
+      "working"
+    ]
+  },
+  {
+    "id": "furniture.cabinet",
+    "name": "Cabinet",
+    "manifestId": "furniture.cabinet",
+    "footprint": {
+      "width": 0.8,
+      "height": 0.5
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "furniture.door",
+    "name": "Door",
+    "manifestId": "furniture.door",
+    "footprint": {
+      "width": 0.9,
+      "height": 0.1
+    },
+    "interactable": true,
+    "defaultInteractions": [
+      "walk-to"
+    ]
+  },
+  {
+    "id": "furniture.window",
+    "name": "Window",
+    "manifestId": "furniture.window",
+    "footprint": {
+      "width": 1.5,
+      "height": 0.1
+    },
+    "interactable": false,
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "furniture.lighting",
+    "name": "Lighting",
+    "manifestId": "furniture.lighting",
+    "footprint": {
+      "width": 0.3,
+      "height": 0.3
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  }
+]

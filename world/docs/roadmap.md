@@ -33,19 +33,20 @@
    read-only functions). Explicitly does **not** implement the Phase W3
    `WorldStateProvider` ABC or choose a renderer — see
    `world/docs/STATE_PROVIDER.md` §9. **Done.**
-8. **W6** — Renderer Integration: (a) pick a concrete renderer engine and
-   implement the Phase W3 interfaces against it; (b) implement the Phase
-   W3 `WorldStateProvider` ABC by projecting Phase W5's `WorldState` down
-   to the renderer-facing shape; (c) static scene rendering with
-   placeholder shapes; (d) fold in the Phase W6 Asset Pipeline work
-   (furniture/decoration/character-sprite metadata — built but never
-   merged as its own branch, `feature/world-phase-w6-asset-pipeline`) as
-   part of actually rendering something with those assets. Not started.
+8. **W6** — Renderer Integration + Asset Pipeline: (a) pick a concrete
+   renderer engine and implement the Phase W3 interfaces against it; (b)
+   implement the Phase W3 `WorldStateProvider` ABC by projecting Phase
+   W5's `WorldState` down to the renderer-facing shape; (c) static scene
+   rendering with placeholder shapes; (d) asset pipeline — concrete
+   `AssetLoader` for all four `AssetSource` values (OpenGameArt, LPC,
+   Kenney, Custom), asset manifest, asset packs, compatibility layer, and
+   full office population (furniture + decorations in every room,
+   character asset + spatial placement for every character). **Asset
+   pipeline (d) done** — see `world/docs/ASSET_PIPELINE.md`. **Renderer
+   integration (a)–(c) not started.**
 9. **W7** — Interaction Layer: wire up the interaction metadata already
-   defined (`world/data/interactions/` if the W6 asset-pipeline work is
-   folded in per above, or defined fresh here otherwise) to real
-   click/hover/walk-to behavior against the chosen W6 renderer. Not
-   started.
+   defined (`world/data/interactions/`) to real click/hover/walk-to
+   behavior against the chosen W6 renderer. Not started.
 10. **W8** — Live Command Center: point real `DataSource` instances
     (Phase W4) at whatever the trading engine actually emits, schedule
     `RuntimeManager.run_once()` (a `Watcher`-gated loop or fixed interval),

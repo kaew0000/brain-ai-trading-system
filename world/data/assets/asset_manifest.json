@@ -1,0 +1,2045 @@
+[
+  {
+    "id": "sprite.bastion.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "bastion",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.bastion.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "bastion",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.bastion.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "bastion",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.bastion.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "bastion",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.bastion.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "bastion",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chameleon",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chameleon",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chameleon",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chameleon",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chameleon",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chronos",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chronos",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chronos",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chronos",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "chronos",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "crucible",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "crucible",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "crucible",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "crucible",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "crucible",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "echo",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "echo",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "echo",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "echo",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "echo",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "forge",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "forge",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "forge",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "forge",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "forge",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "gardener",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "gardener",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "gardener",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "gardener",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "gardener",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "herald",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "herald",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "herald",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "herald",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "herald",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "oracle",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "oracle",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "oracle",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "oracle",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "oracle",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "phoenix",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "phoenix",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "phoenix",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "phoenix",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "phoenix",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "primus",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "primus",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "primus",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "primus",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "primus",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "scribe",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "scribe",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "scribe",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "scribe",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "scribe",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "sentinel",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "sentinel",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "sentinel",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "sentinel",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "sentinel",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "watcher",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "watcher",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "watcher",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "watcher",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "watcher",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.idle",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "webweaver",
+      "idle"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.walking",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "webweaver",
+      "walking"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.working",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "webweaver",
+      "working"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.celebration",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "webweaver",
+      "celebration"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.emergency",
+    "category": "character-sprite",
+    "source": "lpc",
+    "tags": [
+      "character",
+      "webweaver",
+      "emergency"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.desk",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "desk"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.chair",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "chair"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.monitor",
+    "category": "furniture",
+    "source": "opengameart",
+    "tags": [
+      "furniture",
+      "monitor"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.laptop",
+    "category": "furniture",
+    "source": "opengameart",
+    "tags": [
+      "furniture",
+      "laptop"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.server-rack",
+    "category": "furniture",
+    "source": "opengameart",
+    "tags": [
+      "furniture",
+      "server-rack"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.whiteboard",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "whiteboard"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.meeting-table",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "meeting-table"
+    ],
+    "variants": [],
+    "dependencies": [
+      "furniture.chair"
+    ],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.plants",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "plants"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.reception-desk",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "reception-desk"
+    ],
+    "variants": [],
+    "dependencies": [
+      "furniture.monitor"
+    ],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.coffee-machine",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "coffee-machine"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.printer",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "printer"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.cabinet",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "cabinet"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.door",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "door"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.window",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "window"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.lighting",
+    "category": "furniture",
+    "source": "kenney",
+    "tags": [
+      "furniture",
+      "lighting"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.wall-poster-brainai-logo",
+    "category": "decoration",
+    "source": "custom",
+    "tags": [
+      "decoration",
+      "wall-poster-brainai-logo"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.potted-plant-decorative",
+    "category": "decoration",
+    "source": "opengameart",
+    "tags": [
+      "decoration",
+      "potted-plant-decorative"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.rug-modern",
+    "category": "decoration",
+    "source": "kenney",
+    "tags": [
+      "decoration",
+      "rug-modern"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.award-plaque",
+    "category": "decoration",
+    "source": "custom",
+    "tags": [
+      "decoration",
+      "award-plaque"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.wall-clock",
+    "category": "decoration",
+    "source": "opengameart",
+    "tags": [
+      "decoration",
+      "wall-clock"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.bookshelf-slim",
+    "category": "decoration",
+    "source": "kenney",
+    "tags": [
+      "decoration",
+      "bookshelf-slim"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.reception-signage",
+    "category": "decoration",
+    "source": "custom",
+    "tags": [
+      "decoration",
+      "reception-signage"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "decoration.coffee-table",
+    "category": "decoration",
+    "source": "kenney",
+    "tags": [
+      "decoration",
+      "coffee-table"
+    ],
+    "variants": [],
+    "dependencies": [
+      "furniture.chair"
+    ],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  }
+]
