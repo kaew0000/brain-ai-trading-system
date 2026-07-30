@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C Step 1: Autonomous Learning Pipeline (Track A)
+
+### Added
+- **`learning/` package** (new, Track A, READ ONLY): `dataset_builder.py`
+  (`LearningDatasetBuilder`, wraps `journal_v2.get_ensemble_learning_dataset()`,
+  adds derived `cumulative_pnl`/`running_drawdown`), `symbol_statistics.py`,
+  `regime_statistics.py`, `agent_statistics.py`, `feature_statistics.py`,
+  `performance_tracker.py`, `pattern_miner.py` (`PatternMiner`, every
+  requested pattern kind, sample-size gated), `recommendation_engine.py`
+  (`RecommendationEngine`, traceable text recommendations, no automatic
+  actions), `learning_snapshot.py` (immutable, timestamp-named JSON
+  snapshots), `learning_report.py` (`LearningReportGenerator`, writes
+  `learning_report.json`/`performance_report.json`/`pattern_report.json`/
+  `recommendation_report.json`).
+- **`journal/journal_v2.py`**: `get_trade_attribution()` +13 keys
+  (`quantity`, `stop_loss`, `take_profit`, `rr`, `regime`,
+  `signal_confidence`, `score`, `mtf_aligned`, `smc_flags`, `reason`,
+  `source`, `duration_seconds`, `close_confidence`) — surfaces data
+  Phase 4B Step 3D was already storing but this method wasn't yet
+  returning. Additive only.
+
+### Discovery
+`get_ensemble_learning_dataset()`'s N+1 `get_trade_attribution()` call
+pattern doesn't scale past ~1,000 trades (found via this phase's
+benchmark) — a pre-existing characteristic, not introduced or fixed
+here. `market_context`/`volatility`/`atr`/`spread` aren't persisted
+anywhere today — always `None` on `LearningRow`, schema-ready not
+fabricated. `regime`/agent data is only real for legacy single-symbol
+trades. See PATCH_NOTES.md and architecture.md §33 for full detail.
+
+### Testing
+`pytest tests/ -q` → 1885 passed, 0 failed (1783 baseline + 102 new).
+`ruff check .` → clean.
+
 ## [Unreleased] — V16 Phase 4B Step 3D: Unified Trade Lifecycle & Trade Attribution
 
 ### Added

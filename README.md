@@ -73,8 +73,11 @@ from V16 Phase 2C and `execution_api.py` from V16 Phase 2E), `commander/`, `conf
 `decision/`, `execution/` (incl. `execution_orchestrator.py`/`execution_state.py`/
 `execution_events.py`/`execution_metrics.py` from V16 Phase 2E,
 `execution_scheduler.py`/`portfolio_signal_provider.py` from V16 Phase 2F,
-and `ceo_gated_signal_provider.py` from V16 Phase 4B Step 3C),
+`ceo_gated_signal_provider.py` from V16 Phase 4B Step 3C, and
+`trade_lifecycle.py` from V16 Phase 4B Step 3D),
 `features/`, `intelligence/`, `journal/`,
+`learning/` (Autonomous Learning Pipeline — READ ONLY, observation +
+recommendation only, V16 Phase 4C Step 1),
 `ml/`, `paper/`, `pipeline/`, `portfolio/` (V16 Phase 2A/2B), `ranking/`
 (V16 Phase 2), `regime/`, `risk/`, `scanner/` (V16 Phase 2),
 `system_health/`, `telemetry/`, `trend/`, `utils/`.
