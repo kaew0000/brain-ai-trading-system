@@ -1,0 +1,30 @@
+{
+  "$id": "asset_registry_config.schema.json",
+  "description": "Declares which AssetSource loaders should be registered, and asset_id -> source hints. No loader is implemented in Phase W3, so registeredSources is expected to be an empty array until Phase W6 (asset pipeline activation).",
+  "type": "object",
+  "required": ["registeredSources", "assetHints"],
+  "properties": {
+    "registeredSources": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["opengameart", "lpc", "kenney", "custom"]
+      }
+    },
+    "assetHints": {
+      "type": "array",
+      "description": "asset_id -> which source is expected to claim it, used purely as a lookup hint; AssetRegistry.resolve() dispatches by AssetLoader.can_load(), not by this list.",
+      "items": {
+        "type": "object",
+        "required": ["assetId", "source"],
+        "properties": {
+          "assetId": { "type": "string" },
+          "source": {
+            "type": "string",
+            "enum": ["opengameart", "lpc", "kenney", "custom"]
+          }
+        }
+      }
+    }
+  }
+}

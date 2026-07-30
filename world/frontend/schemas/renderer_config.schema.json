@@ -1,0 +1,26 @@
+{
+  "$id": "renderer_config.schema.json",
+  "description": "Engine-agnostic renderer bootstrap config. Describes WHICH engine binding to load and its viewport, not any engine-specific settings.",
+  "type": "object",
+  "required": ["engine", "viewport"],
+  "properties": {
+    "engine": {
+      "type": "string",
+      "description": "Name of the concrete Renderer implementation to load. No value is valid yet — Phase W3 ships no concrete engine binding.",
+      "enum": ["none"]
+    },
+    "viewport": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "scale": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "initialSceneId": {
+      "type": "string",
+      "description": "district id to load as the first scene, e.g. world-gateway (Reception)."
+    }
+  }
+}

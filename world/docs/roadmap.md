@@ -11,8 +11,16 @@
    roadmap, `world/lore/`, `world/ui/specs/`, and `world/docs/architecture.md`
    into agreement with the Phase W2 office theme. No data, schema, engine, or
    layout changes. **Done.**
-5. **W3** — Design the read-only ingestion adapter (still no engine changes).
-6. **W4** — Static scene rendering with placeholder shapes, pick a renderer.
-7. **W5** — Asset pipeline activation (LPC sprites, tilesets, audio).
-8. **W6** — Live data wiring (read-only) from real engine logs.
-9. **W7** — Full UI panel implementation (minimap, inspectors, feeds).
+5. **W3** — Renderer Foundation: engine-agnostic abstraction layer
+   (`world/frontend/` — 13 interfaces, concrete state-only Scene/Camera/
+   Viewport/AssetRegistry/RoomType, no renderer chosen, no sprites, no live
+   data). **Done.**
+6. **W4** — Design the read-only ingestion adapter (still no engine
+   changes) — implements `world.frontend.interfaces.world_state.WorldStateProvider`.
+7. **W5** — Static scene rendering with placeholder shapes; pick a concrete
+   renderer engine and implement the Phase W3 interfaces against it.
+8. **W6** — Asset pipeline activation (office-appropriate sprites, tilesets,
+   audio) — implement `AssetLoader` for at least one `AssetSource`.
+9. **W7** — Live data wiring (read-only) from real engine logs.
+10. **W8** — Full UI panel implementation (the 8 panels already specified in
+    `world/ui/specs/`, now backed by a real renderer).

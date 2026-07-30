@@ -15,3 +15,7 @@ Consumes one or more of: `world.json`, `districts.json`, `characters.json`,
 
 Engine-neutral: implementable equally in React, PixiJS, Phaser, Godot, or
 Unity, since it only reads the JSON contracts in `data/schemas/`.
+
+## Phase W3 Renderer Mapping
+
+`DistrictRenderer` (`world/frontend/interfaces/district_renderer.py`) draws the room this panel describes; room/floor data is `world/data/layout/rooms.json`.

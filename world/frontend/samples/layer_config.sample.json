@@ -1,0 +1,9 @@
+[
+  { "layerType": "background", "zOrder": 0, "entityIds": [], "visible": true },
+  { "layerType": "floor", "zOrder": 1, "entityIds": ["tile-001"], "visible": true },
+  { "layerType": "furniture", "zOrder": 2, "entityIds": [], "visible": true },
+  { "layerType": "characters", "zOrder": 3, "entityIds": ["herald"], "visible": true },
+  { "layerType": "effects", "zOrder": 4, "entityIds": [], "visible": true },
+  { "layerType": "ui_overlay", "zOrder": 5, "entityIds": [], "visible": true },
+  { "layerType": "notification", "zOrder": 6, "entityIds": [], "visible": true }
+]
