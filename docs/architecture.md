@@ -2836,3 +2836,218 @@ no data migration, nothing to undo in already-persisted journal rows
   dashboard UI panel for `/api/ceo-decisions` and now `/api/lifecycle/*`
   too, fee capture, RiskEngine's single account-level gate, real
   correlation tracking.
+
+---
+
+## 33. Autonomous Learning Pipeline — V16 Phase 4C Step 1 (2026-08-02, Track A)
+
+Track A only (`docs/architecture/SEPARATION_POLICY.md` lists "Ensemble
+Learning" explicitly under Track A) — nothing in `world/` was read or
+touched. READ ONLY throughout: no module in `learning/` writes to the
+journal, places an order, or changes a setting. "Learning only.
+Observation only. Recommendation only." — this phase's own brief.
+
+### Pipeline
+
+```
+Trade Closed -> Journal -> Execution Attribution   (existing, Phase 4B Step 2/3D)
+                                  |
+                                  v
+              journal_v2.get_ensemble_learning_dataset()   (existing, §29)
+                                  |
+                                  v
+              learning/dataset_builder.py      (LearningDatasetBuilder)
+                                  |
+             +--------------------+--------------------+
+             v                    v                    v
+  symbol_statistics.py   regime_statistics.py   agent_statistics.py
+  feature_statistics.py           |         performance_tracker.py
+             +--------------------+--------------------+
+                                  v
+              learning/pattern_miner.py         (PatternMiner)
+                                  |
+                                  v
+              learning/recommendation_engine.py (RecommendationEngine)
+                                  |
+                                  v
+              learning/learning_snapshot.py     (LearningSnapshot, immutable)
+                                  |
+                                  v
+              learning/learning_report.py       (4 JSON reports)
+```
+
+### Discovery — read before writing any code
+
+1. **The Learning Dataset already exists.** `journal_v2.get_ensemble_learning_dataset()`
+   (§29, my own Phase 4B Step 2) already builds exactly the "clean
+   dataset ready for Phase 4C" that phase's own brief promised. This
+   phase's `LearningDatasetBuilder` wraps it — never re-queries the
+   database, never duplicates the trades/agent_decisions join.
+2. **A real, verified surfacing gap**: `get_trade_attribution()`
+   (also §29) was already storing `reason`/`source`/`duration_seconds`/
+   a close-time `confidence` (written by §32/Step 3D's
+   `record_trade_outcome()` extension) but never returning them — the
+   data existed, the read method just didn't expose it. Fixed
+   additively this phase (new dict keys only — `quantity`, `stop_loss`,
+   `take_profit`, `rr`, `regime`, `signal_confidence`, `score`,
+   `mtf_aligned`, `smc_flags`, `reason`, `source`, `duration_seconds`,
+   `close_confidence`; nothing renamed, removed, or changed in meaning).
+   This is the one deliberate exception to "do not modify Journal
+   behavior" this phase makes, and it's narrowly scoped: a read
+   method's return dict gained new keys, no write path, no schema,
+   and no existing key changed — flagged explicitly rather than done
+   quietly, matching this project's established practice for every
+   prior judgment call of this kind.
+3. **`regime`/`signal_confidence`/`score`/`mtf_aligned`/`smc_flags` are
+   only real for legacy single-symbol trades.** `execution/execution_orchestrator.py`'s
+   `_record_trade_opened()` (§29) never threaded the computed
+   market_context's regime/confidence into the `TradeRecord` it builds
+   for V16 multi-symbol trades — a real, pre-existing gap, not
+   introduced or fixed here (fixing it means touching
+   `ExecutionOrchestrator`, forbidden this phase).
+4. **`market_context`, `volatility`, `atr`, `spread` are not stored
+   anywhere, for any trade, today.** No write path persists a
+   market-context/indicator snapshot at trade time. `LearningRow`
+   carries these fields anyway (always `None`) so the schema is
+   forward-compatible and honest about the gap rather than silently
+   omitting requested fields — see "Future Phase Proposal" below.
+5. **`get_ensemble_learning_dataset()`'s N+1 read pattern doesn't scale
+   past ~1,000 trades** — see "Benchmark" below. A real, measured
+   characteristic of the EXISTING (§29) method this phase reuses, not
+   introduced here; not fixed here either, per "do not modify Journal
+   behavior" — flagged as a Future Phase Proposal item instead.
+
+### New modules (Track A, `learning/`)
+
+| File | Purpose |
+|---|---|
+| `learning/dataset_builder.py` | `LearningDatasetBuilder(journal).build()` -> `LearningDataset` (tuple of `LearningRow`). Adds two genuinely-derived fields no single trade row could carry alone: `cumulative_pnl`, `running_drawdown` (running sum/peak-to-trough over the chronologically-sorted dataset). |
+| `learning/_stats_utils.py` | Private (not exported). Shared `trade_stats()`/`streaks()` helpers — avoids duplicating win-rate/profit-factor arithmetic across every statistics module. |
+| `learning/symbol_statistics.py` | Per-symbol breakdown, best-first. |
+| `learning/regime_statistics.py` | Per-regime breakdown + honest `coverage` (fraction of rows with real regime data — see Discovery #3). |
+| `learning/agent_statistics.py` | Per-agent win-rate + vote-agreement quality (not a duplicate of `get_agent_performance()`'s live SQL join — a separate, in-memory aggregation over an already-built dataset; see this file's own module docstring for why both exist). |
+| `learning/feature_statistics.py` | Win-rate by SMC structure flag (bos/choch/fvg/ob) and mtf_aligned — the only per-trade "features" actually in storage today. |
+| `learning/performance_tracker.py` | Overall stats, streaks, max drawdown, hour-of-day and weekday breakdowns. |
+| `learning/pattern_miner.py` | `PatternMiner(min_sample_size=5).mine(dataset)` -> `list[Pattern]`. Every pattern kind the brief asked for (best/worst symbol, regime, confidence range, hour, weekday, streaks, agent agreement/disagreement) plus two the brief's examples needed to be real rather than glued-together: `symbol_regime_combo` (joint breakdown — grounds "SYMBOL performs poorly during REGIME" in an actually-measured correlation) and `latency_trend`/`risk_adjusted_return_trend` (first-half-vs-second-half comparison — grounds "execution latency increased" / "risk-adjusted return decreased" in a real trend, not a guess). Every pattern is sample-size-gated; nothing is reported from too little data. |
+| `learning/recommendation_engine.py` | `RecommendationEngine().generate(patterns)` -> `list[Recommendation]`. Purely negative/actionable-shaped patterns become recommendations; purely positive ones ("best symbol", "winning streak") don't — "this is already working" isn't the same kind of feedback as "consider reviewing X", and duplicating every positive Pattern as a Recommendation would just double information already in the patterns list. Every `Recommendation.based_on` traces back to the exact Pattern (kind/subject/metric) that produced it. |
+| `learning/learning_snapshot.py` | `build_learning_snapshot()` -> frozen `LearningSnapshot` (Python-level immutability) + `.to_json()`. `save_snapshot()` writes `learning_snapshot_<timestamp>.json` — never overwrites a previous snapshot (a plain JSON file, not a new database layer). |
+| `learning/learning_report.py` | `LearningReportGenerator(journal).generate()` wires every stage together; `.write_reports()` writes the four requested JSON files (`learning_report.json`, `performance_report.json`, `pattern_report.json`, `recommendation_report.json` — these four DO get overwritten on every run, "the current report", unlike timestamped snapshots). |
+
+### Changes to existing modules
+
+| File | Change |
+|---|---|
+| `journal/journal_v2.py` | `get_trade_attribution()`'s return dict gained 13 new keys (Discovery #2) — additive only, see above. |
+| `README.md` | `learning/` added to "Repository layout". |
+| `CLAUDE.md` | Status/priorities updated (also backfills Step 3C/3D, which — like Step 3A before them — didn't update this file; see CLAUDE.md's own note). |
+
+`agents/`, `execution/` (besides the one journal read-dict extension),
+`portfolio/`, `risk/`, `world/`, and every dashboard/API module were
+**not touched**.
+
+### Compatibility analysis
+
+`get_trade_attribution()` callers that only read the keys that existed
+before this phase are unaffected — new keys, nothing removed or
+renamed. `get_ensemble_learning_dataset()`'s signature and behavior are
+completely unchanged (this phase's `LearningDatasetBuilder` calls it
+exactly as before). No CEOAgent, ExecutionOrchestrator, PortfolioManager,
+RiskEngine, or TradeLifecycle code was touched — this phase is a new,
+independent read-only package plus one additive journal read-dict
+extension.
+
+### Testing
+
+102 new tests across 6 files (`tests/test_learning_dataset_builder.py`,
+`tests/test_learning_statistics.py`, `tests/test_learning_pattern_miner.py`,
+`tests/test_learning_recommendation_engine.py`,
+`tests/test_learning_snapshot.py`, `tests/test_learning_report.py`),
+plus a shared `tests/_learning_helpers.py` seeding helper that writes
+REAL trades through `journal_v2.TradeJournalV2` + `record_trade_outcome()`
+(not hand-built dicts) — every learning/ test exercises the actual
+Phase 4B write path. Covers: empty-dataset edge cases, frozen/immutable
+dataclasses, sample-size gating (patterns/recommendations from too
+little data), never-raises-on-broken-journal for every entry point,
+JSON round-tripping for every report/snapshot, and the example
+sentences from this phase's own brief (verified to actually come out
+of `RecommendationEngine`, not just asserted to exist in the abstract).
+
+**Verified: `pytest tests/ -q` → 1885 passed, 0 failed** (1783
+baseline + 102 new). `ruff check .` → clean.
+
+### Benchmark
+
+Full pipeline (`LearningReportGenerator.generate()` — dataset build +
+every statistics module + pattern mining + recommendations) timed over
+a real, freshly-seeded SQLite journal:
+
+```
+n=    10 trades   0.016s    0.15 MB peak
+n=   100 trades   0.107s    0.64 MB peak
+n=  1000 trades   1.183s    4.76 MB peak
+n= 10000 trades  28.550s   47.55 MB peak
+```
+
+**Not linear at the high end** — 10x more trades (1,000 -> 10,000) took
+~24x longer, not ~10x. Root cause: `get_ensemble_learning_dataset()`
+(§29, reused unchanged by this phase) calls `get_trade_attribution()`
+once per row (an N+1 read pattern, each call opening its own two
+queries) — a real, measured characteristic of the EXISTING method this
+phase builds on, not introduced by anything new here. Memory scales
+linearly and stays modest even at 10,000 rows (47.6 MB). Not fixed in
+this phase (would mean modifying `journal_v2.py`'s query pattern,
+beyond the one narrow read-dict extension already made) — see "Future
+Phase Proposal" below.
+
+### Risk analysis
+
+- **Performance ceiling on `get_ensemble_learning_dataset()`** (above)
+  — a scheduled learning run against a very large journal (tens of
+  thousands of trades) will be slow; not a correctness risk, a latency
+  one. Mitigation available (see Future Phase Proposal) but not applied
+  here.
+- **Silent gaps, not silent fabrication** — every field this phase
+  can't honestly populate (`market_context`, `volatility`, `atr`,
+  `spread`, and `regime`/`agent_participation` for most V16
+  multi-symbol trades) is `None`/`[]`, never guessed. The risk this
+  mitigates: a future consumer trusting a "pattern" built from mostly-
+  absent data. `RegimeStatistics.coverage` and every Pattern's
+  `sample_size` make the gap visible rather than hidden.
+- **No automatic action risk** — by construction, nothing in `learning/`
+  can reach `agents/`, `execution/`, `portfolio/`, or `risk/` (no
+  import from those packages anywhere in `learning/`), so even a bug
+  in pattern-mining or recommendation logic cannot change trading
+  behavior. This is a structural guarantee (verifiable by import
+  inspection, tested implicitly by every test in this phase not
+  needing execution/portfolio fixtures), not just a documented
+  intention.
+- **Statistical honesty vs. sample size** — `min_sample_size` (default
+  5) is a design choice, not a statistically rigorous significance
+  test. At n=5 a "pattern" could still be noise. Documented as a
+  configurable parameter (`LearningReportGenerator(journal, min_sample_size=...)`),
+  not a claim of statistical significance.
+
+### Future Phase Proposal
+
+- **Fix the N+1 read pattern** — a bulk, single-query version of
+  `get_ensemble_learning_dataset()` (or a new method alongside it) for
+  datasets beyond ~1,000 trades. The one journal change this phase
+  identified but deliberately didn't make.
+- **Persist a market-context snapshot at trade-open time** — the only
+  way `market_context`/`volatility`/`atr`/`spread` become real. Needs
+  `execution/execution_orchestrator.py`'s `_record_trade_opened()`
+  touched, forbidden this phase.
+- **Thread regime/confidence into V16 multi-symbol `TradeRecord`s** —
+  same file, same constraint; would make `regime_statistics.py`'s
+  `coverage` meaningfully higher than "legacy trades only".
+- **Per-agent attribution for CEO-gated multi-symbol trades** — still
+  open since §31; once fixed, `agent_statistics.py`/`agent_participation`
+  become real for the multi-symbol path too, not just legacy.
+- **A scheduled snapshot job** — `save_snapshot()` exists; nothing yet
+  calls it on a cadence. A natural, small, additive follow-up.
+- **Phase 4C Step 2+**: actually consuming the dataset for something
+  beyond observation (dynamic weight learning, §28's simple blend
+  extended with this phase's richer per-trade data) — explicitly out
+  of scope for Step 1, per this phase's own "Learning only. Observation
+  only. Recommendation only." brief.
+

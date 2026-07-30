@@ -404,6 +404,30 @@ class TradeJournalV2:
             "slippage":            attribution.get("slippage"),
             "latency_seconds":     attribution.get("latency_seconds"),
             "agent_participation": agent_participation,
+            # V16 Phase 4C Step 1: purely additive — every key below
+            # surfaces data that was already being written (trades
+            # columns since §2A; reason/source/duration_seconds/
+            # confidence since §32/Phase 4B Step 3D's record_trade_outcome()
+            # extension) but that this method wasn't yet returning.
+            # Nothing above this comment changed name, type, or value.
+            "quantity":            trade_d.get("quantity"),
+            "stop_loss":           trade_d.get("stop_loss"),
+            "take_profit":         trade_d.get("take_profit"),
+            "rr":                  trade_d.get("rr"),
+            "regime":              trade_d.get("regime") or None,
+            "signal_confidence":   trade_d.get("confidence") or None,  # confidence at signal/open time (trades.confidence)
+            "score":               trade_d.get("score"),
+            "mtf_aligned":         trade_d.get("mtf_aligned"),
+            "smc_flags": {
+                "bos":   trade_d.get("bos"),
+                "choch": trade_d.get("choch"),
+                "fvg":   trade_d.get("fvg"),
+                "ob":    trade_d.get("ob"),
+            },
+            "reason":              attribution.get("reason"),        # e.g. a execution.trade_lifecycle.CloseSource value
+            "source":              attribution.get("source"),
+            "duration_seconds":    attribution.get("duration_seconds"),
+            "close_confidence":    attribution.get("confidence"),    # confidence recorded at CLOSE time (distinct from signal_confidence above)
         }
 
     def get_ensemble_learning_dataset(self, limit: int = 1000, symbol: str | None = None) -> list[dict]:

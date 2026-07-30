@@ -54,6 +54,22 @@ Completed
   `agents/decision_context.py`, `agents/multi_symbol_adapter.py`,
   `execution/portfolio_signal_provider.py`'s `get_signal_with_context()`,
   `CEOAgent.decide_from_context()`)
+- Ensemble Decision Engine Phase 4B Step 3C — live CEO Agent
+  integration into the multi-symbol decision pipeline (architecture.md
+  §31 — `execution/ceo_gated_signal_provider.py`,
+  `agents/ceo_symbol_cache.py`, `CEO_MULTI_SYMBOL_ENABLED` off by
+  default; merged, not documented in this file by that PR — backfilled
+  here)
+- Ensemble Decision Engine Phase 4B Step 3D — unified trade lifecycle &
+  trade attribution (architecture.md §32 —
+  `execution/trade_lifecycle.py`'s `TradeLifecycle`, the single write
+  path for every close reason: SL/TP, replacement, reconciliation,
+  emergency close, exchange reject; merged, not documented in this file
+  by that PR — backfilled here)
+- Autonomous Learning Pipeline — Phase 4C Step 1 (architecture.md §33 —
+  new `learning/` package, Track A, READ ONLY: dataset builder,
+  symbol/regime/agent/feature statistics, performance tracker, pattern
+  miner, recommendation engine, immutable snapshots, JSON reports)
 
 In Progress
 
@@ -204,25 +220,28 @@ Strategy Plugin System — DONE (architecture.md §25)
 
 Priority 2
 
-Ensemble Decision Engine — Phase 4A DONE (architecture.md §26). Phase 4B
-Step 1 DONE (architecture.md §27). Phase 4B proper DONE (architecture.md
-§28). Phase 4B Step 2 DONE (architecture.md §29: journal wiring for the
-multi-symbol execution path). Phase 4B Step 3A DONE (symbol isolation
-prep — `AgentReport.symbol`, `CEODecision.symbol`, per-symbol
-`RegimeEngine` HMM models). Phase 4B Step 3B DONE (architecture.md §30:
-`agents/multi_symbol_adapter.py` bridges `PortfolioSignalProvider` ->
-`CEODecisionContext` -> `CEOAgent` -> `CEODecision` with zero duplicate
-MarketContextBuilder/ConfidenceEngine computation — but CEOAgent is
-still NOT wired into `main.py`'s live scheduler bootstrap; the adapter
-exists, nothing calls it yet in production). What's still open, scoped
-precisely in §30 "Next up" rather than re-described here: 1) actually
-wiring `MultiSymbolCEOAdapter` into the live `ExecutionScheduler`
-bootstrap, 2) passing `symbol=` to `RegimeEngine.classify()` from
-`PortfolioSignalProvider` (Step 3A's per-symbol HMM capability exists
-but isn't used by the one caller that would need it — cross-symbol HMM
-contamination is still live on the multi-symbol path today), 3) giving
-CEOAgent's 6 sub-agents per-symbol instance state before one shared
-CEOAgent safely services many symbols in a loop, 4) Phase 4C itself.
+Ensemble Decision Engine — Phase 4A through Phase 4B Step 3D all DONE
+(architecture.md §26-§32). Phase 4B Step 3C put CEOAgent live on the
+multi-symbol path behind `CEO_MULTI_SYMBOL_ENABLED` (off by default).
+Phase 4B Step 3D unified every close path (SL/TP, replacement,
+reconciliation, emergency, exchange-reject) through one
+`TradeLifecycle` write path. What's still open, scoped precisely in
+§32/§33 "Next up" rather than re-described here: 1) per-agent
+attribution for CEO-confirmed multi-symbol trades (still not wired —
+`agent_attribution_from_ceo_decision()` still isn't called anywhere),
+2) passing `symbol=` to `RegimeEngine.classify()` from
+`PortfolioSignalProvider` (cross-symbol HMM contamination still live),
+3) per-symbol sub-agent instance state, 4) fee capture,
+5) `get_ensemble_learning_dataset()`'s N+1 read pattern doesn't scale
+past ~1,000 trades (found while building Phase 4C Step 1's benchmark —
+architecture.md §33).
+
+Phase 4C Step 1 DONE (architecture.md §33): new `learning/` package —
+Autonomous Learning Pipeline, Track A, READ ONLY (observation +
+recommendation only, no automatic weight/parameter/strategy changes).
+Wraps the existing `get_ensemble_learning_dataset()` (§29); does not
+duplicate it. See §33 for the full pipeline diagram and Future Phase
+Proposal.
 
 Priority 3
 
@@ -230,7 +249,10 @@ Multi-Agent Framework enhancements (extend `agents/` + `graph/` + `commander/`)
 
 Priority 4
 
-Quant Research Pipeline / Research-Optimization Framework (extend `research/` + `ml/`)
+Quant Research Pipeline / Research-Optimization Framework (extend `research/` + `ml/`).
+Phase 4C Step 1's `learning/` package (Priority 2, architecture.md §33)
+covers the "Ensemble Learning" slice of this pillar specifically —
+research/ml-wide research infrastructure is still untouched.
 
 Priority 5
 
