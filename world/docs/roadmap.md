@@ -1,7 +1,7 @@
 # Development Roadmap
 
-1. **W1** — Architecture, schemas, lore skeleton, docs (documentation only).
-2. **W1A** — Materialize folder structure and placeholder files in-repo.
+1. **W1** — Architecture, schemas, lore skeleton, docs (documentation only). **Done.**
+2. **W1A** — Materialize folder structure and placeholder files in-repo. **Done.**
 3. **W2** — Office Headquarters Foundation: retcon fantasy theme to modern
    office HQ per `docs/architecture/WORLD_OFFICE_POLICY.md` /
    `WORLD_DESIGN_LOCK.md`; add `world/data/layout`, `world/data/characters`
@@ -19,22 +19,37 @@
    source-agnostic readers behind a `DataSource`/`Reader` split),
    `world/watchers/` (2 change-detection strategies), `world/adapter/`
    (orchestration + `EngineSnapshot` + `SnapshotBuilder`),
-   `world/runtime/` (`RuntimeManager` + hash-based `SnapshotCache`,
+   `world/runtime/runtime_manager.py` (+ hash-based `SnapshotCache`,
    writes only to `world/data/runtime/`). No `DataSource` points at a
-   real engine path yet — see `world/docs/INGESTION_ADAPTER.md`.
-   **Done.** Does *not* yet implement
-   `world.frontend.interfaces.world_state.WorldStateProvider` (Phase
-   W3) — that binding is proposed as the first W5 task, see below.
-7. **W5** — Renderer Integration: (a) implement `WorldStateProvider`
-   by reading `world/data/runtime/*.json` and constructing a
-   `WorldState`; (b) pick a concrete renderer engine and implement the
-   Phase W3 interfaces against it; (c) static scene rendering with
-   placeholder shapes. Not started.
-8. **W6** — Asset pipeline activation (office-appropriate sprites, tilesets,
-   audio) — implement `AssetLoader` for at least one `AssetSource`.
-9. **W7** — Live data wiring: point real `DataSource` instances (Phase W4)
-   at whatever the trading engine actually emits, and schedule
-   `RuntimeManager.run_once()` (a `Watcher`-gated loop or fixed interval —
-   design deferred to this phase).
-10. **W8** — Full UI panel implementation (the 8 panels already specified in
-    `world/ui/specs/`, now backed by a real renderer).
+   real engine path yet — see `world/docs/INGESTION_ADAPTER.md`. **Done.**
+7. **W5** — World State Provider: pure backend, in-memory world state.
+   `world/runtime/models.py` (frozen dataclasses: `WorldState`, `RoomState`,
+   `AgentState`, `MissionState`, `PortfolioState`, `NotificationState`,
+   `EventState`, `TelemetryState`), `state_builder.py` (merges all six
+   Phase W4 runtime files with static W1/W2 canon), `state_cache.py` +
+   `update_manager.py` (TTL + hash-based change detection, no polling
+   loop), `relationship_resolver.py`, `state_validator.py`,
+   `statistics.py`, `world_state_provider.py`, and `api.py` (the 5 public
+   read-only functions). Explicitly does **not** implement the Phase W3
+   `WorldStateProvider` ABC or choose a renderer — see
+   `world/docs/STATE_PROVIDER.md` §9. **Done.**
+8. **W6** — Renderer Integration: (a) pick a concrete renderer engine and
+   implement the Phase W3 interfaces against it; (b) implement the Phase
+   W3 `WorldStateProvider` ABC by projecting Phase W5's `WorldState` down
+   to the renderer-facing shape; (c) static scene rendering with
+   placeholder shapes; (d) fold in the Phase W6 Asset Pipeline work
+   (furniture/decoration/character-sprite metadata — built but never
+   merged as its own branch, `feature/world-phase-w6-asset-pipeline`) as
+   part of actually rendering something with those assets. Not started.
+9. **W7** — Interaction Layer: wire up the interaction metadata already
+   defined (`world/data/interactions/` if the W6 asset-pipeline work is
+   folded in per above, or defined fresh here otherwise) to real
+   click/hover/walk-to behavior against the chosen W6 renderer. Not
+   started.
+10. **W8** — Live Command Center: point real `DataSource` instances
+    (Phase W4) at whatever the trading engine actually emits, schedule
+    `RuntimeManager.run_once()` (a `Watcher`-gated loop or fixed interval),
+    and implement the full UI panel set already specified in
+    `world/ui/specs/` (minimap, inspectors, activity feed, notification
+    center, relationship viewer, time control, simulation controls) against
+    live data. Not started.

@@ -25,18 +25,30 @@ deeper documentation (architecture, roadmap, conventions).
   `notifications.json`) — written only by `RuntimeManager`
 - `frontend/` — Phase W3 engine-agnostic renderer abstraction layer
   (interfaces + concrete state, no renderer chosen)
-- `readers/`, `watchers/`, `adapter/`, `runtime/` — Phase W4 read-only
-  ingestion pipeline; see `docs/INGESTION_ADAPTER.md`
-- `docs/` — architecture, roadmap, coding/naming/asset conventions
-- `scripts/` — placeholder validation tooling
-- `tests/` — schema/uniqueness/relationship/adapter/cache/watcher tests
+- `readers/`, `watchers/`, `adapter/` — Phase W4 read-only ingestion
+  pipeline; see `docs/INGESTION_ADAPTER.md`
+- `runtime/` — Phase W4 `runtime_manager.py` + `cache.py` (writes
+  `data/runtime/*.json`) plus Phase W5 `models.py`, `state_builder.py`,
+  `state_cache.py`, `update_manager.py`, `relationship_resolver.py`,
+  `state_validator.py`, `statistics.py`, `world_state_provider.py`, `api.py`
+  (reads `data/runtime/*.json`, produces an in-memory `WorldState`) —
+  see `docs/STATE_PROVIDER.md`
+- `docs/` — architecture, roadmap, coding/naming/asset conventions,
+  ingestion adapter and state provider design docs
+- `scripts/` — validation tooling (`validate_schemas.py`; a Phase W5
+  runtime benchmark script)
+- `tests/` — schema/uniqueness/relationship/adapter/cache/watcher/state
+  tests
 
 ## Status
 
-Phase W4 — Foundation materialized (W1A); office HQ theme locked and
-retconned (W2); documentation synchronized (W2.1); renderer abstraction
-layer built (W3); read-only ingestion adapter built (W4). No renderer
-chosen yet, no sprites, no real engine `DataSource` wired. See
-`docs/architecture/WORLD_OFFICE_POLICY.md` for the locked visual
-direction, `world/docs/OFFICE_LAYOUT.md` for the floor plan, and
-`world/docs/INGESTION_ADAPTER.md` for the read-only data pipeline.
+Phase W5 — World State Provider complete: the six Phase W4 runtime files
+plus static W1/W2 canon now merge into one immutable, in-memory
+`WorldState`, with caching, change detection, validation, relationship
+resolution, and statistics. Still no renderer chosen, no sprites, no real
+engine `DataSource` wired — that's Phase W6 (Renderer Integration), which
+also folds in the Phase W6 Asset Pipeline work built earlier but never
+merged. See `docs/architecture/WORLD_OFFICE_POLICY.md` for the locked
+visual direction, `world/docs/OFFICE_LAYOUT.md` for the floor plan,
+`world/docs/INGESTION_ADAPTER.md` for the read-only data pipeline, and
+`world/docs/STATE_PROVIDER.md` for the state provider.
