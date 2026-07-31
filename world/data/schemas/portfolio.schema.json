@@ -1,0 +1,34 @@
+{
+  "$id": "portfolio.schema.json",
+  "description": "Phase W4 runtime snapshot shape for world/data/runtime/portfolio.json. Presentation-only reflection of portfolio state - not the source of truth (that remains the trading engine's own portfolio/ module, which this schema never reads from or writes to).",
+  "type": "object",
+  "required": ["timestamp", "totalPositions"],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "totalPositions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "district"],
+        "properties": {
+          "symbol": { "type": "string" },
+          "district": {
+            "type": "string",
+            "description": "Always portfolio-garden in the current district map."
+          },
+          "sizeLabel": {
+            "type": "string",
+            "description": "Free-text display label, e.g. 'small'/'medium'/'large' - deliberately not a raw notional amount, to keep this a presentation-only reflection."
+          }
+        }
+      }
+    }
+  }
+}

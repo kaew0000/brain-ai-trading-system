@@ -1,8 +1,8 @@
 # Brain AI Command World — Phase W1: Foundation Architecture
 
 **Status:** Implemented (W1, W1A). Superseded in part by Phase W2 — see notes
-below. Extended, not superseded, by Phase W3.
-**Scope:** Everything below lives under `world/` in `brain-ai-trading-system`. Nothing in `agents/`, `execution/`, `portfolio/`, `journal/`, `risk/`, `api/`, `dashboard/`, or `main.py` is touched, referenced for writes, or assumed to change.
+below. Extended, not superseded, by Phase W3 and Phase W4.
+**Scope:** Everything below lives under `world/` in `brain-ai-trading-system`. Nothing in `agents/`, `execution/`, `portfolio/`, `journal/`, `risk/`, `api/`, `dashboard/`, `dashboard_src/`, `main.py`, `config/`, `scanner/`, `pipeline/`, `telemetry/`, or `database/` is touched, referenced for writes, or assumed to change.
 
 > **Phase W2 update (2026-07-29):** the visual theme described below (city,
 > fortress, forge, castle-adjacent language) is retired. Brain AI Command
@@ -23,6 +23,16 @@ below. Extended, not superseded, by Phase W3.
 > W5); no sprites (Phase W6); no live data (Phase W4 designs the
 > adapter, Phase W7 wires it). §7–8 below reflect the current phase
 > numbering.
+
+> **Phase W4 update (2026-07-31):** the read-only ingestion adapter now
+> exists at `world/adapter/`, `world/readers/`, `world/watchers/`, and
+> `world/runtime/` — see `world/docs/INGESTION_ADAPTER.md` and
+> `world/docs/RUNTIME_DATA_FLOW.md`. `world/data/runtime/*.json` are real,
+> pipeline-generated, schema-valid placeholders (all idle/empty — no
+> `DataSource` points at a real engine file yet). Still no renderer
+> (Phase W5), still no sprites (Phase W6). Phase W5 additionally now
+> means implementing `WorldStateProvider` (Phase W3) against these six
+> files — see `world/docs/roadmap.md`.
 
 ---
 
@@ -327,10 +337,10 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 - Phase W2 (**done**): retcon to modern office HQ theme; add `world/data/layout`, `world/data/characters` (placement), `world/data/navigation` as a spatial layer.
 - Phase W2.1 (**done**): documentation synchronization — this document, roadmap, lore, ui/specs.
 - Phase W3 (**done**): renderer foundation — engine-agnostic abstraction layer under `world/frontend/` (13 interfaces + concrete state-only Scene/Camera/Viewport/AssetRegistry/RoomType). No renderer chosen, no sprites, no live data.
-- Phase W4: design the read-only ingestion adapter, implementing `WorldStateProvider` (`world/frontend/interfaces/world_state.py`).
-- Phase W5: pick a concrete renderer (React Canvas, PixiJS, Phaser, Godot, or Unity — all equally supported by the Phase W3 interfaces) and implement static scene rendering with placeholder shapes.
+- Phase W4 (**done**): read-only ingestion adapter — `world/readers/` (5 generic readers behind a `DataSource`/`Reader` split), `world/watchers/` (2 change-detection strategies), `world/adapter/` (orchestration), `world/runtime/` (`RuntimeManager` + hash-based `SnapshotCache`, writes only `world/data/runtime/`). No `DataSource` points at a real engine path yet; `WorldStateProvider` still not implemented.
+- Phase W5: (a) implement `WorldStateProvider` (`world/frontend/interfaces/world_state.py`) by reading `world/data/runtime/*.json`; (b) pick a concrete renderer (React Canvas, PixiJS, Phaser, Godot, or Unity — all equally supported by the Phase W3 interfaces); (c) static scene rendering with placeholder shapes.
 - Phase W6: office-appropriate sprite integration — implement `AssetLoader` (`world/frontend/interfaces/asset_loader.py`) for at least one `AssetSource`, using `spriteMeta` already defined (no LPC weapon/armor slots — see §4).
-- Phase W7: live event feed wired to real engine logs, via the Phase W4 adapter.
+- Phase W7: point real `DataSource` instances (Phase W4) at whatever the trading engine actually emits, and schedule `RuntimeManager.run_once()`.
 - Phase W8: relationship viewer, mission panel, notification center UI — the 8 panels already specified in `world/ui/specs/`.
 - Sub-departments and new characters can be added without breaking schemas, since arrays are additive.
 
@@ -341,10 +351,10 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 3. **W2 (done):** retcon fantasy theme to modern office HQ; add layout/placement/navigation data layer.
 4. **W2.1 (done):** documentation synchronization across `WORLD.md`, roadmap, lore, and ui/specs.
 5. **W3 (done):** renderer foundation — abstraction layer, no engine chosen.
-6. **W4:** ingestion adapter design, still no trading-code changes.
-7. **W5:** static scene rendering with placeholder shapes (no sprites yet), renderer engine chosen here.
+6. **W4 (done):** read-only ingestion adapter — generic readers/watchers/adapter/runtime pipeline, no real source wired.
+7. **W5:** `WorldStateProvider` implementation + renderer engine chosen + static scene rendering with placeholder shapes.
 8. **W6:** asset pipeline activation (office-appropriate sprites).
-9. **W7:** live data wiring (read-only).
+9. **W7:** live data wiring — point Phase W4 readers at real engine output.
 10. **W8:** full UI panel implementation.
 
 ## 9. Risks
@@ -354,17 +364,21 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 - **Agent role mismatch**: character table above is inferred from names — needs Krush's confirmation against actual agent docs before lore is written as canon.
 - **Termux constraints**: any future scripts should follow existing conventions (sequential commands, `printf` over heredoc, avoid heavy build tools where possible).
 - **Engine lock-in temptation**: schemas and Phase W3 interfaces must stay engine-neutral through W5 (renderer choice) at minimum.
+- **Journal has no schema yet**: `JournalReader` (Phase W4) returns `JournalEntry` dataclasses but there is no `journal.schema.json` / `world/data/runtime/journal.json` — the Phase W4 task's own output contract only names six runtime files and none is a journal snapshot. Flagged, not fixed, in Phase W4 — see Compatibility Report in the Phase W4 delivery message.
 
 ## 10. Suggested Next World Phase
 
-**Phase W4 — Read-Only Ingestion Adapter Design.** Define exactly which existing engine outputs (log files, state files, or a lightweight event bus) can be safely read without touching `agents/`, `execution/`, etc., and design the adapter contract that implements `WorldStateProvider` (`world/frontend/interfaces/world_state.py`) and populates `world/data/*.json` on a schedule. Still design-only, no renderer chosen yet.
+**Phase W5 — Renderer Integration.** (a) Implement `WorldStateProvider` (`world/frontend/interfaces/world_state.py`) by reading the six `world/data/runtime/*.json` files (Phase W4) and constructing a `WorldState`. (b) Pick a concrete renderer engine and implement the Phase W3 interfaces against it. (c) Static scene rendering with placeholder shapes — no sprites yet (Phase W6).
 
 ---
 
 *This document was the Phase W1 deliverable; W1 and W1A have since been*
 *implemented. Phase W2 (office HQ retcon + layout/navigation layer),*
-*Phase W2.1 (this document's synchronization), and Phase W3 (renderer*
-*foundation, `world/frontend/`) are also complete — see*
+*Phase W2.1 (this document's synchronization), Phase W3 (renderer*
+*foundation, `world/frontend/`), and Phase W4 (read-only ingestion*
+*adapter, `world/adapter/` `world/readers/` `world/watchers/`*
+*`world/runtime/`) are also complete — see*
 *`docs/architecture/WORLD_OFFICE_POLICY.md`, `WORLD_DESIGN_LOCK.md`, and*
-*`world/frontend/README.md` for current canon. No renderer, sprites, or*
-*trading-code changes have been made through Phase W3.*
+*`world/docs/INGESTION_ADAPTER.md` for current canon. No renderer,*
+*sprites, live data source, or trading-code changes have been made*
+*through Phase W4.*
