@@ -7,7 +7,7 @@ Brain AI Command World is a one-directional, read-only reflection of engine
 state:
 
 ```
-Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json -> renderer (any engine) -> UI panels
+Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json -> StateBuilder -> WorldState -> renderer (any engine, W6+) -> UI panels
 ```
 
 No arrow points back into the engine. See `naming-conventions.md`,
@@ -22,6 +22,15 @@ plan and department list.
 
 **Ingestion (Phase W4):** the middle three arrows above
 (`DataSource -> Reader -> Adapter`) are implemented at `world/readers/`,
-`world/adapter/`, and `world/runtime/` — see `INGESTION_ADAPTER.md` and
-`RUNTIME_DATA_FLOW.md` in this folder. No `DataSource` points at a real
-engine file yet; `world/data/runtime/*.json` are honest idle placeholders.
+`world/adapter/`, and `world/runtime/runtime_manager.py` — see
+`INGESTION_ADAPTER.md` and `RUNTIME_DATA_FLOW.md` in this folder. No
+`DataSource` points at a real engine file yet; `world/data/runtime/*.json`
+are honest idle placeholders.
+
+**World State Provider (Phase W5):** `StateBuilder -> WorldState` above is
+implemented at `world/runtime/{models,state_builder,state_cache,
+update_manager,relationship_resolver,state_validator,statistics,
+world_state_provider,api}.py` — see `STATE_PROVIDER.md` in this folder.
+Pure backend, in-memory only; no renderer chosen or touched. That binding,
+plus folding in the still-unmerged Phase W6 Asset Pipeline work, is Phase
+W6 (Renderer Integration).
