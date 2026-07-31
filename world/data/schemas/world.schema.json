@@ -28,6 +28,13 @@
       "items": {
         "type": "string"
       }
+    },
+    "activeAgents": {
+      "type": "array",
+      "description": "Added Phase W4 (ingestion adapter) — agent refs (e.g. PRIMUS) currently reflected as active. Optional and additive; does not affect any Phase W1-W3 consumer of this schema.",
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

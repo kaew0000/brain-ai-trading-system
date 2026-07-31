@@ -1,0 +1,28 @@
+{
+  "$id": "telemetry.schema.json",
+  "description": "Phase W4 runtime snapshot shape for world/data/runtime/telemetry.json. Presentation-only reflection of engine health metrics.",
+  "type": "object",
+  "required": ["timestamp", "metrics"],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "number" },
+          "unit": { "type": "string" },
+          "district": {
+            "type": "string",
+            "description": "Which room this metric is reflected in, e.g. data-center for a pipeline-lag metric."
+          }
+        }
+      }
+    }
+  }
+}

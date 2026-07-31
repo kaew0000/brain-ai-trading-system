@@ -1,0 +1,6 @@
+{
+  "timestamp": "2026-07-30T00:00:00Z",
+  "metrics": [
+    { "name": "adapter_lag_seconds", "value": 0.0, "unit": "seconds", "district": "data-center" }
+  ]
+}

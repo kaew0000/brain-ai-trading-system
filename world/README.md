@@ -20,14 +20,23 @@ deeper documentation (architecture, roadmap, conventions).
 - `scenes/` — scene manifest schema (design only)
 - `data/schemas/` — stable JSON Schemas for all world data contracts
 - `data/samples/` — example payloads validating each schema
+- `data/runtime/` — Phase W4 live snapshot output (`world.json`,
+  `events.json`, `missions.json`, `portfolio.json`, `telemetry.json`,
+  `notifications.json`) — written only by `RuntimeManager`
+- `frontend/` — Phase W3 engine-agnostic renderer abstraction layer
+  (interfaces + concrete state, no renderer chosen)
+- `readers/`, `watchers/`, `adapter/`, `runtime/` — Phase W4 read-only
+  ingestion pipeline; see `docs/INGESTION_ADAPTER.md`
 - `docs/` — architecture, roadmap, coding/naming/asset conventions
 - `scripts/` — placeholder validation tooling
-- `tests/` — placeholder schema/uniqueness/relationship tests
+- `tests/` — schema/uniqueness/relationship/adapter/cache/watcher tests
 
 ## Status
 
-Phase W2.1 — Foundation materialized (W1A); office HQ theme locked and
-retconned (W2); documentation synchronized (W2.1). No renderer chosen yet,
-no sprites. See `docs/architecture/WORLD_OFFICE_POLICY.md` for the locked
-visual direction and `world/docs/OFFICE_LAYOUT.md` for the current floor
-plan.
+Phase W4 — Foundation materialized (W1A); office HQ theme locked and
+retconned (W2); documentation synchronized (W2.1); renderer abstraction
+layer built (W3); read-only ingestion adapter built (W4). No renderer
+chosen yet, no sprites, no real engine `DataSource` wired. See
+`docs/architecture/WORLD_OFFICE_POLICY.md` for the locked visual
+direction, `world/docs/OFFICE_LAYOUT.md` for the floor plan, and
+`world/docs/INGESTION_ADAPTER.md` for the read-only data pipeline.
