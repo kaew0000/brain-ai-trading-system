@@ -41,32 +41,40 @@ deeper documentation (architecture, roadmap, conventions).
 - `data/assets/` — asset manifest, packs, furniture/decoration catalogs,
   room population, character asset refs (Phase W6)
 - `data/interactions/` — interaction type catalog (Phase W6)
+- `simulation/` — `SimulationEngine`, character behaviour, room activity,
+  movement (Dijkstra over the real nav graph), event descriptors,
+  `Timeline`, statistics, and the 8-function `api.py` (Phase W7) — see
+  `docs/SIMULATION.md`
 - `docs/` — architecture, roadmap, coding/naming/asset conventions,
-  ingestion adapter, state provider, office layout & room specs (W2), and
-  asset pipeline & population reports (W6)
-- `scripts/` — validation tooling (`validate_schemas.py`, a Phase W5
-  runtime benchmark script, and Phase W6 asset validation)
+  ingestion adapter, state provider, office layout & room specs (W2),
+  asset pipeline & population reports (W6), and the simulation layer (W7)
+- `scripts/` — validation tooling (`validate_schemas.py`, Phase W5/W7
+  performance benchmarks, Phase W6 asset validation)
 - `tests/` — schema/uniqueness/relationship/adapter/cache/watcher/state/
-  navigation/asset tests
+  navigation/asset/simulation tests
 
 ## Status
 
-Phase W6 — Renderer Integration + Asset Pipeline is in progress. The Asset
-Pipeline half is complete: every department (plus lobby/hallway/elevator)
-is populated with furniture and decoration metadata, every character has
-sprite and spatial-placement metadata, and four concrete `AssetLoader`s
-(OpenGameArt, LPC, Kenney, Custom) resolve against
-`world/data/assets/asset_manifest.json` — see `world/docs/ASSET_PIPELINE.md`.
-The Renderer Integration half is still outstanding: no renderer engine is
-chosen, the Phase W3 `WorldStateProvider` ABC
-(`world/frontend/interfaces/world_state.py`) is not yet implemented against
-Phase W5's `WorldState`, and no binary sprites ship in this repo. Phase W4
+Phase W7 — Live Office Simulation is done: `world/simulation/` derives 7
+character behaviours and 6 room activity levels purely from Phase W5's
+`WorldState`, with abstract logical movement (Dijkstra over the real Phase
+W2 navigation graph), metadata-only event descriptors, and a play/pause/
+resume/seek `Timeline` — see `world/docs/SIMULATION.md`. No renderer-
+specific code, no trading/AI-decision logic invented.
+
+Renderer Integration (the part of the old "Phase W6" that never got done —
+picking a renderer engine, implementing the Phase W3 `WorldStateProvider`
+ABC) is renumbered to **Phase W8** and still outstanding; Phase W7 was
+built ahead of it since it only needs `WorldState` (W5) + asset metadata
+(W6), not a renderer. Phase W6's Asset Pipeline half is complete: every
+department (plus lobby/hallway/elevator) is populated with furniture and
+decoration metadata, every character has sprite and spatial-placement
+metadata, and four concrete `AssetLoader`s (OpenGameArt, LPC, Kenney,
+Custom) resolve against `world/data/assets/asset_manifest.json`. Phase W4
 (read-only ingestion adapter) and Phase W5 (World State Provider) are both
-complete — the six Phase W4 runtime files plus static W1/W2 canon merge into
-one immutable, in-memory `WorldState`, with caching, change detection,
-validation, relationship resolution, and statistics. See
-`docs/architecture/WORLD_OFFICE_POLICY.md` for the locked visual direction,
-`world/docs/OFFICE_LAYOUT.md` for the floor plan,
+complete. See `docs/architecture/WORLD_OFFICE_POLICY.md` for the locked
+visual direction, `world/docs/OFFICE_LAYOUT.md` for the floor plan,
 `world/docs/INGESTION_ADAPTER.md` for the read-only data pipeline,
-`world/docs/STATE_PROVIDER.md` for the state provider, and
-`world/docs/ASSET_PIPELINE.md` for the asset pipeline.
+`world/docs/STATE_PROVIDER.md` for the state provider,
+`world/docs/ASSET_PIPELINE.md` for the asset pipeline, and
+`world/docs/SIMULATION.md` for the simulation layer.

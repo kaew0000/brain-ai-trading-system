@@ -44,10 +44,31 @@
    character asset + spatial placement for every character). **Asset
    pipeline (d) done** — see `world/docs/ASSET_PIPELINE.md`. **Renderer
    integration (a)–(c) not started.**
-9. **W7** — Interaction Layer: wire up the interaction metadata already
-   defined (`world/data/interactions/`) to real click/hover/walk-to
-   behavior against the chosen W6 renderer. Not started.
-10. **W8** — Live Command Center: point real `DataSource` instances
+9. **W7** — Live Office Simulation: `world/simulation/` — `SimulationEngine`
+   (Part A: clock, scheduler, movement, character behaviour, room
+   activity, event descriptors, timeline, in one `step()`), 7 character
+   behaviours and 6 room activity levels driven only by Phase W5's
+   `WorldState` (Part B/C), abstract logical movement via Dijkstra over
+   the real Phase W2 navigation graph (Part D), metadata-only event
+   descriptors (Part E), a play/pause/resume/seek `Timeline` (Part F), the
+   8-function `world.simulation.api` (Part G), and per-tick statistics
+   (Part H). No renderer-specific code; no trading/execution/AI-decision
+   logic invented. **Done** — this renumbers what earlier notes called
+   "W7 Interaction Layer" to **W9** below, since Live Office Simulation
+   needs only `WorldState` (W5) + asset metadata (W6), not the
+   still-missing W6 renderer-integration half, and is itself a
+   prerequisite for meaningful interaction (you need simulated behaviour
+   states before wiring click/hover to them). See
+   `world/docs/SIMULATION.md`.
+10. **W8** — Renderer Integration (the part of the old W6 that never got
+    done): pick a concrete renderer engine, implement the Phase W3
+    `WorldStateProvider` ABC, static scene rendering. Feeds directly into
+    W9. Not started.
+11. **W9** — Interaction Layer: wire up the interaction metadata already
+    defined (`world/data/interactions/`) plus Phase W7's `SimulationState`
+    to real click/hover/walk-to behavior against the W8 renderer. Not
+    started.
+12. **W10** — Live Command Center: point real `DataSource` instances
     (Phase W4) at whatever the trading engine actually emits, schedule
     `RuntimeManager.run_once()` (a `Watcher`-gated loop or fixed interval),
     and implement the full UI panel set already specified in

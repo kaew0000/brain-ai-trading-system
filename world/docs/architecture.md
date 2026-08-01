@@ -40,8 +40,24 @@ character has sprite and spatial-placement metadata. Four concrete
 `world/data/assets/asset_manifest.json` — see `ASSET_PIPELINE.md` in this
 folder.
 
-**Renderer integration (Phase W6, outstanding):** the final leg of the
-diagram above, `WorldState -> renderer`, is not yet built — the Phase W3
-`WorldStateProvider` ABC still needs to be implemented against Phase W5's
-`WorldState`, no renderer engine is chosen, and no binary asset files ship
-in this repo.
+**Live Office Simulation (Phase W7, done):** a new stage now sits between
+`WorldState` and any future renderer: `SimulationEngine.step()`
+(`world/simulation/`) derives 7 character behaviours + 6 room activity
+levels + metadata-only event descriptors from `WorldState` and the Phase
+W6 spatial-placement data, tracked through a play/pause/resume/seek
+`Timeline`. No renderer-specific code. Updated diagram:
+
+```
+Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json
+    -> StateBuilder -> WorldState -> SimulationEngine -> SimulationState
+    -> renderer (any engine, W8+) -> UI panels
+```
+
+See `SIMULATION.md` in this folder.
+
+**Renderer integration (Phase W8, outstanding):** the final leg of the
+diagram above, `SimulationState -> renderer`, is not yet built — the Phase
+W3 `WorldStateProvider` ABC still needs to be implemented, no renderer
+engine is chosen, and no binary asset files ship in this repo. (This was
+called "Phase W6, outstanding" in earlier notes; renumbered to W8 per
+`world/docs/roadmap.md` once Phase W7 was built ahead of it.)
