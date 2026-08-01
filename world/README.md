@@ -18,10 +18,14 @@ deeper documentation (architecture, roadmap, conventions).
 - `ui/specs/` — design specs for planned UI panels (design only, not implemented)
 - `minimap/` — minimap schema (design only)
 - `scenes/` — scene manifest schema (design only)
-- `frontend/` — engine-agnostic renderer abstraction layer (Phase W3) plus
+- `frontend/` — engine-agnostic renderer abstraction layer (Phase W3);
   concrete asset-pipeline code (Phase W6): `asset_loader/sources/` (four
   `AssetLoader` implementations), `asset_loader/registry_factory.py`,
-  `asset_loader/compatibility.py`
+  `asset_loader/compatibility.py`; concrete renderer (Phase W8):
+  `renderer/` — `SceneGraphRenderer`, `RenderWorldStateProvider`,
+  `scene_builder`, `sprite_mapper`, `asset_locator`, `character_renderer`,
+  `room_renderer`, `overlay_renderer`, `scene_cache`, `render_state`,
+  `render_config` — see `docs/RENDERER.md`
 - `data/schemas/` — stable JSON Schemas for all world data contracts
 - `data/samples/` — example payloads validating each schema
 - `data/runtime/` — Phase W4 live snapshot output (`world.json`,
@@ -55,18 +59,26 @@ deeper documentation (architecture, roadmap, conventions).
 
 ## Status
 
+Phase W8 — Renderer Integration is done: `world/frontend/renderer/`
+picks a concrete engine (a backend scene-graph compiler targeting
+Phaser 3, not a Python pixel-drawing library — `world/` stays
+engine-neutral; the actual pixel target is the project's browser
+frontend, wired up in Phase W10) and implements the Phase W3
+`WorldStateProvider` ABC by projecting Phase W5's `WorldState` +
+Phase W7's `SimulationState` down to the flattened Phase W3 shape.
+Every render pass produces a JSON-serializable `RenderFrame` for one
+room, cached per `(room_id, tick)`. All 17 rooms (14 departments + 3
+circulation types) render against live data. See
+`world/docs/RENDERER.md`.
+
 Phase W7 — Live Office Simulation is done: `world/simulation/` derives 7
 character behaviours and 6 room activity levels purely from Phase W5's
 `WorldState`, with abstract logical movement (Dijkstra over the real Phase
 W2 navigation graph), metadata-only event descriptors, and a play/pause/
-resume/seek `Timeline` — see `world/docs/SIMULATION.md`. No renderer-
-specific code, no trading/AI-decision logic invented.
+resume/seek `Timeline` — see `world/docs/SIMULATION.md`. No trading/
+AI-decision logic invented.
 
-Renderer Integration (the part of the old "Phase W6" that never got done —
-picking a renderer engine, implementing the Phase W3 `WorldStateProvider`
-ABC) is renumbered to **Phase W8** and still outstanding; Phase W7 was
-built ahead of it since it only needs `WorldState` (W5) + asset metadata
-(W6), not a renderer. Phase W6's Asset Pipeline half is complete: every
+Phase W6's Asset Pipeline half is complete: every
 department (plus lobby/hallway/elevator) is populated with furniture and
 decoration metadata, every character has sprite and spatial-placement
 metadata, and four concrete `AssetLoader`s (OpenGameArt, LPC, Kenney,
@@ -76,5 +88,9 @@ complete. See `docs/architecture/WORLD_OFFICE_POLICY.md` for the locked
 visual direction, `world/docs/OFFICE_LAYOUT.md` for the floor plan,
 `world/docs/INGESTION_ADAPTER.md` for the read-only data pipeline,
 `world/docs/STATE_PROVIDER.md` for the state provider,
-`world/docs/ASSET_PIPELINE.md` for the asset pipeline, and
-`world/docs/SIMULATION.md` for the simulation layer.
+`world/docs/ASSET_PIPELINE.md` for the asset pipeline,
+`world/docs/SIMULATION.md` for the simulation layer, and
+`world/docs/RENDERER.md` for the renderer.
+
+Next: **Phase W9** — Interaction Layer (wire up click/hover/walk-to
+against the W8 renderer).
