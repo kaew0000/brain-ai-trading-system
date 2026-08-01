@@ -7,8 +7,11 @@ Brain AI Command World is a one-directional, read-only reflection of engine
 state:
 
 ```
-Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json -> StateBuilder -> WorldState -> renderer (any engine, W6+) -> UI panels
+Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json -> StateBuilder -> WorldState -> renderer -> UI panels
 ```
+
+(See the fully current version of this diagram, with `SimulationEngine`
+and the Phase W8 renderer stages included, near the end of this file.)
 
 No arrow points back into the engine. See `naming-conventions.md`,
 `coding-standards.md`, and `asset-conventions.md` for how contributions to
@@ -55,9 +58,28 @@ Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json
 
 See `SIMULATION.md` in this folder.
 
-**Renderer integration (Phase W8, outstanding):** the final leg of the
-diagram above, `SimulationState -> renderer`, is not yet built — the Phase
-W3 `WorldStateProvider` ABC still needs to be implemented, no renderer
-engine is chosen, and no binary asset files ship in this repo. (This was
-called "Phase W6, outstanding" in earlier notes; renumbered to W8 per
-`world/docs/roadmap.md` once Phase W7 was built ahead of it.)
+**Renderer integration (Phase W8, done):** the final leg of the diagram
+above, `SimulationState -> renderer`, is now built —
+`world/frontend/renderer/`. Concrete engine chosen: a backend
+scene-graph compiler targeting Phaser 3 (`SceneGraphRenderer`), not a
+Python pixel-drawing library — `world/` stays engine-neutral per this
+file's own rule; the actual pixel target is the project's browser
+frontend (React + Vite + Phaser 3), wired up in Phase W10.
+`RenderWorldStateProvider` implements the Phase W3 `WorldStateProvider`
+ABC by projecting `WorldState` + `SimulationState` down to the
+flattened Phase W3 shape; `scene_builder`/`character_renderer`/
+`room_renderer`/`overlay_renderer` turn that into a JSON-serializable
+`RenderFrame` per room per tick. Still no binary asset files ship in
+this repo — every asset reference resolves to
+`asset_manifest.json` metadata, not pixels; a real Phaser 3 scene
+consuming this data is Phase W10's job. (This stage was called "Phase
+W6, outstanding" in earlier notes; renumbered to W8 per
+`world/docs/roadmap.md` once Phase W7 was built ahead of it.) See
+`RENDERER.md` in this folder. Final diagram:
+
+```
+Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json
+    -> StateBuilder -> WorldState -> SimulationEngine -> SimulationState
+    -> RenderWorldStateProvider -> SceneGraphRenderer -> RenderFrame
+    -> Phaser 3 frontend (W10) -> UI panels
+```

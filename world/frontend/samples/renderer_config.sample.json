@@ -1,5 +1,5 @@
 {
-  "engine": "none",
+  "engine": "phaser",
   "viewport": {
     "width": 1280,
     "height": 720,

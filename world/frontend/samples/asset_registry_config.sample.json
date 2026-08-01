@@ -1,4 +1,4 @@
 {
-  "registeredSources": [],
+  "registeredSources": ["opengameart", "lpc", "kenney", "custom"],
   "assetHints": []
 }

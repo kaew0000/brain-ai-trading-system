@@ -66,6 +66,27 @@ half only), and W7.
 > renderer-specific code, no trading/AI-decision logic invented. Built
 > ahead of Phase W8 (Renderer Integration, still outstanding) since it
 > only needs `WorldState` + Phase W6 asset metadata, not a renderer.
+>
+> **Phase W8 update:** Renderer Integration is done —
+> `world/frontend/renderer/`. Concrete engine chosen: a backend
+> scene-graph compiler targeting Phaser 3
+> (`SceneGraphRenderer`), not a Python pixel-drawing library — `world/`
+> stays engine-neutral; the actual pixel target is the project's
+> browser frontend, wired up in Phase W10.
+> `RenderWorldStateProvider` implements the Phase W3
+> `WorldStateProvider` ABC (deferred since Phase W3's own docs said
+> so) by projecting Phase W5's `WorldState` + Phase W7's
+> `SimulationState` down to the flattened Phase W3 shape.
+> `scene_builder`/`character_renderer`/`room_renderer`/`overlay_renderer`
+> turn that into a JSON-serializable `RenderFrame` per room per tick,
+> cached by `scene_cache.SceneCache`. Found and documented two real
+> gaps rather than inventing around them: character-sprite ids have
+> two disagreeing sources in this repo (only one resolves), and the
+> five sprite animation states don't cover all seven Phase W7
+> behaviour labels (`meeting`/`resting` fall back to
+> `working`/`idle`, documented in one place). All 17 rooms (14
+> departments + 3 circulation types) render against live data. See
+> `world/docs/RENDERER.md`.
 > **Real finding, documented in `SIMULATION.md` §4 rather than hidden:**
 > the real navigation graph has no `lobby`/`hallway` nodes at all — only
 > the 14 departments plus `elevator-floor-1/2/3` — even though Phase W6

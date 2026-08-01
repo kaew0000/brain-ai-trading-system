@@ -6,8 +6,8 @@
   "properties": {
     "engine": {
       "type": "string",
-      "description": "Name of the concrete Renderer implementation to load. No value is valid yet — Phase W3 ships no concrete engine binding.",
-      "enum": ["none"]
+      "description": "Name of the concrete Renderer implementation to load. \"none\" (Phase W3: no concrete engine binding shipped) is kept for backward compatibility; \"phaser\" (Phase W8) is world.frontend.renderer.renderer.SceneGraphRenderer, a backend scene-graph compiler for a browser-side Phaser 3 frontend (see that module's docstring) — matches the existing engine vocabulary in world.frontend.asset_loader.compatibility.KNOWN_ENGINES.",
+      "enum": ["none", "phaser"]
     },
     "viewport": {
       "type": "object",

@@ -62,8 +62,26 @@
    `world/docs/SIMULATION.md`.
 10. **W8** — Renderer Integration (the part of the old W6 that never got
     done): pick a concrete renderer engine, implement the Phase W3
-    `WorldStateProvider` ABC, static scene rendering. Feeds directly into
-    W9. Not started.
+    `WorldStateProvider` ABC, static scene rendering. **Done.** Engine
+    chosen: a backend scene-graph compiler targeting Phaser 3
+    (`world.frontend.renderer.renderer.SceneGraphRenderer`) —
+    `world/` stays a pure-Python, engine-neutral package per
+    `docs/coding-standards.md`; the actual pixel target is the
+    project's browser frontend (React + Vite + Phaser 3), wired up in
+    W10. `world.frontend.renderer.world_state_provider.RenderWorldStateProvider`
+    implements the Phase W3 `WorldStateProvider` ABC by projecting
+    Phase W5's `WorldState` + Phase W7's `SimulationState` down to the
+    Phase W3 renderer-facing shape. `world.frontend.renderer.scene_builder`
+    builds a `Scene` per room from that projection;
+    `character_renderer`/`room_renderer`/`overlay_renderer` emit a
+    `render_state.RenderFrame` (a JSON-serializable scene graph) per
+    render pass, cached per `(room_id, tick)` by `scene_cache.SceneCache`.
+    Found and resolved two real data gaps rather than inventing
+    around them (stale vs. active character-sprite-id sources; five
+    sprite animation states vs. seven Phase W7 behaviour labels) — see
+    `world/docs/RENDERER.md` for both. All 17 real rooms (14
+    departments + 3 circulation types) render end to end against live
+    Phase W5/W7 data. See `world/docs/RENDERER.md`.
 11. **W9** — Interaction Layer: wire up the interaction metadata already
     defined (`world/data/interactions/`) plus Phase W7's `SimulationState`
     to real click/hover/walk-to behavior against the W8 renderer. Not
