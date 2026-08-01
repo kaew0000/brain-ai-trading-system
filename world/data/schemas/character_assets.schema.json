@@ -1,0 +1,47 @@
+{
+  "$id": "character_assets.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "characterId",
+      "agentRef",
+      "spriteAssetIds"
+    ],
+    "properties": {
+      "characterId": {
+        "type": "string"
+      },
+      "agentRef": {
+        "type": "string"
+      },
+      "spriteAssetIds": {
+        "type": "object",
+        "required": [
+          "idle",
+          "walking",
+          "working",
+          "celebration",
+          "emergency"
+        ],
+        "properties": {
+          "idle": {
+            "type": "string"
+          },
+          "walking": {
+            "type": "string"
+          },
+          "working": {
+            "type": "string"
+          },
+          "celebration": {
+            "type": "string"
+          },
+          "emergency": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

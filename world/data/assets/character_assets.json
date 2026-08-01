@@ -1,0 +1,178 @@
+[
+  {
+    "characterId": "bastion",
+    "agentRef": "BASTION",
+    "spriteAssetIds": {
+      "idle": "sprite.bastion.idle",
+      "walking": "sprite.bastion.walking",
+      "working": "sprite.bastion.working",
+      "celebration": "sprite.bastion.celebration",
+      "emergency": "sprite.bastion.emergency"
+    }
+  },
+  {
+    "characterId": "chameleon",
+    "agentRef": "CHAMELEON",
+    "spriteAssetIds": {
+      "idle": "sprite.chameleon.idle",
+      "walking": "sprite.chameleon.walking",
+      "working": "sprite.chameleon.working",
+      "celebration": "sprite.chameleon.celebration",
+      "emergency": "sprite.chameleon.emergency"
+    }
+  },
+  {
+    "characterId": "chronos",
+    "agentRef": "CHRONOS",
+    "spriteAssetIds": {
+      "idle": "sprite.chronos.idle",
+      "walking": "sprite.chronos.walking",
+      "working": "sprite.chronos.working",
+      "celebration": "sprite.chronos.celebration",
+      "emergency": "sprite.chronos.emergency"
+    }
+  },
+  {
+    "characterId": "crucible",
+    "agentRef": "CRUCIBLE",
+    "spriteAssetIds": {
+      "idle": "sprite.crucible.idle",
+      "walking": "sprite.crucible.walking",
+      "working": "sprite.crucible.working",
+      "celebration": "sprite.crucible.celebration",
+      "emergency": "sprite.crucible.emergency"
+    }
+  },
+  {
+    "characterId": "echo",
+    "agentRef": "ECHO",
+    "spriteAssetIds": {
+      "idle": "sprite.echo.idle",
+      "walking": "sprite.echo.walking",
+      "working": "sprite.echo.working",
+      "celebration": "sprite.echo.celebration",
+      "emergency": "sprite.echo.emergency"
+    }
+  },
+  {
+    "characterId": "forge",
+    "agentRef": "FORGE",
+    "spriteAssetIds": {
+      "idle": "sprite.forge.idle",
+      "walking": "sprite.forge.walking",
+      "working": "sprite.forge.working",
+      "celebration": "sprite.forge.celebration",
+      "emergency": "sprite.forge.emergency"
+    }
+  },
+  {
+    "characterId": "gardener",
+    "agentRef": "GARDENER",
+    "spriteAssetIds": {
+      "idle": "sprite.gardener.idle",
+      "walking": "sprite.gardener.walking",
+      "working": "sprite.gardener.working",
+      "celebration": "sprite.gardener.celebration",
+      "emergency": "sprite.gardener.emergency"
+    }
+  },
+  {
+    "characterId": "herald",
+    "agentRef": "HERALD",
+    "spriteAssetIds": {
+      "idle": "sprite.herald.idle",
+      "walking": "sprite.herald.walking",
+      "working": "sprite.herald.working",
+      "celebration": "sprite.herald.celebration",
+      "emergency": "sprite.herald.emergency"
+    }
+  },
+  {
+    "characterId": "mandelbrot",
+    "agentRef": "MANDELBROT",
+    "spriteAssetIds": {
+      "idle": "sprite.mandelbrot.idle",
+      "walking": "sprite.mandelbrot.walking",
+      "working": "sprite.mandelbrot.working",
+      "celebration": "sprite.mandelbrot.celebration",
+      "emergency": "sprite.mandelbrot.emergency"
+    }
+  },
+  {
+    "characterId": "oracle",
+    "agentRef": "ORACLE",
+    "spriteAssetIds": {
+      "idle": "sprite.oracle.idle",
+      "walking": "sprite.oracle.walking",
+      "working": "sprite.oracle.working",
+      "celebration": "sprite.oracle.celebration",
+      "emergency": "sprite.oracle.emergency"
+    }
+  },
+  {
+    "characterId": "phoenix",
+    "agentRef": "PHOENIX",
+    "spriteAssetIds": {
+      "idle": "sprite.phoenix.idle",
+      "walking": "sprite.phoenix.walking",
+      "working": "sprite.phoenix.working",
+      "celebration": "sprite.phoenix.celebration",
+      "emergency": "sprite.phoenix.emergency"
+    }
+  },
+  {
+    "characterId": "primus",
+    "agentRef": "PRIMUS",
+    "spriteAssetIds": {
+      "idle": "sprite.primus.idle",
+      "walking": "sprite.primus.walking",
+      "working": "sprite.primus.working",
+      "celebration": "sprite.primus.celebration",
+      "emergency": "sprite.primus.emergency"
+    }
+  },
+  {
+    "characterId": "scribe",
+    "agentRef": "SCRIBE",
+    "spriteAssetIds": {
+      "idle": "sprite.scribe.idle",
+      "walking": "sprite.scribe.walking",
+      "working": "sprite.scribe.working",
+      "celebration": "sprite.scribe.celebration",
+      "emergency": "sprite.scribe.emergency"
+    }
+  },
+  {
+    "characterId": "sentinel",
+    "agentRef": "SENTINEL",
+    "spriteAssetIds": {
+      "idle": "sprite.sentinel.idle",
+      "walking": "sprite.sentinel.walking",
+      "working": "sprite.sentinel.working",
+      "celebration": "sprite.sentinel.celebration",
+      "emergency": "sprite.sentinel.emergency"
+    }
+  },
+  {
+    "characterId": "watcher",
+    "agentRef": "WATCHER",
+    "spriteAssetIds": {
+      "idle": "sprite.watcher.idle",
+      "walking": "sprite.watcher.walking",
+      "working": "sprite.watcher.working",
+      "celebration": "sprite.watcher.celebration",
+      "emergency": "sprite.watcher.emergency"
+    }
+  },
+  {
+    "characterId": "webweaver",
+    "agentRef": "WEBWEAVER",
+    "spriteAssetIds": {
+      "idle": "sprite.webweaver.idle",
+      "walking": "sprite.webweaver.walking",
+      "working": "sprite.webweaver.working",
+      "celebration": "sprite.webweaver.celebration",
+      "emergency": "sprite.webweaver.emergency"
+    }
+  }
+]

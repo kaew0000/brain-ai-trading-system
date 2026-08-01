@@ -1,0 +1,42 @@
+[
+  {
+    "id": "walk-to",
+    "label": "Walk To",
+    "description": "Character or camera navigates to a target position or object."
+  },
+  {
+    "id": "inspect",
+    "label": "Inspect",
+    "description": "Display detail metadata for the target object or character."
+  },
+  {
+    "id": "talk",
+    "label": "Talk",
+    "description": "Open a dialogue interaction with a character."
+  },
+  {
+    "id": "observe",
+    "label": "Observe",
+    "description": "Passive camera focus on a target without initiating dialogue."
+  },
+  {
+    "id": "meeting",
+    "label": "Meeting",
+    "description": "Gather multiple characters at a shared meeting location."
+  },
+  {
+    "id": "working",
+    "label": "Working",
+    "description": "Character enters its working animation/state at a workstation."
+  },
+  {
+    "id": "emergency",
+    "label": "Emergency",
+    "description": "Character or room enters emergency-state visualization."
+  },
+  {
+    "id": "notification",
+    "label": "Notification",
+    "description": "Surface a notification badge or alert tied to the target."
+  }
+]

@@ -1,0 +1,127 @@
+{
+  "$id": "character_spatial_placement.schema.json",
+  "description": "Additive spatial layer on top of world/data/characters/placement.json (Phase W2). Never modifies that file.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "characterId",
+      "defaultRoom",
+      "homeOffice",
+      "spawnPosition",
+      "idlePosition",
+      "workingPosition",
+      "meetingPosition",
+      "emergencyPosition",
+      "patrolRoute",
+      "interactionRadius"
+    ],
+    "properties": {
+      "characterId": {
+        "type": "string"
+      },
+      "defaultRoom": {
+        "type": "string"
+      },
+      "homeOffice": {
+        "type": "string"
+      },
+      "spawnPosition": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "idlePosition": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "workingPosition": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "meetingPosition": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "emergencyPosition": {
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "patrolRoute": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "interactionRadius": {
+        "type": "number"
+      }
+    }
+  }
+}

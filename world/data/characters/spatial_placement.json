@@ -1,0 +1,642 @@
+[
+  {
+    "characterId": "bastion",
+    "defaultRoom": "risk-fortress",
+    "homeOffice": "risk-fortress",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "chameleon",
+    "defaultRoom": "ai-council",
+    "homeOffice": "ai-council",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "chronos",
+    "defaultRoom": "command-hall",
+    "homeOffice": "command-hall",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "crucible",
+    "defaultRoom": "training-arena",
+    "homeOffice": "training-arena",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "echo",
+    "defaultRoom": "command-hall",
+    "homeOffice": "command-hall",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "forge",
+    "defaultRoom": "execution-forge",
+    "homeOffice": "execution-forge",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "gardener",
+    "defaultRoom": "portfolio-garden",
+    "homeOffice": "portfolio-garden",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "herald",
+    "defaultRoom": "world-gateway",
+    "homeOffice": "world-gateway",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "mandelbrot",
+    "defaultRoom": "simulation-lab",
+    "homeOffice": "simulation-lab",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "oracle",
+    "defaultRoom": "research-district",
+    "homeOffice": "research-district",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "phoenix",
+    "defaultRoom": "recovery-center",
+    "homeOffice": "recovery-center",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "primus",
+    "defaultRoom": "ceo-tower",
+    "homeOffice": "ceo-tower",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "scribe",
+    "defaultRoom": "journal-library",
+    "homeOffice": "journal-library",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "sentinel",
+    "defaultRoom": "risk-fortress",
+    "homeOffice": "risk-fortress",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "watcher",
+    "defaultRoom": "market-intelligence-center",
+    "homeOffice": "market-intelligence-center",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  },
+  {
+    "characterId": "webweaver",
+    "defaultRoom": "data-center",
+    "homeOffice": "data-center",
+    "spawnPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "idlePosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "workingPosition": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "meetingPosition": {
+      "x": 1.5,
+      "y": 0.5
+    },
+    "emergencyPosition": {
+      "x": 1.0,
+      "y": 1.0
+    },
+    "patrolRoute": [
+      {
+        "x": 0.5,
+        "y": 0.5
+      },
+      {
+        "x": 1.0,
+        "y": 0.5
+      },
+      {
+        "x": 0.5,
+        "y": 1.0
+      }
+    ],
+    "interactionRadius": 1.5
+  }
+]

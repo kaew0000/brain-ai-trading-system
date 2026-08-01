@@ -1,0 +1,871 @@
+[
+  {
+    "roomId": "ai-council",
+    "furniturePlacements": [
+      {
+        "instanceId": "ai-council.furniture.meeting-table.0",
+        "furnitureId": "furniture.meeting-table",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "meeting"
+        ]
+      },
+      {
+        "instanceId": "ai-council.furniture.chair.1",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "ai-council.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "ai-council.furniture.whiteboard.3",
+        "furnitureId": "furniture.whiteboard",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "meeting"
+        ]
+      },
+      {
+        "instanceId": "ai-council.furniture.plants.4",
+        "furnitureId": "furniture.plants",
+        "position": {
+          "x": 3.7,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "ai-council.decoration.wall-clock.0",
+        "decorationId": "decoration.wall-clock",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "ceo-tower",
+    "furniturePlacements": [
+      {
+        "instanceId": "ceo-tower.furniture.desk.0",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "ceo-tower.furniture.chair.1",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "ceo-tower.furniture.monitor.2",
+        "furnitureId": "furniture.monitor",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "ceo-tower.furniture.meeting-table.3",
+        "furnitureId": "furniture.meeting-table",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "meeting"
+        ]
+      },
+      {
+        "instanceId": "ceo-tower.furniture.window.4",
+        "furnitureId": "furniture.window",
+        "position": {
+          "x": 3.7,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "ceo-tower.decoration.award-plaque.0",
+        "decorationId": "decoration.award-plaque",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      },
+      {
+        "instanceId": "ceo-tower.decoration.wall-poster-brainai-logo.1",
+        "decorationId": "decoration.wall-poster-brainai-logo",
+        "position": {
+          "x": 0.9,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "command-hall",
+    "furniturePlacements": [
+      {
+        "instanceId": "command-hall.furniture.desk.0",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "command-hall.furniture.monitor.1",
+        "furnitureId": "furniture.monitor",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "command-hall.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "command-hall.furniture.whiteboard.3",
+        "furnitureId": "furniture.whiteboard",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "meeting"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "command-hall.decoration.wall-clock.0",
+        "decorationId": "decoration.wall-clock",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "data-center",
+    "furniturePlacements": [
+      {
+        "instanceId": "data-center.furniture.server-rack.0",
+        "furnitureId": "furniture.server-rack",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "data-center.furniture.cabinet.1",
+        "furnitureId": "furniture.cabinet",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "data-center.furniture.lighting.2",
+        "furnitureId": "furniture.lighting",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": []
+      }
+    ],
+    "decorationPlacements": []
+  },
+  {
+    "roomId": "execution-forge",
+    "furniturePlacements": [
+      {
+        "instanceId": "execution-forge.furniture.desk.0",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "execution-forge.furniture.monitor.1",
+        "furnitureId": "furniture.monitor",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "execution-forge.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "execution-forge.furniture.whiteboard.3",
+        "furnitureId": "furniture.whiteboard",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "meeting"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "execution-forge.decoration.wall-clock.0",
+        "decorationId": "decoration.wall-clock",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "journal-library",
+    "furniturePlacements": [
+      {
+        "instanceId": "journal-library.furniture.cabinet.0",
+        "furnitureId": "furniture.cabinet",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "journal-library.furniture.desk.1",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "journal-library.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "journal-library.furniture.printer.3",
+        "furnitureId": "furniture.printer",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "journal-library.decoration.bookshelf-slim.0",
+        "decorationId": "decoration.bookshelf-slim",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "market-intelligence-center",
+    "furniturePlacements": [
+      {
+        "instanceId": "market-intelligence-center.furniture.desk.0",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "market-intelligence-center.furniture.monitor.1",
+        "furnitureId": "furniture.monitor",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "market-intelligence-center.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "market-intelligence-center.furniture.window.3",
+        "furnitureId": "furniture.window",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": []
+  },
+  {
+    "roomId": "portfolio-garden",
+    "furniturePlacements": [
+      {
+        "instanceId": "portfolio-garden.furniture.plants.0",
+        "furnitureId": "furniture.plants",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "portfolio-garden.furniture.window.1",
+        "furnitureId": "furniture.window",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "portfolio-garden.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "portfolio-garden.decoration.potted-plant-decorative.0",
+        "decorationId": "decoration.potted-plant-decorative",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "recovery-center",
+    "furniturePlacements": [
+      {
+        "instanceId": "recovery-center.furniture.chair.0",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "recovery-center.furniture.plants.1",
+        "furnitureId": "furniture.plants",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "recovery-center.furniture.lighting.2",
+        "furnitureId": "furniture.lighting",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": []
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "recovery-center.decoration.potted-plant-decorative.0",
+        "decorationId": "decoration.potted-plant-decorative",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      },
+      {
+        "instanceId": "recovery-center.decoration.rug-modern.1",
+        "decorationId": "decoration.rug-modern",
+        "position": {
+          "x": 0.9,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "research-district",
+    "furniturePlacements": [
+      {
+        "instanceId": "research-district.furniture.desk.0",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "research-district.furniture.monitor.1",
+        "furnitureId": "furniture.monitor",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "research-district.furniture.whiteboard.2",
+        "furnitureId": "furniture.whiteboard",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "meeting"
+        ]
+      },
+      {
+        "instanceId": "research-district.furniture.chair.3",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "research-district.furniture.cabinet.4",
+        "furnitureId": "furniture.cabinet",
+        "position": {
+          "x": 3.7,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": []
+  },
+  {
+    "roomId": "risk-fortress",
+    "furniturePlacements": [
+      {
+        "instanceId": "risk-fortress.furniture.desk.0",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "risk-fortress.furniture.monitor.1",
+        "furnitureId": "furniture.monitor",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "risk-fortress.furniture.whiteboard.2",
+        "furnitureId": "furniture.whiteboard",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "meeting"
+        ]
+      },
+      {
+        "instanceId": "risk-fortress.furniture.cabinet.3",
+        "furnitureId": "furniture.cabinet",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": []
+  },
+  {
+    "roomId": "simulation-lab",
+    "furniturePlacements": [
+      {
+        "instanceId": "simulation-lab.furniture.desk.0",
+        "furnitureId": "furniture.desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "simulation-lab.furniture.monitor.1",
+        "furnitureId": "furniture.monitor",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "working"
+        ]
+      },
+      {
+        "instanceId": "simulation-lab.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": []
+  },
+  {
+    "roomId": "training-arena",
+    "furniturePlacements": [
+      {
+        "instanceId": "training-arena.furniture.meeting-table.0",
+        "furnitureId": "furniture.meeting-table",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "meeting"
+        ]
+      },
+      {
+        "instanceId": "training-arena.furniture.chair.1",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "training-arena.furniture.chair.2",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "training-arena.furniture.whiteboard.3",
+        "furnitureId": "furniture.whiteboard",
+        "position": {
+          "x": 2.9,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect",
+          "meeting"
+        ]
+      }
+    ],
+    "decorationPlacements": []
+  },
+  {
+    "roomId": "world-gateway",
+    "furniturePlacements": [
+      {
+        "instanceId": "world-gateway.furniture.reception-desk.0",
+        "furnitureId": "furniture.reception-desk",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "talk",
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "world-gateway.furniture.chair.1",
+        "furnitureId": "furniture.chair",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "world-gateway.furniture.plants.2",
+        "furnitureId": "furniture.plants",
+        "position": {
+          "x": 2.1,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "world-gateway.decoration.reception-signage.0",
+        "decorationId": "decoration.reception-signage",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      },
+      {
+        "instanceId": "world-gateway.decoration.rug-modern.1",
+        "decorationId": "decoration.rug-modern",
+        "position": {
+          "x": 0.9,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "lobby",
+    "furniturePlacements": [
+      {
+        "instanceId": "lobby.furniture.plants.0",
+        "furnitureId": "furniture.plants",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      },
+      {
+        "instanceId": "lobby.furniture.window.1",
+        "furnitureId": "furniture.window",
+        "position": {
+          "x": 1.3,
+          "y": 0.5
+        },
+        "interactions": [
+          "inspect"
+        ]
+      }
+    ],
+    "decorationPlacements": [
+      {
+        "instanceId": "lobby.decoration.potted-plant-decorative.0",
+        "decorationId": "decoration.potted-plant-decorative",
+        "position": {
+          "x": 0.3,
+          "y": 1.5
+        }
+      },
+      {
+        "instanceId": "lobby.decoration.wall-poster-brainai-logo.1",
+        "decorationId": "decoration.wall-poster-brainai-logo",
+        "position": {
+          "x": 0.9,
+          "y": 1.5
+        }
+      }
+    ]
+  },
+  {
+    "roomId": "hallway",
+    "furniturePlacements": [
+      {
+        "instanceId": "hallway.furniture.lighting.0",
+        "furnitureId": "furniture.lighting",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": []
+      }
+    ],
+    "decorationPlacements": []
+  },
+  {
+    "roomId": "elevator",
+    "furniturePlacements": [
+      {
+        "instanceId": "elevator.furniture.lighting.0",
+        "furnitureId": "furniture.lighting",
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "interactions": []
+      }
+    ],
+    "decorationPlacements": []
+  }
+]

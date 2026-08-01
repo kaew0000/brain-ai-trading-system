@@ -1,0 +1,91 @@
+{
+  "$id": "room_assets.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "roomId",
+      "furniturePlacements",
+      "decorationPlacements"
+    ],
+    "properties": {
+      "roomId": {
+        "type": "string"
+      },
+      "furniturePlacements": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "instanceId",
+            "furnitureId",
+            "position"
+          ],
+          "properties": {
+            "instanceId": {
+              "type": "string"
+            },
+            "furnitureId": {
+              "type": "string"
+            },
+            "position": {
+              "type": "object",
+              "required": [
+                "x",
+                "y"
+              ],
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              }
+            },
+            "interactions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "decorationPlacements": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "instanceId",
+            "decorationId",
+            "position"
+          ],
+          "properties": {
+            "instanceId": {
+              "type": "string"
+            },
+            "decorationId": {
+              "type": "string"
+            },
+            "position": {
+              "type": "object",
+              "required": [
+                "x",
+                "y"
+              ],
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

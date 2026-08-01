@@ -1,0 +1,36 @@
+{
+  "$id": "asset_packs.schema.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "name",
+      "source",
+      "assetIds"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "source": {
+        "type": "string",
+        "enum": [
+          "opengameart",
+          "lpc",
+          "kenney",
+          "custom"
+        ]
+      },
+      "assetIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

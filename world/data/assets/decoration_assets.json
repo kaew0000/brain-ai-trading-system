@@ -1,0 +1,99 @@
+[
+  {
+    "id": "decoration.wall-poster-brainai-logo",
+    "name": "Wall Poster \u2014 Brain AI Logo",
+    "manifestId": "decoration.wall-poster-brainai-logo",
+    "footprint": {
+      "width": 0.6,
+      "height": 0.05
+    },
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "decoration.potted-plant-decorative",
+    "name": "Potted Plant",
+    "manifestId": "decoration.potted-plant-decorative",
+    "footprint": {
+      "width": 0.3,
+      "height": 0.3
+    },
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "decoration.rug-modern",
+    "name": "Modern Rug",
+    "manifestId": "decoration.rug-modern",
+    "footprint": {
+      "width": 1.5,
+      "height": 1.0
+    },
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "decoration.award-plaque",
+    "name": "Award Plaque",
+    "manifestId": "decoration.award-plaque",
+    "footprint": {
+      "width": 0.3,
+      "height": 0.05
+    },
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "decoration.wall-clock",
+    "name": "Wall Clock",
+    "manifestId": "decoration.wall-clock",
+    "footprint": {
+      "width": 0.2,
+      "height": 0.2
+    },
+    "defaultInteractions": [
+      "inspect",
+      "notification"
+    ]
+  },
+  {
+    "id": "decoration.bookshelf-slim",
+    "name": "Slim Bookshelf",
+    "manifestId": "decoration.bookshelf-slim",
+    "footprint": {
+      "width": 0.6,
+      "height": 0.4
+    },
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "decoration.reception-signage",
+    "name": "Reception Signage",
+    "manifestId": "decoration.reception-signage",
+    "footprint": {
+      "width": 0.8,
+      "height": 0.1
+    },
+    "defaultInteractions": [
+      "inspect"
+    ]
+  },
+  {
+    "id": "decoration.coffee-table",
+    "name": "Coffee Table",
+    "manifestId": "decoration.coffee-table",
+    "footprint": {
+      "width": 0.8,
+      "height": 0.6
+    },
+    "defaultInteractions": [
+      "inspect"
+    ]
+  }
+]
