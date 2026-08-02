@@ -47,6 +47,28 @@ below. Extended, not superseded, by Phase W3, Phase W4, and Phase W5.
 > wiring) are now **W6** and **W8** respectively — see
 > `world/docs/roadmap.md` for the current canonical sequence.
 
+> **Pre-W1 historical background (added 2026-08-02, Repository
+> Stabilization phase):** one Track B commit predates this document and
+> the W1-W8 numbering scheme entirely — `feat(world): performance v1`
+> (commit `9ad1ab5`, 2026-07-19, branch `feature/world-performance-v1`,
+> merged via PR #5 on 2026-07-20 — ten days *before* Phase W1's own
+> first commit, `d74ba2c`, 2026-07-29). It covers code splitting, a
+> minimap v2, an early portfolio dashboard, and store-equality
+> performance work — groundwork that predates this document's own
+> architecture, not part of the W1-W8 sequence, and not renumbered
+> into it. Documented here because it was found unreferenced anywhere
+> in Track B's documentation during a full-repository consistency
+> audit; see `docs/REPOSITORY_STABILIZATION_REPORT.md`.
+
+> **Phase W6 update:** the Renderer Integration + Asset Pipeline phase
+> (see §8 below) is **partially done**. The Asset Pipeline half — four
+> concrete `AssetLoader`s, asset manifest/packs, a compatibility layer,
+> full office population — is complete (`world/docs/ASSET_PIPELINE.md`).
+> The Renderer Integration half — binding the Phase W3
+> `WorldStateProvider` ABC to Phase W5's `WorldState`, choosing a
+> renderer engine, and static scene rendering — is **outstanding**. No
+> renderer, sprites, or live data source exist yet.
+
 ---
 
 ## 1. Architecture Report

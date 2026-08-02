@@ -2189,7 +2189,9 @@ the real (backward-compatible) one it doubles for.
 Phase 4B Step 3A (`feature/phase4b-step3a-symbol-isolation`, merged,
 not separately documented here — that PR didn't update this file;
 noted for the record, not backfilled retroactively as its own section
-since that's not this phase's job) added: `AgentReport.symbol`,
+since that's not this phase's job **at the time this was written; a
+retrospective §34 was added later during the Repository Stabilization
+phase, 2026-08-02 — see §34**) added: `AgentReport.symbol`,
 `CEODecision.symbol`, and `RegimeEngine` per-symbol HMM models
 (`regime/regime_engine.py`'s `self.models` dict, keyed by an optional
 `symbol` argument to `classify()`). All three are additive,
@@ -3050,4 +3052,77 @@ Phase Proposal" below.
   extended with this phase's richer per-trade data) — explicitly out
   of scope for Step 1, per this phase's own "Learning only. Observation
   only. Recommendation only." brief.
+
+---
+
+## 34. Ensemble Decision Engine — Phase 4B Step 3A: Symbol Isolation (RETROSPECTIVE — merged 2026-07-26, documented 2026-08-02)
+
+**This section was written during the Repository Stabilization phase,
+over a week after Phase 4B Step 3A actually merged** (`feature/phase4b-step3a-symbol-isolation`,
+commit `c759bec`) — that phase's own PR never added a dedicated section
+to this file (§30's "Background" is the only prior mention). Placed
+here, at the end of the document, rather than renumbered into its
+correct chronological position between §29 and §30, per the
+Stabilization phase's explicit "Do NOT renumber existing sections"
+constraint. Content below is reconstructed entirely from `c759bec`'s
+own commit message and diff — not from memory, not fabricated.
+
+### Root cause (from that phase's own commit message, empirically verified there — not assumed)
+
+1. `AgentReport` had no `symbol` field — even purely sequential
+   multi-symbol `analyse()` calls on a shared agent instance produced
+   reports indistinguishable by symbol after the fact.
+2. `RegimeEngine` fit exactly one Gaussian HMM, on whichever symbol's
+   OHLCV reached `classify()` first, then reused that same model
+   object for every other symbol for the process's lifetime — verified
+   in that phase's own testing via `id()` comparison on the reused
+   model.
+
+### Change (additive only — no CEO multi-symbol execution wiring, per that phase's own explicit scope)
+
+- `agents/base_agent.py`: `AgentReport` gains `symbol: str | None = None`
+  (new `__slots__` entry, new keyword param, included in `to_dict()`).
+- `agents/trader_agent.py`, `risk_manager.py`, `smc_analyst.py`,
+  `regime_analyst.py`, `journal_analyst.py`, `futures_analyst.py`: each
+  now passes `symbol=market_context.get("symbol")` into its one
+  `AgentReport(...)` construction — never fabricated when absent.
+- `agents/ceo_agent.py`: `CEODecision` gains `symbol: str | None = None`,
+  populated the same way at `decide()`'s one construction site —
+  preparation only, does not touch `action`/`confidence`/
+  `score_breakdown`/`agreement_score`/`weights_used` computation.
+- `regime/regime_engine.py`: `self._hmm_model`/`self._fitted` replaced
+  with `self.models`, a dict keyed by an optional new `symbol`
+  parameter on `classify()`. Omitting `symbol` (every caller as of that
+  commit) maps to one fixed default key, reproducing the exact prior
+  single-shared-model behavior — confirmed by that phase's own claim
+  that all 12 pre-existing `tests/test_regime.py` tests passed
+  unchanged (not independently re-verified by this stabilization pass;
+  see "Verified" below for what WAS independently re-checked today).
+
+### Known limitation, stated in that phase's own commit message
+
+`execution/portfolio_signal_provider.py`'s own `RegimeEngine.classify()`
+call was explicitly NOT wired to pass `symbol=` — out of scope for that
+bundle. This means the actual multi-symbol production caller that most
+needs per-symbol HMM isolation did not benefit from this phase's work
+at the time, and — per §33's own Discovery #2 (2026-08-02) — **still
+does not today**. This is the same gap §30, §31, §32, and §33 each
+independently re-confirmed still open; it is not fixed by this
+retrospective documentation pass either.
+
+### Testing (as claimed in that phase's own commit message)
+
+26 new tests (`tests/test_symbol_isolation.py`). Claimed:
+`pytest tests/ -m unit -q` → 1626 passed, 0 failed (1600 baseline + 26
+new); ruff clean; a 50-call classify() benchmark showing a +0.90%
+delta, described as within normal run-to-run noise.
+
+**Independently re-verified today (2026-08-02), read-only, against
+current `main`** (which includes this phase plus everything merged
+after it): `pytest tests/ -q` → 1885 passed, 0 failed. `ruff check .` →
+clean. This confirms the code is intact and passing now; it does not
+independently re-confirm the specific 1626/1600 figures claimed for
+this commit in isolation at the time it was written — see
+`docs/REPOSITORY_STABILIZATION_REPORT.md` for the full scope of what
+this stabilization pass did and did not re-verify.
 

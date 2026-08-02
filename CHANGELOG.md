@@ -257,6 +257,92 @@ fetches today). See PATCH_NOTES.md for full detail.
 `pytest tests/ -q` → 1600 passed, 0 failed (1556 baseline + 44 new).
 `ruff check .` → clean.
 
+## [Unreleased] — V16 Phase 4B Proper: Dynamic Per-Agent Weighting
+
+> Added during the Repository Stabilization phase (2026-08-02) — this
+> entry was missing from CHANGELOG.md despite the phase being merged,
+> tested, and tagged; content verified against `docs/architecture.md`
+> §28, not reconstructed from memory.
+
+### Added
+- **`config/settings.py`**: `DYNAMIC_AGENT_WEIGHTS_ENABLED` (default
+  `False`), `DYNAMIC_WEIGHT_MIN_SAMPLES` (default `20`),
+  `DYNAMIC_WEIGHT_BLEND` (default `0.3`),
+  `DYNAMIC_WEIGHT_REFRESH_SECONDS` (default `300`).
+- **`agents/ceo_agent.py`**: `CEOAgent.__init__` gains optional
+  `journal=None`. New `_effective_weights()` blends each agent's
+  static `WEIGHTS` entry toward its measured win-rate (via §27's
+  `get_agent_performance()`) once it has `>= DYNAMIC_WEIGHT_MIN_SAMPLES`
+  closed trades; always renormalizes to sum to 1.0; falls back to
+  static weights on any error, disabled flag, or missing journal.
+  `CEODecision` gains `weights_used: dict`.
+
+### Compatibility
+Off by default — `journal=None` (unchanged default) or
+`DYNAMIC_AGENT_WEIGHTS_ENABLED=False` (default) both make this fully
+inert. No changes to `journal/journal_v2.py`, `execution/execution_orchestrator.py`,
+or any schema.
+
+### Testing
+`pytest tests/ -q` → 1556 passed, 0 failed (1546 baseline + 10 new,
+`tests/test_dynamic_agent_weights.py`). `ruff check .` → clean.
+
+## [Unreleased] — V16 Phase 4B Step 1: Per-Agent Outcome Attribution
+
+> Added during the Repository Stabilization phase (2026-08-02) — same
+> note as above; content verified against `docs/architecture.md` §27.
+
+### Added
+- **`journal/journal_v2.py`**: `get_agent_performance(limit=500)` —
+  joins `agent_decisions` to `trades` on `signal_id`; an agent is
+  credited a win/loss only when its vote matched the direction actually
+  traded.
+
+### Changed
+- **`main.py`** (legacy single-symbol pipeline only): `save_signal()`'s
+  return value is now captured and threaded into `save_trade(rec,
+  signal_id=sig_id)`; each `ceo_decision.agent_reports` entry is now
+  persisted via `save_agent_decision()`, wrapped in try/except per agent.
+
+### Discovery
+The V13 schema was already shaped for this join
+(`agent_decisions.signal_id`, `save_trade(signal_id=...)`) — neither
+side was ever populated by the live pipeline; this was a wiring gap,
+not a schema gap. Separately: `execution/execution_orchestrator.py`
+(the V16 multi-symbol path) does not call the journal at all — only
+the legacy single-symbol pipeline does, so this phase only wires the
+path that has something to attribute to.
+
+### Testing
+`pytest tests/ -q` → 1546 passed, 0 failed (1539 baseline + 7 new,
+`tests/test_agent_outcome_attribution.py`). `ruff check .` → clean.
+
+## [Unreleased] — V16 Phase 4A: Ensemble Decision Engine (ConfidenceEngine Fusion)
+
+> Added during the Repository Stabilization phase (2026-08-02) — same
+> note as above; content verified against `docs/architecture.md` §26.
+
+### Changed
+- **`agents/ceo_agent.py`**: `CEOAgent.WEIGHTS` gains a
+  `confidence_engine` key (0.15), rebalanced from
+  `{smc:.30 futures:.25 regime:.20 risk:.15 journal:.10}` to
+  `{smc:.25 futures:.20 regime:.15 risk:.15 journal:.10
+  confidence_engine:.15}`. `confidence_result` (previously an override
+  that bypassed the agent vote entirely) is now folded into the same
+  weighted vote as every other agent — except a hard `BLOCKED` result,
+  which still short-circuits, same precedence as the risk veto.
+  `CEODecision` gains `agreement_score` (0-1); confidence is damped by
+  `0.5 + 0.5*agreement_score` when the agent layer disagrees.
+
+### Compatibility
+`execution/strategy.py`, `execution/portfolio_signal_provider.py`,
+`decision/confidence_engine.py`, `ranking/confidence_fusion.py` — not
+modified; this phase only changes how `CEOAgent` consumes their output.
+
+### Testing
+`pytest tests/ -q` → 1539 passed, 0 failed (1533 baseline + 6 new,
+`tests/test_ceo_ensemble_fusion.py`). `ruff check .` → clean.
+
 ## [Unreleased] — V16 Phase 3A: Strategy Plugin System
 
 ### Added
