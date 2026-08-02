@@ -1,6 +1,6 @@
 {
   "$id": "asset_registry_config.schema.json",
-  "description": "Declares which AssetSource loaders should be registered, and asset_id -> source hints. No loader is implemented in Phase W3, so registeredSources is expected to be an empty array until Phase W6 (asset pipeline activation).",
+  "description": "Declares which AssetSource loaders should be registered, and asset_id -> source hints. No loader was implemented in Phase W3 (registeredSources was an empty array then); Phase W6 (asset pipeline activation) shipped all four concrete loaders — see world.frontend.asset_loader.registry_factory.build_default_registry, which the Phase W8 renderer (world.frontend.renderer.asset_locator.AssetLocator) uses by default.",
   "type": "object",
   "required": ["registeredSources", "assetHints"],
   "properties": {
