@@ -14,10 +14,19 @@ multi-symbol migration notes.
 This repository is the result of merging ten development-phase patch
 bundles (Fix #1/#2, P1-A, P1-B1, Multi-Symbol Foundation, Scanner,
 Opportunity Ranker, and related architecture/doc/test updates) back into
-one clean tree, since extended through V16 Phase 2A-2E (Portfolio
-Intelligence, Manager, API, and Execution Orchestrator — see
-`docs/architecture.md` §17-21). See `MERGE_REPORT.md` for exactly what
-was merged from where and why.
+one clean tree, since extended through V16 Phase 4C Step 1 (Portfolio
+Intelligence, Manager, API, Execution Orchestrator, Strategy Plugin
+System, Ensemble Decision Engine, CEO Agent multi-symbol integration,
+Unified Trade Lifecycle, and the Autonomous Learning Pipeline — see
+`docs/architecture.md` §17-33 and `docs/ROADMAP.md` for current status).
+See `MERGE_REPORT.md` for exactly what was merged from where and why in
+the original ten-bundle consolidation.
+
+This is Track A of a two-track repository — Track B ("Brain AI Command
+World", a visualization/game layer) lives under `world/` with its own
+documentation (`world/WORLD.md`, `world/docs/roadmap.md`). See
+`docs/architecture/SEPARATION_POLICY.md` for the boundary between the
+two.
 
 ## Requirements
 

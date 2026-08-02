@@ -1,5 +1,13 @@
 # Development Roadmap
 
+> **Pre-W1 note (added 2026-08-02, Repository Stabilization phase):**
+> `feat(world): performance v1` (commit `9ad1ab5`, merged via PR #5,
+> 2026-07-20) predates W1 (first commit `d74ba2c`, 2026-07-29) by ten
+> days and is not part of this numbered sequence — historical
+> background only, not renumbered as "W0". See `world/WORLD.md`'s
+> matching note and `docs/REPOSITORY_STABILIZATION_REPORT.md` for
+> detail.
+
 1. **W1** — Architecture, schemas, lore skeleton, docs (documentation only). **Done.**
 2. **W1A** — Materialize folder structure and placeholder files in-repo. **Done.**
 3. **W2** — Office Headquarters Foundation: retcon fantasy theme to modern
