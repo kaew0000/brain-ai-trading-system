@@ -83,3 +83,22 @@ Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json
     -> RenderWorldStateProvider -> SceneGraphRenderer -> RenderFrame
     -> Phaser 3 frontend (W10) -> UI panels
 ```
+
+**Interaction layer (Phase W9, done):** a second, parallel consumer of
+`WorldState` + `SimulationState` — `world/interaction/` — sits alongside
+the renderer rather than downstream of it: selection/hover validate
+against real `WorldState` + `SimulationState` ids, the Inspector Panel
+merges both plus `Timeline` history, `FocusManager` wraps Phase W8's
+`ReferenceCameraController` for camera commands, and a `CommandDispatcher`
+exposes read-only commands (no trading commands; nothing here calls
+`agents/`, `execution/`, `portfolio/`, `learning/`, `risk/`, or
+`exchange/`). See `INTERACTION_LAYER.md` in this folder. Fully current
+diagram:
+
+```
+Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json
+    -> StateBuilder -> WorldState -> SimulationEngine -> SimulationState
+    -> RenderWorldStateProvider -> SceneGraphRenderer -> RenderFrame -\
+                                                                        \
+    -> world.interaction.api (selection/hover/inspector/commands) -----+-> Phaser 3 frontend (W10) -> UI panels
+```

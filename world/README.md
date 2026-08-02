@@ -49,15 +49,33 @@ deeper documentation (architecture, roadmap, conventions).
   movement (Dijkstra over the real nav graph), event descriptors,
   `Timeline`, statistics, and the 8-function `api.py` (Phase W7) — see
   `docs/SIMULATION.md`
+- `interaction/` — `SelectionManager`, `HoverManager`, `build_inspector_report`,
+  `FocusManager` (camera wrapper), `TimelineController` (seek/replay),
+  `NotificationCenter`, `search`, `filters`, `CommandDispatcher`,
+  `EventBus`, `InteractionHistory`, and the public `api.py` (Phase W9,
+  read-only over Phase W5+W7+W8 state) — see `docs/INTERACTION_LAYER.md`
 - `docs/` — architecture, roadmap, coding/naming/asset conventions,
   ingestion adapter, state provider, office layout & room specs (W2),
-  asset pipeline & population reports (W6), and the simulation layer (W7)
+  asset pipeline & population reports (W6), the simulation layer (W7),
+  the renderer (W8), and the interaction layer (W9)
 - `scripts/` — validation tooling (`validate_schemas.py`, Phase W5/W7
   performance benchmarks, Phase W6 asset validation)
 - `tests/` — schema/uniqueness/relationship/adapter/cache/watcher/state/
-  navigation/asset/simulation tests
+  navigation/asset/simulation/renderer/interaction tests
 
 ## Status
+
+Phase W9 — Interactive Command Center is done: `world/interaction/`
+adds selection, hover, an Inspector Panel (merging Phase W5 identity +
+Phase W7 behaviour/activity + retained `Timeline` history), a
+`FocusManager` wrapping Phase W8's `ReferenceCameraController`
+(Focus Room / Follow Character / Center Camera), timeline seek/replay/
+jump-to-event, a Notification Center built only from
+`SimulationState` per design, search, filters, a read-only
+`CommandDispatcher` (no trading commands), a six-event `EventBus`
+(SelectionChanged, HoverChanged, CameraMoved, TimelineChanged,
+SimulationPaused, SimulationResumed), and bounded interaction history.
+See `world/docs/INTERACTION_LAYER.md`.
 
 Phase W8 — Renderer Integration is done: `world/frontend/renderer/`
 picks a concrete engine (a backend scene-graph compiler targeting
@@ -89,8 +107,10 @@ visual direction, `world/docs/OFFICE_LAYOUT.md` for the floor plan,
 `world/docs/INGESTION_ADAPTER.md` for the read-only data pipeline,
 `world/docs/STATE_PROVIDER.md` for the state provider,
 `world/docs/ASSET_PIPELINE.md` for the asset pipeline,
-`world/docs/SIMULATION.md` for the simulation layer, and
-`world/docs/RENDERER.md` for the renderer.
+`world/docs/SIMULATION.md` for the simulation layer,
+`world/docs/RENDERER.md` for the renderer, and
+`world/docs/INTERACTION_LAYER.md` for the interaction layer.
 
-Next: **Phase W9** — Interaction Layer (wire up click/hover/walk-to
-against the W8 renderer).
+Next: **Phase W10** — Live Command Center UI (the `world/ui/specs/` panel
+set as an actual browser frontend, consuming Phase W8's `RenderFrame` and
+Phase W9's `world.interaction.api`).
