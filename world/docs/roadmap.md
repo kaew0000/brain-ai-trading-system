@@ -82,14 +82,44 @@
     `world/docs/RENDERER.md` for both. All 17 real rooms (14
     departments + 3 circulation types) render end to end against live
     Phase W5/W7 data. See `world/docs/RENDERER.md`.
-11. **W9** — Interaction Layer: wire up the interaction metadata already
-    defined (`world/data/interactions/`) plus Phase W7's `SimulationState`
-    to real click/hover/walk-to behavior against the W8 renderer. Not
+11. **W9** — Interactive Command Center: `world/interaction/` —
+    `SelectionManager` (validates room/department/character/furniture/
+    decoration/event ids against real Phase W5/W6/W7 data before
+    accepting a selection), `HoverManager` (lightweight per-tick status/
+    activity/room/clock/event), `build_inspector_report` (merges Phase
+    W5 identity + Phase W7 behaviour/activity + retained `Timeline`
+    history + `relationship_resolver` department ownership),
+    `FocusManager` (wraps Phase W8's `ReferenceCameraController` for
+    Focus Room / Follow Character / Center Camera), `TimelineController`
+    (seek/replay/pause/resume/jump-to-event, via one additive function —
+    `world.simulation.api.get_timeline()` — added to expose Phase W7's
+    already-built `Timeline`), `NotificationCenter` (built only from
+    `SimulationState` per this phase's brief, not Phase W5's own
+    `NotificationState`; category mapping documented in-module as a
+    judgment call, not fabricated data), `search` and `filters`
+    (department / room type / agent state / simulation state / alerts /
+    meetings), a read-only `CommandDispatcher` (9 commands; no trading
+    commands; `set_simulation_speed` is stored as a UI preference with
+    no backend effect, documented as such, since Phase W7 has no
+    tick-cadence concept to control), a six-event `EventBus`
+    (SelectionChanged, HoverChanged, CameraMoved, TimelineChanged,
+    SimulationPaused, SimulationResumed), and a bounded
+    `InteractionHistory`. **Done.** 85 new tests. See
+    `world/docs/INTERACTION_LAYER.md`.
+12. **W10** — Live Command Center UI: implement the full UI panel set
+    already specified in `world/ui/specs/` (minimap, agent inspector,
+    district inspector, activity feed, notification center, relationship
+    viewer, time control, simulation controls) as an actual browser
+    frontend — React + Vite + Phaser 3 — consuming Phase W8's
+    `RenderFrame` wire format and Phase W9's `world.interaction.api`. Not
     started.
-12. **W10** — Live Command Center: point real `DataSource` instances
-    (Phase W4) at whatever the trading engine actually emits, schedule
-    `RuntimeManager.run_once()` (a `Watcher`-gated loop or fixed interval),
-    and implement the full UI panel set already specified in
-    `world/ui/specs/` (minimap, inspectors, activity feed, notification
-    center, relationship viewer, time control, simulation controls) against
-    live data. Not started.
+13. **W11** — Real-time Operations Center: point real `DataSource`
+    instances (Phase W4) at whatever the trading engine actually emits
+    and schedule `RuntimeManager.run_once()` (a `Watcher`-gated loop or
+    fixed interval), so the Phase W10 UI reflects live engine state
+    instead of today's idle placeholders. This item is unchanged in
+    substance from the old, single "W10 — Live Command Center" entry; it
+    is split into its own phase (W11) so that "build the UI against
+    already-complete backends" (W10) and "wire a real data source behind
+    those backends" (W11) aren't one phase conflating two different
+    kinds of work. Not started.

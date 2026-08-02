@@ -401,9 +401,10 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 - Phase W5 (**done**): World State Provider — `world/runtime/{models,state_builder,state_cache,update_manager,relationship_resolver,state_validator,statistics,world_state_provider,api}.py`. Merges the six Phase W4 runtime files with static W1/W2 canon into one immutable, in-memory `WorldState`. Deliberately not bound to the Phase W3 `WorldStateProvider` ABC or any renderer — see `world/docs/STATE_PROVIDER.md` §9.
 - Phase W6 (**asset pipeline half done, renderer half renumbered to W8**): four concrete `AssetLoader`s (OpenGameArt, LPC, Kenney, Custom) implementing `world/frontend/interfaces/asset_loader.py`, asset manifest/packs/compatibility layer, and full furniture + decoration population of every room plus sprite + spatial placement for every character — see `world/docs/ASSET_PIPELINE.md`.
 - Phase W7 (**done**): Live Office Simulation — `world/simulation/`: 7 character behaviours + 6 room activity levels derived purely from Phase W5's `WorldState`, abstract logical movement (Dijkstra over the real Phase W2 navigation graph), metadata-only event descriptors, a play/pause/resume/seek `Timeline`, and the 8-function `world.simulation.api`. No renderer-specific code. See `world/docs/SIMULATION.md`.
-- Phase W8: Renderer Integration (the Phase W6 half that never happened) — (a) implement the Phase W3 `WorldStateProvider` ABC (`world/frontend/interfaces/world_state.py`); (b) pick a concrete renderer (React Canvas, PixiJS, Phaser, Godot, or Unity — all equally supported by the Phase W3 interfaces); (c) static scene rendering, now able to draw on both the Phase W6 asset metadata and the Phase W7 `SimulationState` instead of only placeholder shapes.
-- Phase W9: interaction layer — wire click/hover/walk-to behavior against the W8 renderer, using the interaction metadata already defined in `world/data/interactions/` plus Phase W7's `SimulationState`.
-- Phase W10: point real `DataSource` instances (Phase W4) at whatever the trading engine actually emits, schedule `RuntimeManager.run_once()`, and implement the full UI panel set already specified in `world/ui/specs/` against live data.
+- Phase W8 (**done**): Renderer Integration (the Phase W6 half that never happened) — `world.frontend.renderer.renderer.SceneGraphRenderer` implements the Phase W3 `Renderer` ABC as a backend scene-graph compiler targeting Phaser 3; `RenderWorldStateProvider` implements the Phase W3 `WorldStateProvider` ABC by projecting Phase W5 + W7 state down to the renderer-facing shape; all 17 real rooms render end to end. See `world/docs/RENDERER.md`. *(This entry was not updated when W8 actually merged — corrected now, alongside the W9 update below, rather than left to drift further.)*
+- Phase W9 (**done**): Interactive Command Center — `world/interaction/`: selection/hover/inspector/focus/timeline-seek/notification-center/search/filters/command-dispatch/history, all read-only over Phase W5+W7 state plus the Phase W8 camera controller. No trading-code, `dashboard/`, or renderer-pixel changes. See `world/docs/INTERACTION_LAYER.md`.
+- Phase W10: Live Command Center UI — implement the full UI panel set already specified in `world/ui/specs/` (minimap, inspectors, activity feed, notification center, relationship viewer, time control, simulation controls) as an actual browser frontend (React + Vite + Phaser 3) consuming the Phase W8 `RenderFrame` wire format and the Phase W9 interaction API.
+- Phase W11: Real-time Operations Center — point real `DataSource` instances (Phase W4) at whatever the trading engine actually emits and schedule `RuntimeManager.run_once()` (a `Watcher`-gated loop or fixed interval), so the Phase W10 UI reflects live engine state instead of the current idle placeholders.
 - Sub-departments and new characters can be added without breaking schemas, since arrays are additive.
 
 ## 8. Development Roadmap
@@ -417,9 +418,10 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 7. **W5 (done):** World State Provider — backend-only in-memory `WorldState`, caching, validation, relationship resolution, statistics.
 8. **W6 (asset pipeline done, renderer half renumbered to W8):** four concrete `AssetLoader`s, asset manifest/packs, compatibility layer, full office population.
 9. **W7 (done):** Live Office Simulation — character behaviour, room activity, movement, event descriptors, timeline, simulation API, statistics.
-10. **W8:** Renderer Integration — `WorldStateProvider` ABC binding, renderer engine choice, static scene rendering.
-11. **W9:** interaction layer against the W8 renderer.
-12. **W10:** live data wiring (real `DataSource`) + full UI panel implementation.
+10. **W8 (done):** Renderer Integration — `WorldStateProvider` ABC binding, Phaser-3-targeting scene-graph renderer, static scene rendering against live W5+W7 data.
+11. **W9 (done):** Interactive Command Center — selection, hover, inspector, focus/camera commands, timeline seek/replay, notification center, search, filters, event bus, interaction history.
+12. **W10:** Live Command Center UI — the full UI panel set from `world/ui/specs/` as an actual browser frontend.
+13. **W11:** Real-time Operations Center — live `DataSource` wiring so W10's UI reflects real engine state.
 
 ## 9. Risks
 
@@ -430,11 +432,11 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 - **Engine lock-in temptation**: schemas and Phase W3 interfaces must stay engine-neutral through W8 (renderer choice) at minimum.
 - **Journal has no schema yet**: `JournalReader` (Phase W4) returns `JournalEntry` dataclasses but there is no `journal.schema.json` / `world/data/runtime/journal.json` — the Phase W4 task's own output contract only names six runtime files and none is a journal snapshot. Flagged, not fixed, in Phase W4 — see Compatibility Report in the Phase W4 delivery message.
 - **Static canon re-read on every rebuild**: `StateBuilder` re-reads all district/character definitions and `placement.json` from disk on every `build()` call, even though that data never changes at runtime — the real Part L benchmark (`world/docs/STATE_PROVIDER.md` §8) shows rebuild cost staying around 2.7–5ms regardless of N rather than trending toward near-zero, because of this. Not a correctness bug, but a real optimization opportunity for a future phase.
-- **Navigation graph / room-population naming gap**: `world/data/navigation/graph.json` (Phase W2) has no `lobby`/`hallway` nodes — only the 14 departments plus `elevator-floor-1/2/3` — even though the Phase W6 asset pipeline populated furniture into rooms literally named `lobby`/`hallway`. Not currently harmful (no real character's home room is either), but should be reconciled before Phase W8/W9 ever need to route a character or camera through the lobby.
+- **Navigation graph / room-population naming gap**: `world/data/navigation/graph.json` (Phase W2) has no `lobby`/`hallway` nodes — only the 14 departments plus `elevator-floor-1/2/3` — even though the Phase W6 asset pipeline populated furniture into rooms literally named `lobby`/`hallway`. Not currently harmful (no real character's home room is either, and neither Phase W8's renderer nor Phase W9's interaction layer route a character or camera through the lobby), but should still be reconciled before a future phase needs to.
 
 ## 10. Suggested Next World Phase
 
-**Phase W8 — Renderer Integration.** (a) Implement the Phase W3 `WorldStateProvider` ABC (`world/frontend/interfaces/world_state.py`) by projecting Phase W5's `world.runtime.models.WorldState` down to the renderer-facing `world.frontend.renderer.world_state.WorldState` shape. (b) Pick a concrete renderer engine and implement the Phase W3 interfaces against it. (c) Static scene rendering, now able to draw on both the Phase W6 asset metadata (furniture, decorations, character sprites) and the Phase W7 `SimulationState` (character behaviour, room activity, positions) instead of only placeholder shapes. (d) While there, reconcile the `lobby`/`hallway` navigation-graph gap noted in §9.
+**Phase W10 — Live Command Center UI.** Implement the full UI panel set already specified in `world/ui/specs/` (minimap, agent inspector, district inspector, activity feed, notification center, relationship viewer, time control, simulation controls) as an actual browser frontend — React + Vite + Phaser 3, per the compatibility list this repo commits to. It consumes two already-complete backends: Phase W8's `RenderFrame` wire format (`world/frontend/renderer/render_state.py`) for what to draw, and Phase W9's `world.interaction.api` for what happens on click/hover/search/filter. No new backend logic should be needed for W10 itself — it's a rendering and wiring phase, same shape as W8 was for the scene graph.
 
 ---
 
@@ -448,12 +450,15 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 *relationship_resolver,state_validator,statistics,world_state_provider,*
 *api}.py`), the Asset Pipeline half of Phase W6 (furniture/decoration/*
 *character-sprite metadata, four `AssetLoader`s, see*
-*`world/docs/ASSET_PIPELINE.md`), and Phase W7 (Live Office Simulation,*
-*`world/simulation/`, see `world/docs/SIMULATION.md`) are also complete —*
-*see `docs/architecture/WORLD_OFFICE_POLICY.md`, `WORLD_DESIGN_LOCK.md`,*
-*`world/docs/INGESTION_ADAPTER.md`, `world/docs/STATE_PROVIDER.md`, and*
-*`world/docs/SIMULATION.md` for current canon. No renderer, sprites, live*
-*data source, or trading-code changes have been made through Phase W7.*
-*The Renderer Integration half of the old Phase W6 — `WorldStateProvider`*
-*ABC binding, renderer engine choice, and static scene rendering — is*
-*renumbered to Phase W8 and remains outstanding.*
+*`world/docs/ASSET_PIPELINE.md`), Phase W7 (Live Office Simulation,*
+*`world/simulation/`, see `world/docs/SIMULATION.md`), Phase W8*
+*(Renderer Integration, `world/frontend/renderer/`, see*
+*`world/docs/RENDERER.md`), and Phase W9 (Interactive Command Center,*
+*`world/interaction/`, see `world/docs/INTERACTION_LAYER.md`) are also*
+*complete — see `docs/architecture/WORLD_OFFICE_POLICY.md`,*
+*`WORLD_DESIGN_LOCK.md`, `world/docs/INGESTION_ADAPTER.md`,*
+*`world/docs/STATE_PROVIDER.md`, `world/docs/SIMULATION.md`,*
+*`world/docs/RENDERER.md`, and `world/docs/INTERACTION_LAYER.md` for*
+*current canon. No trading-code changes have been made through Phase W9.*
+*A browser-rendered UI (Phase W10) and live engine data (Phase W11)*
+*remain outstanding.*
