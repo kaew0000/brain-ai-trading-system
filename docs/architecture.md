@@ -3126,3 +3126,55 @@ this commit in isolation at the time it was written — see
 `docs/REPOSITORY_STABILIZATION_REPORT.md` for the full scope of what
 this stabilization pass did and did not re-verify.
 
+
+---
+
+## Hotfix (2026-08-04): Live trading client was silently pinned to Testnet (BUG-V16-BP-05)
+
+### Root cause
+`data/binance_provider.py`'s `BinanceDataProvider.__init__` constructed
+`self.trade_client` (aliased as `self.client`, the client every real order
+in `execution/trade_manager.py` is signed and sent through) with
+`BINANCE_TESTNET_API_KEY` / `BINANCE_TESTNET_BASE_URL` unconditionally —
+not gated on `EXECUTION_MODE` or `settings.BINANCE_TESTNET` at all.
+`run_live.bat`/`run_live.sh` correctly set `EXECUTION_MODE=live` and
+`BINANCE_TESTNET=false`, and `execution/execution_factory.py` correctly
+logged `Binance LIVE ⚠️`, but the actual outbound HTTP client never
+changed — every order, balance query, and `get_position_info()` call
+still hit Binance Testnet. `config/settings.py` already had a `base_url`
+property that correctly branched on `BINANCE_TESTNET`, but nothing in the
+codebase referenced it (confirmed via repo-wide grep — zero call sites).
+Net effect: `EXECUTION_MODE=live` was inert since it was introduced; no
+code path could place a real mainnet order.
+
+### Change (single file, no interface change)
+- `data/binance_provider.py`: `trade_client` now branches on
+  `settings.BINANCE_TESTNET` — testnet credentials/URL when true, mainnet
+  `BINANCE_API_KEY`/`BINANCE_API_SECRET`/`BINANCE_PROD_BASE_URL` when
+  false. Raises `RuntimeError` at construction if live mode has empty
+  mainnet credentials, rather than starting with a client that will fail
+  every signed request. `market_client` (market data, always mainnet) is
+  untouched. Startup log now reports the client actually in use.
+
+### Blast radius
+Only `data/binance_provider.py` changed. `execution/trade_manager.py`,
+`execution/execution_factory.py`, `execution/execution_coordinator.py`,
+and everything above `main.py` are unaffected — they all consume
+`data_provider.client` as an opaque `UMFutures` instance and never
+depended on which credentials it held. Paper mode is unaffected (never
+touches `trade_client`).
+
+### Testing
+`tests/test_binance_provider_trade_client.py` (3 new tests): testnet mode
+→ testnet key/URL, live mode → mainnet key/URL, live mode with empty
+mainnet keys → `RuntimeError` at startup. Full suite:
+`pytest -m unit -q` → 1918 passed, 0 failed (1915 baseline + 3 new).
+`ruff check` clean on changed files. `vulture` clean on
+`data/binance_provider.py` at `--min-confidence 80`.
+
+### Operator note
+Once this lands, `run_live.bat`/`run_live.sh` will place real orders on
+Binance mainnet using whatever is in `BINANCE_API_KEY`/`BINANCE_API_SECRET`
+in `.env`. Confirm those are genuine mainnet keys with the intended
+permissions and IP whitelist before running live for the first time after
+this patch.
