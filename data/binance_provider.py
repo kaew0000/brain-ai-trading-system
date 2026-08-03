@@ -56,9 +56,23 @@ class BinanceDataProvider:
 
     Dual-client design
     ------------------
-    market_client  →  Mainnet (ราคา/ข้อมูลตลาดจริง, public endpoints)
-    trade_client   →  Testnet (เทรดด้วยเงินปลอม, ต้องการ Testnet API Key)
+    market_client  →  Mainnet (ราคา/ข้อมูลตลาดจริง, public endpoints เสมอ)
+    trade_client   →  Mainnet หรือ Testnet ตาม settings.BINANCE_TESTNET
+                       (V16 BUG-V16-BP-05 fix — ก่อนหน้านี้ hardcode เป็น
+                       Testnet เสมอ ไม่ว่า EXECUTION_MODE จะเป็น live หรือไม่)
     self.client    →  alias ของ trade_client (backward-compat)
+
+    BUG-V16-BP-05: trade_client hardcoded to Testnet regardless of mode.
+      run_live.bat/run_live.sh set BINANCE_TESTNET=false + EXECUTION_MODE=live,
+      and execution_factory.py logged "Binance LIVE ⚠️", but every real
+      order/balance/position call (execution/trade_manager.py → self.client)
+      went through a trade_client that was *always* constructed with
+      BINANCE_TESTNET_API_KEY + BINANCE_TESTNET_BASE_URL — so EXECUTION_MODE=live
+      could never actually reach Binance mainnet. settings.base_url already
+      encoded the correct mainnet/testnet branching but was never wired to
+      this client. Fix: branch on settings.BINANCE_TESTNET (same flag the
+      run_live/run_testnet scripts already set) and fail fast instead of
+      silently starting with empty mainnet keys.
     """
 
     def __init__(self) -> None:
@@ -69,11 +83,33 @@ class BinanceDataProvider:
             base_url=settings.BINANCE_PROD_BASE_URL,
         )
 
-        # ── Trading: ส่งออเดอร์ไป Testnet (เงินปลอม) ─────────────────
+        # ── Trading: mainnet (เงินจริง) หรือ testnet (เงินปลอม) ──────────
+        # ตาม settings.BINANCE_TESTNET — ค่าเดียวกับที่ run_live.*/run_testnet.*
+        # ตั้งไว้ และตรงกับ settings.base_url property ที่มีอยู่แล้ว
+        if settings.BINANCE_TESTNET:
+            trade_key, trade_secret, trade_base_url = (
+                settings.BINANCE_TESTNET_API_KEY,
+                settings.BINANCE_TESTNET_API_SECRET,
+                settings.BINANCE_TESTNET_BASE_URL,
+            )
+        else:
+            if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+                raise RuntimeError(
+                    "BINANCE_TESTNET=false (live trading) but BINANCE_API_KEY / "
+                    "BINANCE_API_SECRET are not set — refusing to start with "
+                    "empty mainnet credentials. Set both in .env before running "
+                    "run_live.bat / run_live.sh."
+                )
+            trade_key, trade_secret, trade_base_url = (
+                settings.BINANCE_API_KEY,
+                settings.BINANCE_API_SECRET,
+                settings.BINANCE_PROD_BASE_URL,
+            )
+
         self.trade_client = UMFutures(
-            key=settings.BINANCE_TESTNET_API_KEY,
-            secret=settings.BINANCE_TESTNET_API_SECRET,
-            base_url=settings.BINANCE_TESTNET_BASE_URL,
+            key=trade_key,
+            secret=trade_secret,
+            base_url=trade_base_url,
         )
 
         # backward-compat: execution layer ยังคงใช้ self.client
@@ -95,9 +131,10 @@ class BinanceDataProvider:
 
         self._sync_time_offset()
 
+        trading_label = "TESTNET" if settings.BINANCE_TESTNET else "MAINNET ⚠️ LIVE-REAL-MONEY"
         logger.info(
             f"BinanceDataProvider V15 ready | symbol={self.symbol} "
-            f"| market=MAINNET | trading=TESTNET "
+            f"| market=MAINNET | trading={trading_label} "
             f"| clock_sync={'OK' if self._time_sync_ok else 'FAILED'}"
         )
 

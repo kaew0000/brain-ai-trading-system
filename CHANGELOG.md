@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## [Unreleased] — Hotfix: Live Trading Client Wiring (BUG-V16-BP-05)
+
+### Fixed
+- **`data/binance_provider.py`** — `BinanceDataProvider.trade_client` was
+  hardcoded to always construct with `BINANCE_TESTNET_API_KEY` /
+  `BINANCE_TESTNET_BASE_URL`, regardless of `EXECUTION_MODE` /
+  `settings.BINANCE_TESTNET`. `run_live.bat`/`run_live.sh` correctly set
+  `EXECUTION_MODE=live` + `BINANCE_TESTNET=false`, and
+  `execution/execution_factory.py` correctly logged `Binance LIVE ⚠️`, but
+  every real order, balance check, and position check
+  (`execution/trade_manager.py` → `self.client` → `data_provider.client` →
+  `trade_client`) still went to Binance **Testnet**. `EXECUTION_MODE=live`
+  could not previously reach mainnet under any configuration.
+  `settings.base_url` (config/settings.py) already encoded the correct
+  mainnet/testnet branch but was never referenced anywhere — dead code.
+  Fix: `trade_client` now branches on `settings.BINANCE_TESTNET` (the same
+  flag the run scripts already set) and raises `RuntimeError` at startup if
+  live mode is selected with empty `BINANCE_API_KEY`/`BINANCE_API_SECRET`,
+  instead of silently signing requests with blank mainnet credentials.
+  `market_client` (market data) is unaffected — it was already always
+  mainnet.
+- Startup log line changed from `market=MAINNET | trading=TESTNET` (always)
+  to `market=MAINNET | trading={TESTNET|MAINNET ⚠️ LIVE-REAL-MONEY}`
+  reflecting the actual client in use.
+
+### Added
+- `tests/test_binance_provider_trade_client.py` — regression tests pinning
+  testnet-mode credentials, live-mode mainnet credentials, and the
+  fail-fast guard for live mode with missing mainnet keys.
+
+### Impact
+Affects only `data/binance_provider.py` (behavior) and
+`tests/test_binance_provider_trade_client.py` (new tests). No API
+signature changes; `execution/trade_manager.py`, `execution_factory.py`,
+and everything above them are unaffected since they only ever consumed
+`data_provider.client`. Paper mode (`EXECUTION_MODE=paper`) is unaffected
+— it never uses `trade_client` for order execution. **Operational impact:
+once this patch is applied, `run_live.bat`/`run_live.sh` will place real
+orders on Binance mainnet using `BINANCE_API_KEY`/`BINANCE_API_SECRET`.
+Verify those are genuine mainnet keys with the desired permissions/IP
+whitelist before running live.**
+
 ## [Unreleased] — V16 Phase 4C Step 1: Autonomous Learning Pipeline (Track A)
 
 ### Added
