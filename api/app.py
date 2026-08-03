@@ -90,6 +90,14 @@ from api.execution_api import router as _execution_router
 # V16 Phase 4B Step 3D — Lifecycle API. Same additive-router pattern.
 from api.lifecycle_api import router as _lifecycle_router
 
+# Phase W10 — Live Command Center UI. Same additive-router pattern as
+# every other /api/* module above: Track B (world/) read-only data,
+# exposed through the existing FastAPI singleton rather than a second
+# app. See api/world_api.py and api/world_ws.py module docstrings.
+from api.world_api import router as _world_router
+from api.world_ws import router as _world_ws_router
+from api.world_ws import check_and_broadcast as _world_ws_check
+
 logger = get_logger("api.app")
 
 # ── Startup time ──────────────────────────────────────────────────────────────
@@ -292,6 +300,15 @@ async def _broadcast_loop() -> None:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
 
+            # ── /ws/world — Phase W10: heartbeat + new-tick-only broadcast,
+            # entirely inside this same existing loop tick (see
+            # api/world_ws.py's module docstring for why this isn't a
+            # second independent poll loop).
+            try:
+                await _world_ws_check()
+            except Exception as exc:
+                logger.debug(f"world WS check_and_broadcast error: {exc}")
+
         except Exception as exc:
             logger.debug(f"broadcast_loop error: {exc}")
 
@@ -358,6 +375,12 @@ app.include_router(_execution_router)
 
 # V16 Phase 4B Step 3D — Lifecycle API. Same /api/* auth coverage.
 app.include_router(_lifecycle_router)
+
+# Phase W10 — Live Command Center UI. /api/world/* and /ws/world are
+# covered by the same prefix-generic _auth_middleware / enforce_ws_role
+# pattern as everything above — no auth changes needed.
+app.include_router(_world_router)
+app.include_router(_world_ws_router)
 
 
 # ── P1-A: Dashboard authentication ─────────────────────────────────────────

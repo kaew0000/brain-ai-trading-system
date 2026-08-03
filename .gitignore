@@ -48,3 +48,8 @@ update/failed/*
 !update/incoming/.gitkeep
 !update/applied/.gitkeep
 !update/failed/.gitkeep
+
+# Phase W10 fix: dashboard_src/node_modules/ was never covered by any
+# .gitignore pattern in this repo (verified: no match anywhere before
+# this line). `npm install` there stages ~8000 files if not excluded.
+node_modules/

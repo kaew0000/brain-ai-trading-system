@@ -79,6 +79,43 @@ def _handle_signal(sig, frame):
 
 # ── System bootstrap ──────────────────────────────────────────────────────────
 
+def _initialize_world_runtime() -> bool:
+    """
+    Phase W10 — best-effort, non-blocking World Runtime + Simulation
+    warm-up. Deliberately defensive: World (world/) is Track B
+    visualization only — it must NEVER be able to prevent the trading
+    bot itself from starting. Any failure here is logged and swallowed;
+    the bot proceeds exactly as it would if this function didn't exist.
+    """
+    try:
+        from world.runtime import api as _world_runtime_api
+        from world.simulation import api as _world_simulation_api
+
+        _world_runtime_api.get_world_state()
+        _world_simulation_api.get_simulation_state()
+        logger.info("World Runtime + Simulation initialized (Phase W5/W7).")
+        return True
+    except Exception as exc:
+        logger.warning(f"World Runtime did not initialize (dashboard World tab will be unavailable): {exc}")
+        return False
+
+
+def _tick_world_simulation() -> None:
+    """Phase W10 — advance the Phase W7 SimulationEngine by one tick per
+    trading cycle. Read-only from the trading engine's perspective (only
+    ever calls world.simulation.api.step(), which reads world.runtime's
+    already-existing WorldState — never anything in components/agents/
+    execution). Wrapped defensively for the same reason
+    _initialize_world_runtime() is: a World failure must never affect
+    the trading loop it rides alongside.
+    """
+    try:
+        from world.simulation import api as _world_simulation_api
+        _world_simulation_api.step()
+    except Exception as exc:
+        logger.debug(f"World simulation tick skipped: {exc}")
+
+
 # ── Dashboard / API server ────────────────────────────────────────────────────
 
 def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent_layer=None, risk_engine=None, host: str = "0.0.0.0", port: int = 8000) -> None:
@@ -1356,6 +1393,11 @@ def main() -> None:
     # Build all components
     components = build_system()
 
+    # Phase W10 — best-effort World Runtime + Simulation warm-up. Purely
+    # additive: does not affect `components`, does not block startup if
+    # it fails (see _initialize_world_runtime()'s own docstring).
+    _initialize_world_runtime()
+
     # Schedule recurring tasks
     # ── Start dashboard API + open browser ──────────────────────────────────
     api_port = _start_api_server(
@@ -1373,6 +1415,11 @@ def main() -> None:
     schedule.every(60).seconds.do(run_position_reconciliation, components)
     schedule.every(1).hours.do(daily_report,            components)
     schedule.every().day.at("02:00").do(run_nightly_retrain_job)
+    # Phase W10 — advance the World Simulation once per trading cycle,
+    # same cadence as run_trading_cycle above (LOOP_INTERVAL). Additive;
+    # see _tick_world_simulation()'s own docstring for why this can never
+    # affect the trading loop even if World is broken.
+    schedule.every(settings.LOOP_INTERVAL).seconds.do(_tick_world_simulation)
 
     # Run immediately on startup
     run_trading_cycle(components)

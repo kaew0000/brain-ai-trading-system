@@ -16,6 +16,7 @@ const NAV = [
   {to:'/replay',icon:'▷',label:'Trade Replay',short:'RPL'},
   {to:'/commander',icon:'⌘',label:'Commander',short:'CMD'},
   {to:'/health',icon:'♥',label:'System Health',short:'SYS'},
+  {to:'/world',icon:'⌂',label:'Office World',short:'WLD'},
 ]
 
 function Clock(){

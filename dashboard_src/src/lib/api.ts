@@ -207,5 +207,8 @@ export const wsAgents   = new ManagedWS('/ws/agents')
 export const wsMissions = new ManagedWS('/ws/missions')
 export const wsML       = new ManagedWS('/ws/ml')
 export const wsSignals  = new ManagedWS('/ws/signals')
+// Phase W10 — Live Command Center UI. Same ManagedWS reconnect/backoff
+// every other channel above already gets; no new WebSocket client code.
+export const wsWorld     = new ManagedWS('/ws/world')
 
-;[wsEvents, wsDecision, wsAgents, wsMissions, wsML, wsSignals].forEach(w => w.connect())
+;[wsEvents, wsDecision, wsAgents, wsMissions, wsML, wsSignals, wsWorld].forEach(w => w.connect())

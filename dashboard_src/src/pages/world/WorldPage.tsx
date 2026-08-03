@@ -1,206 +1,160 @@
-// ============================================================
-// Brain Bot V16 — World HQ Page
-// Root React component for the 2D pixel-art trading HQ.
-// Mounts Phaser, bridges events to React overlays, manages
-// the full module lifecycle cleanly.
-//
-// V16 changes:
-//   • React.memo to prevent parent re-render cascades
-//   • Throttled NPC position updates (200 ms)
-//   • Named event listener cleanup (no removeAllListeners)
-//   • Loading overlay while Phaser boots
-// ============================================================
+// dashboard_src/src/pages/world/WorldPage.tsx
+// Phase W10 — Office World, one module of the unified Brain AI Trading
+// Command Center (not a separate dashboard). Consumes only /api/world/*
+// and /ws/world (api/world_api.py, api/world_ws.py — Track B, additive)
+// via world.runtime/world.simulation/world.interaction/world.frontend.
+// renderer's own already-public APIs.
+import { useEffect, useMemo, useState } from 'react'
+import { worldApi, wsWorld } from './api'
+import type { RenderFrame, RoomActivity, SimulationState } from './types'
+import OfficeScene from './components/OfficeScene'
+import RoomList from './components/RoomList'
+import Inspector from './components/Inspector'
+import TimelinePanel from './components/TimelinePanel'
+import NotificationsPanel from './components/NotificationsPanel'
+import SettingsPanel from './components/SettingsPanel'
 
-import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import Phaser from 'phaser';
-import { WorldScene, WORLD_EVENTS } from './WorldScene';
-import { startWorldApi, stopWorldApi } from './worldApi';
-import { useWorldStore, THEME_COLORS } from './worldStore';
-import { buildWorldMap } from './MapLoader';
-import { ROOM_DEFINITIONS } from './Room';
-import type { WorldMap } from './types/world.types';
-import { useThrottle } from '@/hooks/useThrottle';
+type TabId = 'scene' | 'timeline' | 'alerts' | 'settings'
 
-import WorldOverlay from './components/WorldOverlay';
-import SearchBar from './components/SearchBar';
-import ThemeToolbar from './components/ThemeToolbar';
-import InteractionModal from './components/InteractionModal';
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'scene', label: 'Office' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'settings', label: 'Settings' },
+]
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+export default function WorldPage() {
+  const [rooms, setRooms] = useState<RoomActivity[]>([])
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null)
+  const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
+  const [frame, setFrame] = useState<RenderFrame | null>(null)
+  const [tab, setTab] = useState<TabId>('scene')
+  const [connected, setConnected] = useState(false)
 
-function closestRoomId(tx: number, ty: number): string {
-  let best = 'plaza';
-  let bestDist = Infinity;
-  for (const room of ROOM_DEFINITIONS) {
-    const cx = room.tx + room.tw / 2;
-    const cy = room.ty + room.th / 2;
-    const d = Math.hypot(cx - tx, cy - ty);
-    if (d < bestDist) { bestDist = d; best = room.id; }
+  // Initial hydration via REST — matches the same "REST for initial
+  // hydration, WebSocket for realtime" split the rest of this dashboard
+  // already uses (src/lib/api.ts's ManagedWS channels).
+  useEffect(() => {
+    worldApi.listRooms().then((list) => {
+      setRooms(list)
+      if (list.length > 0) setSelectedRoomId((prev) => prev ?? list[0].roomId)
+    })
+  }, [])
+
+  // Realtime: /ws/world pushes the current SimulationState whenever its
+  // tick changes (api/world_ws.py) — keep the room list's activity/
+  // occupancy fresh without re-polling REST every second. ManagedWS.on()
+  // takes one handler and returns its own unsubscribe function (see
+  // src/lib/api.ts) — no named 'message'/'open'/'close' events.
+  useEffect(() => {
+    const unsubscribe = wsWorld.on((raw: unknown) => {
+      const msg = raw as { type: string; data?: SimulationState }
+      if ((msg.type === 'init' || msg.type === 'simulation') && msg.data) {
+        setRooms(msg.data.rooms)
+      }
+    })
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    const id = setInterval(() => setConnected(wsWorld.readyState === 'OPEN'), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    if (!selectedRoomId) return
+    worldApi.getRoomFrame(selectedRoomId).then(setFrame).catch(() => setFrame(null))
+  }, [selectedRoomId])
+
+  const characterIdsInFrame = useMemo(
+    () =>
+      (frame?.commands ?? [])
+        .filter((c) => c.layer === 'characters')
+        .map((c) => c.entityId),
+    [frame],
+  )
+
+  const handleSelectRoom = (roomId: string) => {
+    setSelectedRoomId(roomId)
+    setSelectedCharacterId(null)
+    worldApi.select('room', roomId).catch(() => undefined)
   }
-  return best;
-}
 
-function createPhaserConfig(parent: HTMLElement): Phaser.Types.Core.GameConfig {
-  return {
-    type: Phaser.AUTO,
-    parent,
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#070714',
-    pixelArt: true,
-    antialias: false,
-    roundPixels: true,
-    scene: [WorldScene],
-    physics: {
-      default: 'arcade',
-      arcade: { gravity: { x: 0, y: 0 }, debug: false },
-    },
-    scale: {
-      mode: Phaser.Scale.RESIZE,
-      autoCenter: Phaser.Scale.CENTER_BOTH,
-    },
-  };
-}
-
-// ── WorldPage ─────────────────────────────────────────────────────────────────
-
-export default memo(function WorldPage() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const gameRef = useRef<Phaser.Game | null>(null);
-  const sceneRef = useRef<WorldScene | null>(null);
-
-  const [worldMap, setWorldMap] = useState<WorldMap | null>(null);
-  const [npcPositions, setNpcPositions] = useState<Array<{ id: string; tx: number; ty: number }>>([]);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [ready, setReady] = useState(false);
-
-  const { theme, openModal } = useWorldStore();
-  const colors = THEME_COLORS[theme];
-
-  // Throttle NPC position updates to 200 ms — prevents React re-render storm
-  // when player walks across many tiles quickly.
-  const throttledSetNpcPositions = useThrottle(
-    useCallback((positions: Array<{ id: string; tx: number; ty: number }>) => {
-      setNpcPositions(positions);
-    }, []),
-    200
-  );
-
-  // ── Mount Phaser ─────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!containerRef.current || gameRef.current) return;
-
-    const game = new Phaser.Game(createPhaserConfig(containerRef.current));
-    gameRef.current = game;
-
-    const onReady = () => {
-      const scene = game.scene.getScene('WorldScene') as WorldScene;
-      sceneRef.current = scene;
-      setWorldMap(buildWorldMap());
-      setReady(true);
-    };
-
-    const onInteract = (data: { type: any; roomId: string; npcId?: string }) => {
-      openModal(data.type, data.roomId, data.npcId);
-    };
-
-    const onPlayerMove = () => {
-      if (sceneRef.current) {
-        throttledSetNpcPositions(sceneRef.current.getNpcPositions());
-      }
-    };
-
-    const onSearch = () => setSearchOpen(true);
-
-    game.events.on(WORLD_EVENTS.READY, onReady);
-    game.events.on(WORLD_EVENTS.INTERACT, onInteract);
-    game.events.on(WORLD_EVENTS.PLAYER_MOVE, onPlayerMove);
-    game.events.on('world:search', onSearch);
-
-    return () => {
-      // Named removal — safe, does not nuke Phaser internal listeners
-      game.events.off(WORLD_EVENTS.READY, onReady);
-      game.events.off(WORLD_EVENTS.INTERACT, onInteract);
-      game.events.off(WORLD_EVENTS.PLAYER_MOVE, onPlayerMove);
-      game.events.off('world:search', onSearch);
-      game.destroy(true);
-      gameRef.current = null;
-      sceneRef.current = null;
-      setReady(false);
-    };
-  }, [openModal, throttledSetNpcPositions]);
-
-  // ── Start API connections ─────────────────────────────────────
-
-  useEffect(() => {
-    startWorldApi();
-    return () => stopWorldApi();
-  }, []);
-
-  // ── Global keyboard shortcuts ─────────────────────────────────
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setSearchOpen((v) => !v);
-      }
-      if (e.key === 'Escape') setSearchOpen(false);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  // ── Teleport handlers ─────────────────────────────────────────
-
-  const handleTeleportRoom = useCallback((roomId: string) => {
-    sceneRef.current?.teleportToRoom(roomId);
-    setSearchOpen(false);
-  }, []);
-
-  const handleTeleportNpc = useCallback((npcId: string) => {
-    sceneRef.current?.teleportToNpc(npcId);
-    setSearchOpen(false);
-  }, []);
-
-  const handleMinimapTeleport = useCallback((tx: number, ty: number) => {
-    const roomId = closestRoomId(tx, ty);
-    sceneRef.current?.teleportToRoom(roomId);
-  }, []);
-
-  // ── Render ───────────────────
+  const handleSelectCharacter = (agentId: string) => {
+    setSelectedCharacterId(agentId)
+    worldApi.select('character', agentId).catch(() => undefined)
+  }
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-surface" ref={containerRef}>
-      {ready && worldMap && (
-        <>
-          <WorldOverlay
-            worldMap={worldMap}
-            npcPositions={npcPositions}
-            onMinimapTeleport={handleMinimapTeleport}
-            colors={colors}
-          />
-          <ThemeToolbar />
-          {searchOpen && (
-            <SearchBar
-              worldMap={worldMap}
-              onTeleportRoom={handleTeleportRoom}
-              onTeleportNpc={handleTeleportNpc}
-              onClose={() => setSearchOpen(false)}
+    <div className="p-6 space-y-4" data-testid="world-page">
+      <header className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-white">Office World</h1>
+        <span
+          data-testid="world-ws-status"
+          className={`text-xs rounded-full px-2 py-1 ${
+            connected ? 'bg-green-900 text-green-300' : 'bg-slate-800 text-slate-400'
+          }`}
+        >
+          {connected ? 'Live' : 'Connecting…'}
+        </span>
+      </header>
+
+      <nav className="flex gap-2 border-b border-slate-800 pb-2" data-testid="world-tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            data-testid={`world-tab-${t.id}`}
+            onClick={() => setTab(t.id)}
+            className={`px-3 py-1.5 rounded-t text-sm ${
+              tab === t.id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'scene' && (
+        <div className="grid grid-cols-[240px,1fr,280px] gap-4">
+          <div>
+            <h2 className="text-xs uppercase text-slate-500 mb-2">Rooms</h2>
+            <RoomList rooms={rooms} selectedRoomId={selectedRoomId} onSelect={handleSelectRoom} />
+          </div>
+          <div className="space-y-2">
+            <OfficeScene frame={frame} />
+            {characterIdsInFrame.length > 0 && (
+              <div className="flex flex-wrap gap-2" data-testid="character-chip-list">
+                {characterIdsInFrame.map((agentId) => (
+                  <button
+                    key={agentId}
+                    type="button"
+                    onClick={() => handleSelectCharacter(agentId)}
+                    className={`text-xs rounded-full px-2 py-1 border ${
+                      selectedCharacterId === agentId
+                        ? 'border-sky-400 text-sky-300'
+                        : 'border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {agentId}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <h2 className="text-xs uppercase text-slate-500 mb-2">Inspector</h2>
+            <Inspector
+              kind={selectedCharacterId ? 'character' : 'room'}
+              targetId={selectedCharacterId ?? selectedRoomId}
             />
-          )}
-          <InteractionModal />
-        </>
-      )}
-      {!ready && (
-        <div className="absolute inset-0 flex items-center justify-center bg-surface z-50">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-accent-blue/30 border-t-accent-blue rounded-full animate-spin" />
-            <span className="text-xs text-text-muted font-mono tracking-wider">LOADING WORLD HQ…</span>
           </div>
         </div>
       )}
+
+      {tab === 'timeline' && <TimelinePanel />}
+      {tab === 'alerts' && <NotificationsPanel />}
+      {tab === 'settings' && <SettingsPanel rooms={rooms.map((r) => r.roomId)} />}
     </div>
-  );
-});
+  )
+}
