@@ -114,13 +114,19 @@
     SimulationPaused, SimulationResumed), and a bounded
     `InteractionHistory`. **Done.** 85 new tests. See
     `world/docs/INTERACTION_LAYER.md`.
-12. **W10** — Live Command Center UI: implement the full UI panel set
-    already specified in `world/ui/specs/` (minimap, agent inspector,
-    district inspector, activity feed, notification center, relationship
-    viewer, time control, simulation controls) as an actual browser
-    frontend — React + Vite + Phaser 3 — consuming Phase W8's
-    `RenderFrame` wire format and Phase W9's `world.interaction.api`. Not
-    started.
+12. **W10** — Live Command Center UI: unified into the existing React/
+    Vite/FastAPI dashboard (`dashboard_src/`), not a separate app, per
+    Krush's explicit direction — Office World is one more nav tab
+    (`/world`), consuming Phase W8's `RenderFrame` wire format and Phase
+    W9's `world.interaction.api` via new `api/world_api.py` (REST) and
+    `api/world_ws.py` (WebSocket), both additively included into the
+    existing FastAPI singleton. `main.py` now also warms up World and
+    ticks the Simulation once per trading cycle, defensively wrapped so a
+    World failure can never affect the trading engine (empirically
+    proven, not just argued). First phase to touch Track A
+    (`main.py`, `api/app.py`, `dashboard_src/`) — see
+    `world/docs/LIVE_COMMAND_CENTER.md` for the full compatibility
+    argument. **Done.**
 13. **W11** — Real-time Operations Center: point real `DataSource`
     instances (Phase W4) at whatever the trading engine actually emits
     and schedule `RuntimeManager.run_once()` (a `Watcher`-gated loop or

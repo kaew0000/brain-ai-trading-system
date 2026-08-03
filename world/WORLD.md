@@ -1,9 +1,19 @@
 # Brain AI Command World — Phase W1: Foundation Architecture
 
 **Status:** Implemented (W1, W1A). Superseded in part by Phase W2 — see notes
-below. Extended, not superseded, by Phase W3, W4, W5, W6 (asset pipeline
-half only), and W7.
-**Scope:** Everything below lives under `world/` in `brain-ai-trading-system`. Nothing in `agents/`, `execution/`, `portfolio/`, `journal/`, `risk/`, `api/`, `dashboard/`, `dashboard_src/`, `main.py`, `config/`, `scanner/`, `pipeline/`, `telemetry/`, or `database/` is touched, referenced for writes, or assumed to change.
+below. Extended, not superseded, by Phase W3, W4, W5, W6, W7, W8, W9, and
+W10.
+**Scope:** Through Phase W9, everything lived under `world/` only, with
+`agents/`, `execution/`, `portfolio/`, `journal/`, `risk/`, `api/`,
+`dashboard/`, `dashboard_src/`, `main.py`, `config/`, `scanner/`,
+`pipeline/`, `telemetry/`, and `database/` untouched. **Phase W10 changed
+this deliberately**, per Krush's explicit direction to unify Office World
+into the existing dashboard rather than build a second one: `main.py`,
+`api/app.py`, and `dashboard_src/` now carry a small, additive, defensively-
+wrapped Phase W10 footprint — see `world/docs/LIVE_COMMAND_CENTER.md` for
+the full compatibility argument and every diff's rationale. `agents/`,
+`execution/`, `portfolio/`, `journal/`, `risk/`, `learning/`, `decision/`
+remain completely untouched through W10.
 
 > **Phase W2 update (2026-07-29):** the visual theme described below (city,
 > fortress, forge, castle-adjacent language) is retired. Brain AI Command
@@ -114,6 +124,37 @@ half only), and W7.
 > the W7/W8 callouts above, which are more complete and more current.
 > Keeping both would have restated "renderer integration outstanding"
 > right next to a callout confirming it's done.
+
+> **Phase W9 update (backfilled):** the Interactive Command Center layer
+> is done — `world/interaction/`: `SelectionManager`/`HoverManager`
+> validate against real `WorldState`/`SimulationState` ids,
+> `build_inspector_report` merges Phase W5 identity + Phase W7
+> behaviour/activity + `Timeline` history, `FocusManager` wraps Phase
+> W8's `ReferenceCameraController`, a read-only `CommandDispatcher`
+> exposes 9 commands (no trading commands), a 6-event `EventBus`, and a
+> bounded `NotificationCenter`/`InteractionHistory`. See
+> `world/docs/INTERACTION_LAYER.md`.
+
+> **Phase W10 update:** the Live Command Center UI is done, unified into
+> the *existing* dashboard per Krush's explicit direction rather than a
+> separate app — see `world/docs/LIVE_COMMAND_CENTER.md`. This is the
+> first phase with any Track A footprint: `api/world_api.py` (REST) and
+> `api/world_ws.py` (WebSocket) are new, additively included into the
+> existing `api/app.py` FastAPI singleton; `main.py` gained two
+> defensively-wrapped functions (`_initialize_world_runtime`,
+> `_tick_world_simulation`) that warm up World and tick the Simulation
+> once per trading cycle, proven empirically (not just argued) to never
+> affect the trading engine even on failure; and
+> `dashboard_src/src/pages/world/` — the old, live-routed V15 Phaser page
+> — is replaced entirely with a new page consuming Phase W8/W9's APIs,
+> per Krush's explicit decision. A genuinely new file,
+> `world/frontend/renderer/api.py`, was also added — the one facade
+> missing from the runtime/simulation/interaction/renderer convention.
+> A real, unrelated, pre-existing bug in `dashboard_src/vite.config.ts`
+> (a manual-chunk conflict that broke `npm run build` on completely
+> unmodified `main`) was found and fixed, since otherwise this phase's
+> own deliverable — and the dashboard generally — couldn't be built at
+> all.
 
 ---
 
@@ -479,7 +520,9 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 *complete — see `docs/architecture/WORLD_OFFICE_POLICY.md`,*
 *`WORLD_DESIGN_LOCK.md`, `world/docs/INGESTION_ADAPTER.md`,*
 *`world/docs/STATE_PROVIDER.md`, `world/docs/SIMULATION.md`,*
-*`world/docs/RENDERER.md`, and `world/docs/INTERACTION_LAYER.md` for*
-*current canon. No trading-code changes have been made through Phase W9.*
-*A browser-rendered UI (Phase W10) and live engine data (Phase W11)*
-*remain outstanding.*
+*`world/docs/RENDERER.md`, `world/docs/INTERACTION_LAYER.md`, and*
+*`world/docs/LIVE_COMMAND_CENTER.md` for current canon. Phase W10 (Live*
+*Command Center UI) is also complete and is the first phase with any*
+*Track A footprint — a small, additive, defensively-wrapped one, fully*
+*documented in `LIVE_COMMAND_CENTER.md`. Live engine data (Phase W11)*
+*remains outstanding.*

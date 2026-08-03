@@ -102,3 +102,18 @@ Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json
                                                                         \
     -> world.interaction.api (selection/hover/inspector/commands) -----+-> Phaser 3 frontend (W10) -> UI panels
 ```
+
+**Live Command Center UI (Phase W10, done):** the final leg of the
+diagram above is now real — `api/world_api.py` (REST) and
+`api/world_ws.py` (WebSocket) expose the four `world.*.api` facades
+above through the *existing* FastAPI app (`api/app.py`, additive
+`include_router` calls), and `dashboard_src/src/pages/world/WorldPage.tsx`
+consumes them as one more tab of the *existing* unified dashboard — not a
+second app, per Krush's explicit direction. `main.py` also now warms up
+World and ticks the Simulation once per trading cycle
+(`_initialize_world_runtime`, `_tick_world_simulation`), both defensively
+wrapped so a World failure can never affect the trading engine — this is
+the first phase with any Track A footprint at all; see
+`LIVE_COMMAND_CENTER.md` in this folder for the full compatibility
+argument. No PNG sprite/tile assets exist yet, so the Phaser canvas draws
+real, data-driven shapes rather than art (see that document §5).

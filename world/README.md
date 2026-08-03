@@ -25,7 +25,9 @@ deeper documentation (architecture, roadmap, conventions).
   `renderer/` — `SceneGraphRenderer`, `RenderWorldStateProvider`,
   `scene_builder`, `sprite_mapper`, `asset_locator`, `character_renderer`,
   `room_renderer`, `overlay_renderer`, `scene_cache`, `render_state`,
-  `render_config` — see `docs/RENDERER.md`
+  `render_config` — see `docs/RENDERER.md`; `renderer/api.py` (Phase W10)
+  completes the runtime/simulation/interaction/renderer facade convention
+  (`get_render_frame`, `known_room_ids`), consumed by `api/world_api.py`
 - `data/schemas/` — stable JSON Schemas for all world data contracts
 - `data/samples/` — example payloads validating each schema
 - `data/runtime/` — Phase W4 live snapshot output (`world.json`,
@@ -57,13 +59,25 @@ deeper documentation (architecture, roadmap, conventions).
 - `docs/` — architecture, roadmap, coding/naming/asset conventions,
   ingestion adapter, state provider, office layout & room specs (W2),
   asset pipeline & population reports (W6), the simulation layer (W7),
-  the renderer (W8), and the interaction layer (W9)
+  the renderer (W8), the interaction layer (W9), and the Live Command
+  Center UI (W10 — the first phase with a Track A footprint: `main.py`,
+  `api/world_api.py`, `api/world_ws.py`, `dashboard_src/src/pages/world/`)
 - `scripts/` — validation tooling (`validate_schemas.py`, Phase W5/W7
   performance benchmarks, Phase W6 asset validation)
 - `tests/` — schema/uniqueness/relationship/adapter/cache/watcher/state/
   navigation/asset/simulation/renderer/interaction tests
 
 ## Status
+
+Phase W10 — Live Command Center UI is done: Office World is now unified
+into the existing React/Vite/FastAPI dashboard (`dashboard_src/`) as one
+more tab, not a separate app — new `api/world_api.py` (REST) and
+`api/world_ws.py` (WebSocket) expose Phase W5/W7/W9's already-public APIs,
+`main.py` defensively warms up World and ticks the Simulation once per
+trading cycle, and the old V15 World page is fully replaced. First phase
+to touch Track A; see `world/docs/LIVE_COMMAND_CENTER.md` for the full
+compatibility argument (1915/1915 existing tests, empirically-proven
+defensive failure path).
 
 Phase W9 — Interactive Command Center is done: `world/interaction/`
 adds selection, hover, an Inspector Panel (merging Phase W5 identity +

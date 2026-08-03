@@ -28,8 +28,6 @@ export default defineConfig({
           // Phaser game engine (always separate)
           // Separate Phaser into its own chunk (~4MB)
           phaser: ['phaser'],
-          // React + framer in another
-          'react-vendor': ['react', 'react-dom', 'framer-motion', 'zustand'],
         },
       },
     },
