@@ -25,19 +25,15 @@ export interface WorldManifest {
   decorations: Record<string, string>;
 }
 
-// ── NPC agent-id → sheet-role mapping ───────────────────────
-const AGENT_TO_ROLE: Record<string, string> = {
-  ceo_agent:          'ceo',
-  risk_agent:         'risk_manager',
-  smc_agent:          'quant_researcher',
-  ml_agent:           'ml_scientist',
-  futures_agent:      'data_analyst',
-  trader_agent:       'trader',
-  portfolio_agent:    'office_worker',
-  regime_agent:       'security_officer',
-  mission_controller: 'visitor_1',
-  journal_agent:      'visitor_2',
-};
+// NPC role resolution: callers pass an already-resolved role name (see
+// pages/world/assetMapping.ts's CHARACTER_TO_ROLE, which maps the real
+// character codenames used throughout this app — 'primus', 'bastion',
+// etc., per world/characters/definitions/*.json — to one of this
+// manifest's 11 npc roles). This file intentionally has no id->role
+// table of its own: an earlier version did (AGENT_TO_ROLE, keyed by
+// ids like "ceo_agent" that never appeared anywhere in the actual
+// data), which meant it silently never matched anything. One mapping
+// table, in the one place it's actually used, is safer than two.
 
 // ── Module state ─────────────────────────────────────────────
 let _manifest: WorldManifest | null = null;
@@ -150,12 +146,13 @@ export function getBuilding(
 }
 
 /** Return the Phaser texture key for an NPC direction sheet, or fallback.
- *  Pass the agent id (e.g. "ceo_agent") or role name (e.g. "ceo"). */
+ *  Pass an already-resolved role name (e.g. "ceo") — see
+ *  pages/world/assetMapping.ts's CHARACTER_TO_ROLE for resolving a
+ *  real character codename ("primus") to one first. */
 export function getNPC(
   scene: Phaser.Scene,
-  agentIdOrRole: string,
+  role: string,
 ): string {
-  const role = AGENT_TO_ROLE[agentIdOrRole] ?? agentIdOrRole;
   const ssKey = `npc_ss__${role}`;
   if (_registeredKeys.has(ssKey) && scene.textures.exists(ssKey)) return ssKey;
   // Try plain image key as fallback
