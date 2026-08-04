@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from world.readers.event_reader import Event
 from world.readers.journal_reader import JournalEntry
 from world.readers.mission_reader import Mission
-from world.readers.portfolio_reader import PortfolioPosition
+from world.readers.portfolio_reader import PortfolioPosition, PortfolioSummary
 from world.readers.telemetry_reader import TelemetryPoint
 
 
@@ -21,6 +21,10 @@ class EngineSnapshot:
     portfolio_positions: list[PortfolioPosition] = field(default_factory=list)
     missions: list[Mission] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
+    #: Phase W11 — portfolio-wide read-only figures (PnL/drawdown/win
+    #: rate), or None if the portfolio reader didn't supply any (either
+    #: it's a Phase W4-shaped source, or summary parsing found nothing).
+    portfolio_summary: PortfolioSummary | None = None
 
     #: which of the five readers actually returned data this capture
     #: (vs. their source being unavailable) - lets SnapshotBuilder and

@@ -96,6 +96,30 @@ class PortfolioState:
 
 
 @dataclass(frozen=True)
+class PortfolioSummaryState:
+    """Phase W11 — portfolio-wide, read-only figures (as opposed to
+    `PortfolioState`, which is per-position). `None` on `WorldState`
+    when the Phase W4 runtime file has no `summary` object this
+    capture (older payload shape, or the trading engine simply hadn't
+    produced one yet) — never fabricated as zeros."""
+
+    daily_pnl: float | None = None
+    floating_pnl: float | None = None
+    drawdown: float | None = None
+    win_rate: float | None = None
+    avg_rr: float | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "dailyPnl": self.daily_pnl,
+            "floatingPnl": self.floating_pnl,
+            "drawdown": self.drawdown,
+            "winRate": self.win_rate,
+            "avgRr": self.avg_rr,
+        }
+
+
+@dataclass(frozen=True)
 class NotificationState:
     notification_id: str
     timestamp: str
@@ -174,6 +198,7 @@ class WorldState:
     agents: tuple[AgentState, ...] = field(default_factory=tuple)
     missions: tuple[MissionState, ...] = field(default_factory=tuple)
     portfolio: tuple[PortfolioState, ...] = field(default_factory=tuple)
+    portfolio_summary: PortfolioSummaryState | None = None
     notifications: tuple[NotificationState, ...] = field(default_factory=tuple)
     events: tuple[EventState, ...] = field(default_factory=tuple)
     telemetry: tuple[TelemetryState, ...] = field(default_factory=tuple)
@@ -188,6 +213,7 @@ class WorldState:
             "agents": [a.to_dict() for a in self.agents],
             "missions": [m.to_dict() for m in self.missions],
             "portfolio": [p.to_dict() for p in self.portfolio],
+            "portfolioSummary": self.portfolio_summary.to_dict() if self.portfolio_summary else None,
             "notifications": [n.to_dict() for n in self.notifications],
             "events": [e.to_dict() for e in self.events],
             "telemetry": [t.to_dict() for t in self.telemetry],

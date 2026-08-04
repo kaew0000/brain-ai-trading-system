@@ -70,6 +70,39 @@ def test_build_portfolio_matches_schema():
     assert data["totalPositions"] == 1
 
 
+def test_build_portfolio_has_no_summary_key_when_snapshot_has_none():
+    """The exact pre-W11 output shape, byte for byte, when there's
+    nothing to add."""
+    data = SnapshotBuilder().build_portfolio(_sample_snapshot())
+    assert "summary" not in data
+
+
+def test_build_portfolio_includes_summary_when_present():
+    from world.readers.portfolio_reader import PortfolioSummary
+
+    snapshot = _sample_snapshot()
+    snapshot.portfolio_summary = PortfolioSummary(
+        daily_pnl=10.5, floating_pnl=-2.0, drawdown=0.08, win_rate=0.6, avg_rr=1.4,
+    )
+    data = SnapshotBuilder().build_portfolio(snapshot)
+    jsonschema.validate(instance=data, schema=_schema("portfolio.schema.json"))
+    assert data["summary"] == {
+        "dailyPnl": 10.5, "floatingPnl": -2.0, "drawdown": 0.08, "winRate": 0.6, "avgRr": 1.4,
+    }
+
+
+def test_build_portfolio_omits_individual_none_summary_fields():
+    """A summary field the trading engine didn't supply is left out
+    entirely, never written as 0 or null."""
+    from world.readers.portfolio_reader import PortfolioSummary
+
+    snapshot = _sample_snapshot()
+    snapshot.portfolio_summary = PortfolioSummary(drawdown=0.05)  # everything else None
+    data = SnapshotBuilder().build_portfolio(snapshot)
+    assert data["summary"] == {"drawdown": 0.05}
+    jsonschema.validate(instance=data, schema=_schema("portfolio.schema.json"))
+
+
 def test_build_telemetry_matches_schema():
     data = SnapshotBuilder().build_telemetry(_sample_snapshot())
     jsonschema.validate(instance=data, schema=_schema("telemetry.schema.json"))
