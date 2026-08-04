@@ -19,6 +19,7 @@ from world.runtime.models import (
     MissionState,
     NotificationState,
     PortfolioState,
+    PortfolioSummaryState,
     RoomState,
     TelemetryState,
     WorldState,
@@ -185,6 +186,23 @@ class StateBuilder:
             for p in portfolio_raw.get("positions", [])
         )
 
+        # Phase W11 — optional portfolio-wide figures. Absent in the
+        # Phase W4 payload shape (no "summary" key) or in any capture
+        # where the trading engine didn't supply one this cycle -> None,
+        # never a fabricated PortfolioSummaryState of zeros.
+        summary_raw = portfolio_raw.get("summary")
+        portfolio_summary = (
+            PortfolioSummaryState(
+                daily_pnl=summary_raw.get("dailyPnl"),
+                floating_pnl=summary_raw.get("floatingPnl"),
+                drawdown=summary_raw.get("drawdown"),
+                win_rate=summary_raw.get("winRate"),
+                avg_rr=summary_raw.get("avgRr"),
+            )
+            if isinstance(summary_raw, dict)
+            else None
+        )
+
         telemetry = tuple(
             TelemetryState(
                 name=str(t["name"]),
@@ -243,6 +261,7 @@ class StateBuilder:
             agents=agents,
             missions=missions,
             portfolio=portfolio,
+            portfolio_summary=portfolio_summary,
             notifications=notifications,
             events=events,
             telemetry=telemetry,

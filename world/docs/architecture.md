@@ -117,3 +117,20 @@ the first phase with any Track A footprint at all; see
 `LIVE_COMMAND_CENTER.md` in this folder for the full compatibility
 argument. No PNG sprite/tile assets exist yet, so the Phaser canvas draws
 real, data-driven shapes rather than art (see that document §5).
+
+**Live Operations Center (Phase W11, done):** the first arrow in every
+diagram above — `Trading Engine -> DataSource` — is now real.
+`telemetry/world_export.py` (new, Track A side) calls the trading
+engine's own existing read-only accessors (agent telemetry, subsystem
+heartbeats, circuit-breaker latency, active missions, portfolio
+drawdown/PnL/win-rate, `events.event_bus`) and writes them as the raw
+payloads the Phase W4 readers already expected; `main.py` schedules one
+export + `RuntimeManager.run_once()` per trading cycle, same cadence and
+defensive wrapping as Phase W10's simulation tick. `portfolio.schema.json`
+gained an optional `summary` object (real PnL/drawdown/win-rate, an
+explicit, documented exception to the "no financial data" principle) that
+now threads all the way through `WorldState.portfolio_summary` to the
+dashboard. See `LIVE_OPERATIONS_CENTER.md` in this folder for the full
+data-flow diagram, and `docs/architecture/SEPARATION_POLICY.md`'s "Phase
+W11 amendment" for what changed in the separation contract itself.
+

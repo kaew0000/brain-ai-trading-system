@@ -1,6 +1,6 @@
 {
   "$id": "portfolio.schema.json",
-  "description": "Phase W4 runtime snapshot shape for world/data/runtime/portfolio.json. Presentation-only reflection of portfolio state - not the source of truth (that remains the trading engine's own portfolio/ module, which this schema never reads from or writes to).",
+  "description": "Phase W4 runtime snapshot shape for world/data/runtime/portfolio.json. Presentation-only reflection of portfolio state - not the source of truth (that remains the trading engine's own portfolio/ module, which this schema never reads from or writes to). Phase W11 amendment (see docs/architecture/SEPARATION_POLICY.md): the optional top-level `summary` object is a deliberate, explicit exception allowing real read-only portfolio-wide figures (PnL/drawdown/win rate) to cross the boundary - individual positions still never carry raw notional size (see `sizeLabel` below).",
   "type": "object",
   "required": ["timestamp", "totalPositions"],
   "properties": {
@@ -28,6 +28,17 @@
             "description": "Free-text display label, e.g. 'small'/'medium'/'large' - deliberately not a raw notional amount, to keep this a presentation-only reflection."
           }
         }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "Phase W11 - optional, portfolio-wide, read-only figures sourced verbatim from the trading engine's own existing accessors (portfolio.portfolio_history.get_latest_decisions(), journal.journal_v2.get_daily_stats()). Never computed in world/. Every field is independently optional; a key is omitted rather than set to a fabricated 0 when the engine didn't supply it this capture.",
+      "properties": {
+        "dailyPnl": { "type": "number" },
+        "floatingPnl": { "type": "number" },
+        "drawdown": { "type": "number" },
+        "winRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "avgRr": { "type": "number" }
       }
     }
   }

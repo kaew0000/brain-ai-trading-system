@@ -39,6 +39,7 @@ class ReadOnlyIngestionAdapter:
     def capture_snapshot(self) -> EngineSnapshot:
         results: dict[str, list] = {}
         available: dict[str, bool] = {}
+        portfolio_summary = None
 
         for name, reader in self._readers.items():
             if reader is None:
@@ -48,6 +49,14 @@ class ReadOnlyIngestionAdapter:
             try:
                 results[name] = reader.read()
                 available[name] = True
+                if name == "portfolio":
+                    # Phase W11 — optional side-channel set by
+                    # PortfolioReader.read() itself; absent on readers
+                    # that don't define it (e.g. in older tests using a
+                    # stub Reader), which is exactly why getattr's
+                    # default is used rather than a direct attribute
+                    # access.
+                    portfolio_summary = getattr(reader, "last_summary", None)
             except Exception:
                 # Any failure to read (missing file, malformed source,
                 # unavailable DB, etc.) is "no data this capture," per
@@ -66,4 +75,5 @@ class ReadOnlyIngestionAdapter:
             missions=results["missions"],
             events=results["events"],
             sources_available=available,
+            portfolio_summary=portfolio_summary,
         )

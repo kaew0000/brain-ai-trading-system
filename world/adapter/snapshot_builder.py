@@ -68,7 +68,7 @@ class SnapshotBuilder:
         ]
 
     def build_portfolio(self, snapshot: EngineSnapshot) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "timestamp": snapshot.captured_at,
             "totalPositions": len(snapshot.portfolio_positions),
             "positions": [
@@ -80,6 +80,29 @@ class SnapshotBuilder:
                 for p in snapshot.portfolio_positions
             ],
         }
+
+        # Phase W11 — optional portfolio-wide figures. Only ever added
+        # when the reader actually supplied a summary; a capture with no
+        # summary (Phase W4-shaped source, or the field just wasn't in
+        # this payload) produces exactly the Phase W4 output shape, byte
+        # for byte, so existing consumers of this file see no change.
+        s = snapshot.portfolio_summary
+        if s is not None:
+            summary: dict[str, Any] = {}
+            if s.daily_pnl is not None:
+                summary["dailyPnl"] = s.daily_pnl
+            if s.floating_pnl is not None:
+                summary["floatingPnl"] = s.floating_pnl
+            if s.drawdown is not None:
+                summary["drawdown"] = s.drawdown
+            if s.win_rate is not None:
+                summary["winRate"] = s.win_rate
+            if s.avg_rr is not None:
+                summary["avgRr"] = s.avg_rr
+            if summary:
+                out["summary"] = summary
+
+        return out
 
     def build_telemetry(self, snapshot: EngineSnapshot) -> dict[str, Any]:
         return {

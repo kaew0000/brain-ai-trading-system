@@ -65,6 +65,7 @@ def test_build_with_no_runtime_files_defaults_cleanly(empty_runtime_dir):
     assert len(state.agents) == 16
     assert state.missions == ()
     assert state.portfolio == ()
+    assert state.portfolio_summary is None
     assert state.notifications == ()
     assert state.events == ()
     assert state.telemetry == ()
@@ -81,6 +82,44 @@ def test_build_merges_every_populated_source(populated_runtime_dir):
     assert len(state.telemetry) == 1
     assert len(state.notifications) == 1
     assert len(state.events) == 1
+
+
+def test_portfolio_summary_parses_when_present(tmp_path):
+    """Phase W11 — the one field state_builder gained."""
+    (tmp_path / "portfolio.json").write_text(json.dumps({
+        "positions": [],
+        "summary": {"dailyPnl": 12.5, "floatingPnl": -1.0, "drawdown": 0.07, "winRate": 0.65, "avgRr": 1.9},
+        "timestamp": "2026-08-01T00:00:00Z",
+    }))
+    state = _builder(str(tmp_path)).build()
+    assert state.portfolio_summary is not None
+    assert state.portfolio_summary.daily_pnl == 12.5
+    assert state.portfolio_summary.floating_pnl == -1.0
+    assert state.portfolio_summary.drawdown == 0.07
+    assert state.portfolio_summary.win_rate == 0.65
+    assert state.portfolio_summary.avg_rr == 1.9
+    assert state.to_dict()["portfolioSummary"] == {
+        "dailyPnl": 12.5, "floatingPnl": -1.0, "drawdown": 0.07, "winRate": 0.65, "avgRr": 1.9,
+    }
+
+
+def test_portfolio_summary_is_none_when_portfolio_json_has_no_summary_key(populated_runtime_dir):
+    """populated_runtime_dir's portfolio.json (above) is the pre-W11
+    shape — proves old runtime output still builds a valid WorldState
+    with portfolio_summary simply absent, not a fabricated zero."""
+    state = _builder(populated_runtime_dir).build()
+    assert state.portfolio_summary is None
+    assert state.to_dict()["portfolioSummary"] is None
+
+
+def test_portfolio_summary_with_partial_fields(tmp_path):
+    (tmp_path / "portfolio.json").write_text(json.dumps({
+        "positions": [], "summary": {"drawdown": 0.03},
+    }))
+    state = _builder(str(tmp_path)).build()
+    assert state.portfolio_summary.drawdown == 0.03
+    assert state.portfolio_summary.daily_pnl is None
+    assert state.portfolio_summary.win_rate is None
 
 
 def test_active_agents_marked_active_and_working(populated_runtime_dir):

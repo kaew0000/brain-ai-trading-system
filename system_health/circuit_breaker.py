@@ -96,6 +96,11 @@ class CircuitBreaker:
         self._last_failure_at: float | None = None
         self._state_changed_at = time.monotonic()
         self._last_failure_msg: str | None  = None
+        # Phase W11: wall-clock latency of the most recent call() invocation
+        # (success or failure), for read-only observability only. Never
+        # read by _pre_call/_on_success/_on_failure — has zero effect on
+        # breaker state transitions.
+        self._last_latency_ms: float | None = None
 
     # ── Context manager ───────────────────────────────────────────────────────
 
@@ -114,9 +119,23 @@ class CircuitBreaker:
     # ── Call-wrapper API (alternative to context manager) ─────────────────────
 
     def call(self, fn, *args, **kwargs):
-        """Execute fn(*args, **kwargs) through the breaker."""
-        with self:
-            return fn(*args, **kwargs)
+        """Execute fn(*args, **kwargs) through the breaker.
+
+        Phase W11: also times the call (wall-clock, success or failure)
+        and stores it for read-only observability via snapshot(). This is
+        purely additive — the timing has no effect on _pre_call/
+        _on_success/_on_failure, the breaker's state machine, the return
+        value, or any exception raised by fn."""
+        start = time.monotonic()
+        try:
+            with self:
+                return fn(*args, **kwargs)
+        finally:
+            self._record_latency_ms((time.monotonic() - start) * 1000.0)
+
+    def _record_latency_ms(self, latency_ms: float) -> None:
+        with self._lock:
+            self._last_latency_ms = round(latency_ms, 2)
 
     # ── State transitions ─────────────────────────────────────────────────────
 
@@ -201,6 +220,7 @@ class CircuitBreaker:
                 "last_failure":      self._last_failure_msg,
                 "state_age_s":       round(age, 1),
                 "recovery_in_s":     recovery_in,
+                "last_latency_ms":   self._last_latency_ms,
                 "timestamp":         now.isoformat(),
             }
 

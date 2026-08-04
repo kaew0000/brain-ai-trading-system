@@ -53,6 +53,42 @@ def test_one_failing_reader_does_not_break_the_others():
     assert snapshot.sources_available["telemetry"] is True
 
 
+def test_portfolio_summary_is_none_when_reader_has_no_last_summary():
+    """Phase W11: a portfolio reader that doesn't define `last_summary`
+    (e.g. this file's own _FakeReader, or any older stub) must not
+    break the adapter — portfolio_summary simply stays None."""
+    adapter = ReadOnlyIngestionAdapter(portfolio_reader=_FakeReader(["p1"]))
+    snapshot = adapter.capture_snapshot()
+    assert snapshot.portfolio_positions == ["p1"]
+    assert snapshot.portfolio_summary is None
+
+
+def test_portfolio_summary_is_read_from_reader_side_channel():
+    """Phase W11: after a successful .read(), the adapter picks up
+    whatever the portfolio reader left on its `last_summary`
+    attribute."""
+
+    class _ReaderWithSummary:
+        def __init__(self):
+            self.last_summary = "sentinel-summary"
+
+        def read(self):
+            return ["p1"]
+
+    adapter = ReadOnlyIngestionAdapter(portfolio_reader=_ReaderWithSummary())
+    snapshot = adapter.capture_snapshot()
+    assert snapshot.portfolio_summary == "sentinel-summary"
+
+
+def test_portfolio_summary_is_none_when_portfolio_reader_raises():
+    """Phase W11: same never-fatal contract as every other reader — a
+    raising portfolio reader must not leave a stale/wrong summary."""
+    adapter = ReadOnlyIngestionAdapter(portfolio_reader=_RaisingReader())
+    snapshot = adapter.capture_snapshot()
+    assert snapshot.portfolio_summary is None
+    assert snapshot.sources_available["portfolio"] is False
+
+
 def test_adapter_never_writes_a_file(tmp_path, monkeypatch):
     """The adapter must only read. Assert no new file appears in a
     scratch directory during a capture, using a real (working) reader

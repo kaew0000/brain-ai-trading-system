@@ -127,13 +127,31 @@
     (`main.py`, `api/app.py`, `dashboard_src/`) — see
     `world/docs/LIVE_COMMAND_CENTER.md` for the full compatibility
     argument. **Done.**
-13. **W11** — Real-time Operations Center: point real `DataSource`
-    instances (Phase W4) at whatever the trading engine actually emits
-    and schedule `RuntimeManager.run_once()` (a `Watcher`-gated loop or
-    fixed interval), so the Phase W10 UI reflects live engine state
-    instead of today's idle placeholders. This item is unchanged in
-    substance from the old, single "W10 — Live Command Center" entry; it
-    is split into its own phase (W11) so that "build the UI against
-    already-complete backends" (W10) and "wire a real data source behind
-    those backends" (W11) aren't one phase conflating two different
-    kinds of work. Not started.
+13. **W11** — Live Operations Center: `telemetry/world_export.py` (new,
+    Track A-side) calls existing read-only accessors — agent telemetry,
+    subsystem heartbeats, circuit-breaker latency (now instrumented),
+    active missions, portfolio drawdown/PnL/win-rate, and
+    `events.event_bus`'s `get_recent()` — and writes them as the raw
+    payloads Phase W4's readers expect. `main.py` schedules one export +
+    `RuntimeManager.run_once()` per trading cycle, at the same cadence
+    and with the same defensive wrapping as Phase W10's simulation tick.
+    `portfolio.schema.json` gained an optional, additive `summary`
+    object (real PnL/drawdown/win-rate, by explicit exception to the
+    "no financial data" principle — see
+    `docs/architecture/SEPARATION_POLICY.md` "Phase W11 amendment"),
+    threaded all the way through to `WorldState.portfolio_summary`.
+    CPU/RAM added via `psutil`, the one new dependency. All five Phase
+    W4 readers now have live data; individual open exchange positions
+    and true exchange/API-call latency remain future work (no verified
+    read-only accessor was found for either — see
+    `world/docs/LIVE_OPERATIONS_CENTER.md` "Known Gaps"). **Done.**
+14. **W12 (proposed)** — Close the two gaps W11 documented rather than
+    guessed: (a) a real mapping between `events/event_bus.py`'s
+    subsystem agent names and the Phase W1 district `assignedAgents`
+    codenames, so live events place themselves in the correct room
+    instead of the neutral `command-hall` fallback; (b) a verified
+    read-only accessor for currently-open exchange positions (as
+    opposed to the most recent portfolio-decision-cycle figures W11
+    wired), if one gets built in Track A. Both are additive,
+    Track-B-visualization-quality improvements, not corrections to
+    anything W11 shipped.

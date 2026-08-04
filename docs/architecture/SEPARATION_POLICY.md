@@ -128,6 +128,57 @@ Never the reverse.
 
 ---
 
+## Phase W11 amendment (added 2026-08-03)
+
+Phase W11 wires the Communication contract above to real data for the
+first time (Phases W1–W10 built the pipeline; nothing produced real
+output until W11). Two changes to this policy, both explicit and both
+still one-way:
+
+1. **Portfolio-wide read-only figures are now permitted to cross the
+   boundary.** Individual positions still never carry raw notional
+   size (`sizeLabel` stays a free-text display label — see
+   `world/data/schemas/portfolio.schema.json`). But the optional
+   top-level `summary` object in `portfolio.json` (`dailyPnl`,
+   `floatingPnl`, `drawdown`, `winRate`, `avgRr`) is real, sourced
+   verbatim from the trading engine's own existing read-only
+   accessors — `portfolio.portfolio_history.get_latest_decisions()`
+   and `journal.journal_v2.TradeJournalV2.get_daily_stats()` — never
+   recomputed in `world/`. This is a deliberate exception to Track B's
+   "presentation-only reflection, not a financial data feed"
+   principle, made by explicit request; every other aspect of the
+   one-way contract is unchanged.
+
+2. **The export side of the contract now has an implementation**:
+   `telemetry/world_export.py`, a new Track A-side module. It only
+   ever *calls* existing accessors (see that file's own docstring for
+   the complete list) and *writes* JSON — it never imports anything
+   from `world/`, and `RuntimeManager.run_once()` (Track B) never
+   imports anything from Track A. The dependency direction in the
+   diagram above is unchanged; this module is the first concrete
+   instance of the "Trading Engine exports data" box.
+
+**Known gaps, documented rather than papered over:**
+
+- Two vocabulary mismatches between Track A and Track B were
+  discovered while building the exporter, with no existing mapping
+  anywhere in the codebase: (a) `events/event_bus.py` publishers use
+  real subsystem names (`RISK_MANAGER`, `SMC_ANALYST`, ...) that don't
+  match the Phase W1 district `assignedAgents` codenames (`PRIMUS`,
+  `BASTION`, ...); (b) `missions/mission_tracker.py`'s stage
+  vocabulary (`SIGNAL_FOUND` → ... → `CLOSED`) doesn't match
+  `missions.schema.json`'s status enum. Both are handled with a
+  documented, conservative fallback in `telemetry/world_export.py`
+  (events default to a neutral district; mission stages collapse to
+  `proposed`/`active`) rather than a guessed 1:1 mapping. Building a
+  real mapping is a candidate for a follow-up phase.
+- No read-only accessor for the trading engine's currently-open
+  exchange positions (a live list, as opposed to the most recent
+  portfolio-decision-cycle figures above) was found. `positions` in
+  `portfolio.json` remains empty until one is identified.
+
+---
+
 ## Enforcement
 
 - PRs touching Track A must not add sprite/animation/world-asset
