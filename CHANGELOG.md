@@ -300,6 +300,60 @@ trades. See PATCH_NOTES.md and architecture.md §33 for full detail.
 
 ---
 
+## [Unreleased] — V16 Phase 4B Step 3A: Symbol Isolation & Per-Symbol Regime Models
+
+*(Backfilled during the C2 repository consolidation pass — this phase
+merged via PR #13 on 2026-07-26 but had no CHANGELOG entry. Content below
+is reconstructed from that PR's own merge commit message, not invented.)*
+
+Architectural prerequisite for CEO Agent multi-symbol integration
+(Step 3B+). Additive only — no CEO multi-symbol execution, no
+`PortfolioSignalProvider`/`ExecutionOrchestrator`/journal/trade-attribution/
+public-API changes.
+
+Root cause fixed: `AgentReport` had no `symbol` field, so sequential
+multi-symbol `analyse()` calls on a shared agent instance produced
+reports indistinguishable by symbol after the fact. Separately,
+`RegimeEngine` fit exactly one Gaussian HMM on whichever symbol's OHLCV
+reached `classify()` first and silently reused it for every other
+symbol for the process's lifetime (verified empirically: fitting on
+BTC-like low-volatility data then classifying altcoin-like
+high-volatility data reused the identical model object).
+
+### Added
+- **`agents/base_agent.py`**: `AgentReport` gains `symbol: str | None`
+  (default `None`); included in `to_dict()`. Every existing kwargs-based
+  construction site is unaffected.
+- **`agents/trader_agent.py`, `risk_manager.py`, `smc_analyst.py`,
+  `regime_analyst.py`, `journal_analyst.py`, `futures_analyst.py`**:
+  each `analyse()`'s `AgentReport(...)` now passes
+  `symbol=market_context.get("symbol")` — never fabricated when absent.
+- **`agents/ceo_agent.py`**: `CEODecision` gains `symbol: str | None`
+  (preparation only — does not touch action/confidence/score_breakdown/
+  agreement_score/weights_used computation).
+- **`regime/regime_engine.py`**: single `self._hmm_model`/`self._fitted`
+  replaced with `self.models`, a dict keyed by an optional `symbol`
+  parameter on `classify()`. Omitting `symbol` (every caller as of this
+  commit) maps to one fixed default key, reproducing prior
+  single-shared-model behavior byte-for-byte. Passing an explicit
+  `symbol` gives that symbol its own independently-fit model.
+
+### Known limitation
+`execution/portfolio_signal_provider.py`'s own `RegimeEngine.classify()`
+call is **not** wired with `symbol=` by this phase (out of scope per its
+own stated constraints) — the actual multi-symbol production caller that
+most needs per-symbol HMM isolation does not yet benefit from it. Step 3A
+builds the capability; wiring `PortfolioSignalProvider` to use it is
+deferred.
+
+### Testing
+`pytest tests/ -m unit -q` → 1626 passed, 0 failed (1600 baseline + 26
+new, `tests/test_symbol_isolation.py`). All 12 pre-existing
+`tests/test_regime.py` tests pass unchanged. `ruff check .` → clean.
+Benchmark (50 timed `classify()` calls, steady state): old mean 16.16ms
+vs. new-with-symbol mean 16.31ms — within one standard deviation of
+measurement noise, not a measurable regression.
+
 ## [Unreleased] — V16 Phase 4B Step 3B: CEO Decision Context + Multi-Symbol Signal Integration
 
 ### Added

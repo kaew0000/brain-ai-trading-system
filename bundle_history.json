@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-05T09:11:35Z",
+  "updated_at": "2026-08-05T09:30:12Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -204,10 +204,10 @@
       "sha": "acc402150b2abd1b09080d50cab184d9077181cc",
       "branch": "docs/c2-repository-consolidation",
       "bundle_filename": "c2-repository-consolidation.bundle",
-      "status": "failed",
-      "imported_at": "2026-08-05T09:11:35Z",
-      "pushed": false,
-      "reason": "checkout failed: error: Your local changes to the following files would be overwritten by checkout:\n\tbundle_history.json\nPlease commit your changes or stash them before you switch branches.\nAborting"
+      "status": "applied",
+      "imported_at": "2026-08-05T09:30:12Z",
+      "pushed": true,
+      "reason": null
     }
   ]
 }
