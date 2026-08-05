@@ -173,12 +173,69 @@ class TestWebSocketAuth:
             assert msg["type"] == "init"
 
 
-# ── Backward-compat contract ─────────────────────────────────────────────────
+# ── Default-value contract (V16 BUG-LIVE-RISK-01) ────────────────────────────
 
-class TestAuthDisabledByDefault:
-    def test_default_settings_has_auth_off(self):
+class TestAuthEnabledByDefault:
+    def test_default_settings_has_auth_on(self):
         from config.settings import Settings
-        # A fresh Settings() (no env overrides) must default to disabled —
-        # every other test module's unauthenticated TestClient calls, and
-        # any already-deployed instance, depends on this.
-        assert Settings().API_AUTH_ENABLED is False
+        # V16 BUG-LIVE-RISK-01: a fresh Settings() (no env overrides) must
+        # now default to ENABLED — a live deployment is secure without
+        # extra config. This test suite still runs with auth OFF by
+        # default via conftest.py's autouse
+        # `_default_auth_disabled_for_tests` fixture (a test-time-only
+        # override), NOT via this production-code default — read this
+        # assertion together with that fixture, not in isolation.
+        assert Settings().API_AUTH_ENABLED is True
+
+    def test_conftest_fixture_disables_auth_for_ordinary_tests(self):
+        # Meta-test: confirms the autouse fixture in conftest.py is
+        # actually active here even though this test requested nothing
+        # auth-related itself — this is what keeps every other test
+        # module's unauthenticated TestClient calls working unchanged.
+        from config.settings import settings
+        assert settings.API_AUTH_ENABLED is False
+
+
+class TestLiveModeRequiresAuth:
+    """
+    V16 BUG-LIVE-RISK-01: api/app.py's lifespan() refuses to start the
+    dashboard server at all when EXECUTION_MODE=live and
+    API_AUTH_ENABLED=false, regardless of what the default is. Checked at
+    server-startup time (lifespan), not at import time, so these tests
+    exercise `with TestClient(app):` rather than the bare import.
+    """
+
+    def test_live_mode_without_auth_refuses_to_start(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        from config.settings import settings
+        import api.app as app_module
+
+        monkeypatch.setenv("EXECUTION_MODE", "live")
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", False)
+
+        with pytest.raises(RuntimeError, match="Refusing to start"):
+            with TestClient(app_module.app):
+                pass
+
+    def test_live_mode_with_auth_starts_normally(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        from config.settings import settings
+        import api.app as app_module
+
+        monkeypatch.setenv("EXECUTION_MODE", "live")
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", True)
+
+        with TestClient(app_module.app):
+            pass  # no exception raised == started fine
+
+    def test_paper_mode_without_auth_still_starts(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        from config.settings import settings
+        import api.app as app_module
+
+        monkeypatch.setenv("EXECUTION_MODE", "paper")
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", False)
+
+        with TestClient(app_module.app):
+            pass  # paper/testnet may still legitimately run without auth
+

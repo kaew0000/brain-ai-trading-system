@@ -334,6 +334,27 @@ async def _supervised_broadcast() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # V16 BUG-LIVE-RISK-01: refuse to actually start serving if this is a
+    # real-money live run with no dashboard authentication. Checked here
+    # (server startup) rather than at bare module import time, so merely
+    # importing api.app for introspection/tests never raises — only
+    # actually starting the app (real uvicorn startup, or a test's
+    # `with TestClient(app):`) does. Reads EXECUTION_MODE fresh from the
+    # environment rather than trusting an import-time binding, since
+    # config.settings.EXECUTION_MODE is a plain module attribute a few
+    # tests intentionally mutate at runtime (see
+    # tests/test_execution_factory.py) — this avoids depending on import
+    # ordering to get the right value.
+    execution_mode = _os.environ.get("EXECUTION_MODE", "paper").strip().lower()
+    if execution_mode == "live" and not settings.API_AUTH_ENABLED:
+        raise RuntimeError(
+            "Refusing to start: EXECUTION_MODE=live but API_AUTH_ENABLED=false. "
+            "The dashboard API — including POST /api/command (pause/resume "
+            "live trading) and live position/balance data — would be "
+            "reachable with no authentication while real money is at risk. "
+            "Set API_AUTH_ENABLED=true and configure API_KEYS + JWT_SECRET "
+            "in .env before running live, or use EXECUTION_MODE=paper/testnet."
+        )
     task = asyncio.create_task(_supervised_broadcast())
     logger.info("Dashboard API V15 started — supervised broadcast loop running")
     yield
@@ -400,6 +421,10 @@ _AUTH_PUBLIC_PATHS = {
 # middleware does not run for the websocket ASGI scope.
 _AUTH_OPERATOR_ROUTES = {
     ("POST", "/api/command"),
+    # V16 BUG-LIVE-RISK-02: clearing an orphaned-position hold is a
+    # trading-safety decision (see system_health/recovery_engine.py),
+    # same trust level as pause/resume.
+    ("POST", "/api/system/reconciliation/acknowledge"),
 }
 
 
@@ -1410,12 +1435,36 @@ async def system_reconciliation(limit: int = Query(default=50, ge=1, le=200)):
             "status":       engine.status(),
             "events":       engine.get_recent(limit=limit),
             "recovery_log": recovery.get_attempt_log(limit=limit),
+            # V16 BUG-LIVE-RISK-02: surfaces whether an orphaned exchange
+            # position is currently holding new trade entries, and why.
+            "orphan_hold":  recovery.get_orphan_hold(),
             "timestamp":    datetime.now(timezone.utc).isoformat(),
         })
     except Exception as exc:
         logger.error(f"/api/system/reconciliation error: {exc}", exc_info=True)
-        return _ok({"status": {}, "events": [], "recovery_log": [],
+        return _ok({"status": {}, "events": [], "recovery_log": [], "orphan_hold": None,
                     "timestamp": datetime.now(timezone.utc).isoformat(), "error": str(exc)})
+
+
+@app.post("/api/system/reconciliation/acknowledge")
+async def system_reconciliation_acknowledge(request: Request):
+    """
+    V16 BUG-LIVE-RISK-02: clear an active orphaned-position hold (see
+    system_health/recovery_engine.py) so new trade entries can resume.
+    OPERATOR role required (see _AUTH_OPERATOR_ROUTES) — this does not
+    re-verify exchange state itself, it records that a human reviewed
+    and confirmed the position is protected/handled.
+    """
+    try:
+        recovery = get_recovery_engine()
+        auth_ctx = getattr(request.state, "auth", None)
+        operator = auth_ctx.principal if auth_ctx is not None else "unauthenticated"
+        result = recovery.acknowledge_orphaned_position(sys=_state, operator=operator)
+        return _ok({"result": result, "orphan_hold": recovery.get_orphan_hold(),
+                    "timestamp": datetime.now(timezone.utc).isoformat()})
+    except Exception as exc:
+        logger.error(f"/api/system/reconciliation/acknowledge error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Phase 3C — ML endpoints ───────────────────────────────────────────────────

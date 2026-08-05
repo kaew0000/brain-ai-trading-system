@@ -51,7 +51,37 @@ class RiskEngine:
         self.journal               = journal
         self._disabled_today: bool = False
         self._disable_date: date | None = None
+        # V16 BUG-LIVE-RISK-02: manual hold, distinct from _disabled_today.
+        # _disabled_today auto-clears at the next UTC day boundary (see
+        # _reset_if_new_day) — appropriate for daily-loss/consecutive-loss
+        # limits, but wrong for "an exchange position was found with no
+        # protective SL/TP and no journal record of it" (RecoveryEngine,
+        # system_health/recovery_engine.py): that condition must keep
+        # blocking new entries across day boundaries until a human
+        # explicitly acknowledges it, not just until midnight UTC.
+        self._manual_hold_reason: str | None = None
         logger.info("RiskEngine ready")
+
+    # ── Manual hold (V16 BUG-LIVE-RISK-02) ──────────────────────────────────
+
+    def set_manual_hold(self, reason: str) -> None:
+        """Block can_trade() until clear_manual_hold() is called explicitly.
+        Does NOT auto-clear at the UTC day boundary — use disable_trading_today()
+        for that instead. Calling this again while already held overwrites the
+        reason (last caller wins) without needing to be cleared first."""
+        self._manual_hold_reason = reason
+        logger.critical(f"TRADING MANUALLY HELD | {reason}")
+
+    def clear_manual_hold(self) -> None:
+        if self._manual_hold_reason is not None:
+            logger.warning(f"Manual trading hold cleared (was: {self._manual_hold_reason})")
+        self._manual_hold_reason = None
+
+    def has_manual_hold(self) -> bool:
+        return self._manual_hold_reason is not None
+
+    def manual_hold_reason(self) -> str | None:
+        return self._manual_hold_reason
 
     # ── Day boundary ──────────────────────────────────────────────────────
 
@@ -145,6 +175,9 @@ class RiskEngine:
         """
         self._reset_if_new_day()
 
+        if self._manual_hold_reason is not None:
+            return False, self._manual_hold_reason
+
         if self._disabled_today:
             return False, "Trading disabled for today"
 
@@ -183,4 +216,8 @@ class RiskEngine:
             "dynamic_leverage":   self.get_leverage(atr_pct),
             "atr_pct":            atr_pct,
             "volatility_factor":  self._volatility_factor(atr_pct),
+            # V16 BUG-LIVE-RISK-02 additions. New keys only — every key
+            # above is unchanged, so existing readers keep working.
+            "manual_hold":        self._manual_hold_reason is not None,
+            "manual_hold_reason": self._manual_hold_reason,
         }

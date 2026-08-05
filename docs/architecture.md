@@ -3178,3 +3178,79 @@ Binance mainnet using whatever is in `BINANCE_API_KEY`/`BINANCE_API_SECRET`
 in `.env`. Confirm those are genuine mainnet keys with the intended
 permissions and IP whitelist before running live for the first time after
 this patch.
+
+## Hotfix (2026-08-05): Live-Trading Risk Hardening (BUG-LIVE-RISK-01..04)
+
+Source: `KNOWN_BUGS_LIVE_TRADING_RISK.md`, a 4-item bug list found via
+source inspection of `main` *after* BUG-V16-BP-05 (§ above) landed — all
+four independently verified still present, against a fresh clone, before
+any code was written for this patch.
+
+### BUG-LIVE-RISK-01 — Dashboard API had no auth by default
+**Root cause:** `config/settings.py`'s `API_AUTH_ENABLED` defaulted to
+`False` with nothing stopping `EXECUTION_MODE=live` from running that
+way. **Change:** default flipped to `True`; `api/app.py`'s `lifespan()`
+now refuses to start at all if `EXECUTION_MODE=live` and auth is off
+regardless of how it got that way (checked at server-startup, not import
+time, so test/introspection imports never raise); `conftest.py` gained
+an autouse fixture pinning the *test-time* default back to `False` so
+the ~18 other test files with unauthenticated `TestClient(app)` calls
+needed no individual changes.
+
+### BUG-LIVE-RISK-02 — Orphaned exchange positions got zero protection
+**Root cause:** `system_health/recovery_engine.py` only handled "journal
+thinks open, exchange flat" (ghost row). The opposite case — exchange
+has a real position, journal has no record of it at all — fell through
+to `no_safe_auto_action` with just a log line: no SL, no alert, no block
+on new entries. **Change:** new `_protect_orphaned_exchange_position()`
+auto-places a protective SL sized off `RISK_PER_TRADE_MAX` (idempotent —
+won't stack a second SL on repeat cycles) and sets a new
+`RiskEngine.set_manual_hold()`, checked first in `can_trade()`.
+Deliberately separate from `disable_trading_today()`, which auto-clears
+at the UTC day boundary — wrong here; this must persist until a human
+calls the new `acknowledge_orphaned_position()`
+(`POST /api/system/reconciliation/acknowledge`, OPERATOR role). Status
+surfaced via `GET /api/system/reconciliation`'s new `orphan_hold` field.
+
+### BUG-LIVE-RISK-03 — Leverage-change failure never checked before sizing
+**Root cause:** `TradeManager.execute_trade()` discarded
+`set_leverage()`'s bool return and sized against the *intended* leverage
+even when the exchange call actually failed. **Change:** on failure, new
+`_query_actual_leverage()` re-queries the real current leverage via
+`get_position_risk()` and sizes against that; if the re-query itself
+can't be verified, the trade aborts rather than guessing. Re-raises
+retryable `ClientError`s (same classification as `close_position` etc.)
+so its own `retries=3` is real, not dead code.
+
+### BUG-LIVE-RISK-04 — Emergency close had a lower retry budget than its trigger
+**Root cause:** `close_position()` (the fallback when SL placement fails
+after all of `place_stop_loss`'s retries) had `retries=2, delay=2.0` vs.
+`place_stop_loss`'s `retries=5, delay=3.0`. **Change:** aligned to
+`retries=5, delay=3.0`. Deliberately did not add the trade circuit
+breaker here — a breaker already open from the preceding SL failures
+would fast-fail the emergency close instead of attempting it.
+
+### Blast radius
+`config/settings.py`, `api/app.py`, `risk/risk_engine.py`,
+`system_health/recovery_engine.py`, `execution/trade_manager.py`,
+`conftest.py` (test-only). `RiskEngine.can_trade()`'s signature/contract
+unchanged — `portfolio/capital_manager.py` and all other callers
+unaffected. `TradeManager.execute_trade()`'s public contract unchanged.
+
+### Testing
+30 new tests across `tests/test_api_auth.py`,
+`tests/test_execution.py`, `tests/test_v16_execution_idempotency.py`,
+the new `tests/test_recovery_engine.py` (first-ever coverage for
+`RecoveryEngine` — none existed before), and `tests/test_audit_fixes.py`.
+Full suite: `pytest -m unit -q` → 1948 passed, 0 failed (1918 baseline +
+30 new). `ruff check .` clean. Verified in a second, independent fresh
+clone before commit.
+
+### Follow-up found but not fixed here (out of scope for this bundle)
+`tests/test_execution_factory.py` mutates
+`os.environ["EXECUTION_MODE"]`/`config.settings.EXECUTION_MODE` across
+several tests and never restores it — latent today only because that
+file's last call happens to leave it at `"paper"`. BUG-LIVE-RISK-01's
+fail-fast check was deliberately written to read `EXECUTION_MODE` fresh
+from the environment each time (not an import-time binding) specifically
+to sidestep this hazard rather than depend on it staying benign.

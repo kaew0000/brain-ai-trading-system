@@ -316,6 +316,64 @@ class TestRiskEngine:
                     "today_pnl", "dynamic_risk_pct"):
             assert key in rpt
 
+    # ── V16 BUG-LIVE-RISK-02: manual hold ───────────────────────────────────
+
+    def _mk_engine(self, ms):
+        from risk.risk_engine import RiskEngine
+        ms.MAX_DAILY_LOSS          = 0.03
+        ms.MAX_CONSECUTIVE_LOSSES  = 3
+        ms.RISK_PER_TRADE_MIN      = 0.005
+        ms.RISK_PER_TRADE_MAX      = 0.01
+        return RiskEngine(self._make_journal())
+
+    def test_manual_hold_blocks_can_trade(self):
+        with patch("risk.risk_engine.settings") as ms:
+            eng = self._mk_engine(ms)
+            eng.set_manual_hold("orphaned position")
+            ok, reason = eng.can_trade(1_000.0)
+        assert ok is False
+        assert reason == "orphaned position"
+
+    def test_manual_hold_not_active_by_default(self):
+        with patch("risk.risk_engine.settings") as ms:
+            eng = self._mk_engine(ms)
+        assert eng.has_manual_hold() is False
+        assert eng.manual_hold_reason() is None
+
+    def test_clear_manual_hold_restores_trading(self):
+        with patch("risk.risk_engine.settings") as ms:
+            eng = self._mk_engine(ms)
+            eng.set_manual_hold("orphaned position")
+            eng.clear_manual_hold()
+            ok, reason = eng.can_trade(1_000.0)
+        assert ok is True
+        assert reason == ""
+        assert eng.has_manual_hold() is False
+
+    def test_manual_hold_survives_new_day_unlike_disable_today(self):
+        # The whole point of manual_hold vs disable_trading_today: it must
+        # NOT be cleared by _reset_if_new_day(). Force the day-rollover
+        # branch directly rather than depending on real wall-clock time.
+        from datetime import date, timedelta
+        with patch("risk.risk_engine.settings") as ms:
+            eng = self._mk_engine(ms)
+            eng.set_manual_hold("orphaned position")
+            eng._disable_date   = date.today() - timedelta(days=2)
+            eng._disabled_today = True
+            ok, reason = eng.can_trade(1_000.0)
+        assert ok is False
+        assert reason == "orphaned position"
+        assert eng._disabled_today is False  # day-boundary reset did happen
+
+    def test_manual_hold_takes_priority_over_disabled_today(self):
+        with patch("risk.risk_engine.settings") as ms:
+            eng = self._mk_engine(ms)
+            eng.disable_trading_today("daily loss limit")
+            eng.set_manual_hold("orphaned position")
+            ok, reason = eng.can_trade(1_000.0)
+        assert ok is False
+        assert reason == "orphaned position"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TradeJournal

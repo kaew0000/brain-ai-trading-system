@@ -96,12 +96,23 @@ class Settings(BaseSettings):
     JOURNAL_DB_PATH: str = Field(default="brain_bot_journal.db")
     DATABASE_PATH: str = Field(default="brain_bot_v13.db")
 
-    # ── Dashboard API Authentication (P1-A) ────────────────
-    # Off by default so existing deployments/tests keep working unchanged.
-    # api/app.py logs a loud warning at startup whenever this is False.
-    # Flip to true + configure API_KEYS + JWT_SECRET before exposing the
-    # dashboard beyond localhost.
-    API_AUTH_ENABLED: bool = Field(default=False, alias="API_AUTH_ENABLED")
+    # ── Dashboard API Authentication (P1-A / V16 BUG-LIVE-RISK-01) ────────
+    # V16 BUG-LIVE-RISK-01: was default=False ("off by default so existing
+    # deployments/tests keep working unchanged"). In practice that meant
+    # every /api/* and /ws/* endpoint — including POST /api/command
+    # (pause/resume live trading) and live position/balance data — was
+    # reachable with NO authentication unless an operator remembered to
+    # flip this in .env before exposing the dashboard beyond localhost.
+    # Now defaults to True: a fresh deployment is secure without extra
+    # config. Set to false explicitly (.env: API_AUTH_ENABLED=false) for
+    # local-only dashboards where auth is genuinely unnecessary. api/app.py
+    # additionally refuses to start at all when EXECUTION_MODE=live and
+    # this is false (see api/app.py's lifespan()) — real-money live mode
+    # can no longer run with an unauthenticated dashboard even if this is
+    # left/set to false by mistake. The test suite pins its own default
+    # via conftest.py's autouse fixture, matching the old behavior, so
+    # this change doesn't require touching every test file individually.
+    API_AUTH_ENABLED: bool = Field(default=True, alias="API_AUTH_ENABLED")
     # JSON object mapping raw API key -> role ("admin"|"operator"|"viewer").
     # e.g. API_KEYS={"changeme-op-key":"operator","changeme-view-key":"viewer"}
     API_KEYS: dict[str, str] = Field(default_factory=dict, alias="API_KEYS")
