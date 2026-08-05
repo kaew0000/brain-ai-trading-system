@@ -123,7 +123,114 @@ class TestRetryActuallyRetriesNow:
         assert client.new_order.call_count == 1
 
 
-class TestDuplicateOrderRecovery:
+class TestClosePositionRetryBudget:
+    """V16 BUG-LIVE-RISK-04: close_position is the emergency fallback used
+    when SL placement fails after ALL of place_stop_loss's retries — it
+    must not give up more easily than the thing it's a fallback for."""
+
+    def test_close_position_retries_as_many_times_as_place_stop_loss(self):
+        m, client = _make_manager()
+        rate_limited = _client_error(429, -1015, "Too many requests.")
+        # 4 failures then success on the 5th attempt — only possible to
+        # observe if retries=5 (old retries=2 would have raised out after
+        # attempt 2 and never reached call #5).
+        client.new_order.side_effect = [
+            rate_limited, rate_limited, rate_limited, rate_limited,
+            {"orderId": 9, "status": "FILLED"},
+        ]
+        with patch("execution.trade_manager.time.sleep"):
+            result = m.close_position("LONG", 0.05, client_order_id="bbCLOSERETRY")
+        assert client.new_order.call_count == 5
+        assert result == {"orderId": 9, "status": "FILLED"}
+
+
+class TestLeverageReQueryOnSetLeverageFailure:
+    """V16 BUG-LIVE-RISK-03: set_leverage()'s return value must actually be
+    checked. On failure, re-query the exchange's real current leverage and
+    size the trade against THAT — not the intended-but-unconfirmed value."""
+
+    def _stub_happy_order_flow(self, client):
+        client.new_order.return_value = {"orderId": 1, "status": "FILLED"}
+
+    def test_sizes_against_actual_leverage_when_set_leverage_fails(self):
+        m, client = _make_manager()
+        client.change_leverage.side_effect = _client_error(400, -4046, "No need to change margin type.")
+        client.get_position_risk.return_value = [
+            {"symbol": "BTCUSDT", "leverage": "3"},
+        ]
+        self._stub_happy_order_flow(client)
+
+        with patch.object(m, "calculate_position_size", return_value=0.02) as mock_calc, \
+             patch("execution.trade_manager.time.sleep"):
+            result = m.execute_trade(
+                direction="LONG", entry_price=67000.0, stop_loss=65800.0,
+                take_profit=69400.0, balance=10000.0, risk_pct=0.01, leverage=10,
+            )
+
+        # intended leverage was 10x; actual on the exchange was 3x —
+        # calculate_position_size must be called with the ACTUAL value.
+        mock_calc.assert_called_once_with(10000.0, 67000.0, 65800.0, 0.01, 3)
+        assert result["success"] is True
+
+    def test_uses_intended_leverage_when_set_leverage_succeeds(self):
+        """Sanity check / non-regression: the normal (no-failure) path is unchanged."""
+        m, client = _make_manager()
+        client.change_leverage.return_value = {}  # no exception == success
+        self._stub_happy_order_flow(client)
+
+        with patch.object(m, "calculate_position_size", return_value=0.02) as mock_calc, \
+             patch("execution.trade_manager.time.sleep"):
+            m.execute_trade(
+                direction="LONG", entry_price=67000.0, stop_loss=65800.0,
+                take_profit=69400.0, balance=10000.0, risk_pct=0.01, leverage=10,
+            )
+
+        mock_calc.assert_called_once_with(10000.0, 67000.0, 65800.0, 0.01, 10)
+        client.get_position_risk.assert_not_called()
+
+    def test_aborts_trade_when_leverage_cannot_be_verified(self):
+        """If set_leverage fails AND the re-query also fails, abort rather
+        than guess — no order should be placed at all."""
+        m, client = _make_manager()
+        client.change_leverage.side_effect = _client_error(400, -4046, "No need to change margin type.")
+        client.get_position_risk.side_effect = _client_error(400, -1000, "An unknown error occurred.")
+        self._stub_happy_order_flow(client)
+
+        with patch("execution.trade_manager.time.sleep"):
+            result = m.execute_trade(
+                direction="LONG", entry_price=67000.0, stop_loss=65800.0,
+                take_profit=69400.0, balance=10000.0, risk_pct=0.01, leverage=10,
+            )
+
+        assert result["success"] is False
+        assert "leverage" in result["error"].lower()
+        client.new_order.assert_not_called()
+
+    def test_retryable_requery_error_is_retried(self):
+        """The re-query call itself must honor @retry_api_call, not
+        swallow a retryable ClientError internally (that would be
+        BUG-V16-EXEC-01(b) again, just relocated to this new method)."""
+        m, client = _make_manager()
+        client.change_leverage.side_effect = _client_error(400, -4046, "No need to change margin type.")
+        rate_limited = _client_error(429, -1015, "Too many requests.")
+        client.get_position_risk.side_effect = [
+            rate_limited,
+            [{"symbol": "BTCUSDT", "leverage": "3"}],
+        ]
+        self._stub_happy_order_flow(client)
+
+        with patch.object(m, "calculate_position_size", return_value=0.02) as mock_calc, \
+             patch("execution.trade_manager.time.sleep"):
+            result = m.execute_trade(
+                direction="LONG", entry_price=67000.0, stop_loss=65800.0,
+                take_profit=69400.0, balance=10000.0, risk_pct=0.01, leverage=10,
+            )
+
+        assert client.get_position_risk.call_count == 2
+        mock_calc.assert_called_once_with(10000.0, 67000.0, 65800.0, 0.01, 3)
+        assert result["success"] is True
+
+
     """BUG-V16-EXEC-01(a): if the exchange rejects a retry because the
     clientOrderId was already used, that means the original attempt likely
     succeeded — recover it via query_order instead of reporting failure or,

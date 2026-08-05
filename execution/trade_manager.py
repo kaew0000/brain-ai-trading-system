@@ -166,6 +166,38 @@ class TradeManager:
             return False
 
     @retry_api_call(retries=3, delay=2.0)
+    def _query_actual_leverage(self) -> int | None:
+        """
+        V16 BUG-LIVE-RISK-03: re-query the exchange's *actual* current
+        leverage for this symbol. Used when set_leverage() reports failure
+        (e.g. "Margin type cannot be changed if there exists position",
+        rate limit, transient error) so the caller can size the trade
+        against ground truth instead of assuming the intended leverage was
+        applied. Returns None (not an exception) on a non-retryable lookup
+        failure, so callers can treat "couldn't verify" as its own
+        distinct case rather than an uncaught crash. Retryable errors are
+        re-raised (same classification helper as close_position /
+        place_market_order etc. use) so @retry_api_call's retries=3 is
+        real and not dead code — swallowing every ClientError internally
+        here would be exactly BUG-V16-EXEC-01(b) again, just relocated.
+        """
+        try:
+            raw = self.client.get_position_risk(symbol=self.symbol, recvWindow=5000)
+        except ClientError as exc:
+            if _is_retryable_client_error(exc):
+                logger.warning(f"_query_actual_leverage error (retryable, propagating): {exc}")
+                raise
+            logger.error(f"_query_actual_leverage error (non-retryable): {exc}")
+            return None
+        for p in raw:
+            if p.get("symbol") == self.symbol:
+                try:
+                    return int(p.get("leverage"))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    @retry_api_call(retries=3, delay=2.0)
     def set_margin_type(self, margin_type: str = "ISOLATED") -> bool:
         try:
             self.client.change_margin_type(symbol=self.symbol, marginType=margin_type)
@@ -514,7 +546,18 @@ class TradeManager:
             logger.error(f"cancel_all_orders error: {exc}")
             return False
 
-    @retry_api_call(retries=2, delay=2.0)
+    # V16 BUG-LIVE-RISK-04: retry budget was 2/2.0s — lower than
+    # place_stop_loss's 5/3.0s despite close_position being the "last line
+    # of defense" call used to flatten a naked position when SL placement
+    # fails after all 5 of ITS retries. Aligned to match place_stop_loss's
+    # retries/delay so the fallback isn't more likely to give up than the
+    # thing it's a fallback for. Deliberately NOT adding breaker=_TRADE_BREAKER
+    # here (unlike place_stop_loss/place_market_order/place_take_profit): if
+    # the breaker were already open from the preceding SL failures, wrapping
+    # this call in the same breaker would fast-fail the emergency close
+    # instead of attempting it — the opposite of what a last-resort safety
+    # action should do.
+    @retry_api_call(retries=5, delay=3.0)
     def close_position(
         self, direction: str, quantity: float, client_order_id: str | None = None
     ) -> dict | None:
@@ -607,12 +650,40 @@ class TradeManager:
         }
 
         try:
-            self.set_leverage(leverage or settings.LEVERAGE)
+            intended_leverage = leverage or settings.LEVERAGE
+            leverage_ok = self.set_leverage(intended_leverage)
             self.set_margin_type("ISOLATED")
             self.cancel_all_orders()
 
+            # V16 BUG-LIVE-RISK-03: set_leverage()'s return value used to be
+            # discarded — calculate_position_size() would size against the
+            # INTENDED leverage even if the exchange call actually failed
+            # (e.g. "Margin type cannot be changed if there exists
+            # position"), silently allowing a larger notional than the
+            # account can really support at the leverage it's actually
+            # running at. Now: on failure, re-query the exchange's real
+            # current leverage and size against THAT instead. If the
+            # re-query itself can't be verified, abort rather than guess —
+            # sizing against an unknown leverage is not a safe default for
+            # a real order.
+            effective_leverage = intended_leverage
+            if not leverage_ok:
+                actual_leverage = self._query_actual_leverage()
+                if actual_leverage is None:
+                    raise RuntimeError(
+                        "set_leverage failed and actual exchange leverage "
+                        "could not be verified — aborting trade rather than "
+                        "sizing against an unconfirmed leverage"
+                    )
+                logger.warning(
+                    f"set_leverage failed; re-queried actual exchange "
+                    f"leverage={actual_leverage}x (intended was "
+                    f"{intended_leverage}x) — sizing against the ACTUAL value"
+                )
+                effective_leverage = actual_leverage
+
             qty = self.calculate_position_size(
-                balance, entry_price, stop_loss, risk_pct, leverage
+                balance, entry_price, stop_loss, risk_pct, effective_leverage
             )
             if qty <= 0:
                 raise ValueError(f"Invalid qty={qty}")

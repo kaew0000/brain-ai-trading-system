@@ -612,6 +612,99 @@ class TestAPIHealth:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# V16 BUG-LIVE-RISK-02: /api/system/reconciliation orphan_hold field +
+# /api/system/reconciliation/acknowledge endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+class TestReconciliationOrphanHoldAPI:
+
+    @pytest.fixture(autouse=True)
+    def _reset_singletons(self):
+        from system_health.recovery_engine import reset_recovery_engine
+        import api.app as app_module
+        # V16 BUG-LIVE-RISK-02 test hygiene: api.app._state is a
+        # module-level global that persists for the whole pytest session
+        # (set_state() has no scoping), not just this test. Without
+        # save/restore here, test_acknowledge_clears_active_hold's
+        # set_state("risk_engine", <bare MagicMock>) would leak into
+        # every test that runs afterward in the same session and expects
+        # a properly-configured risk_engine mock (found by running the
+        # full suite: tests/test_commander.py::TestCommandWebSocket::
+        # test_ws_command_no_duplicate_reply failed only when run after
+        # this file, never in isolation).
+        orig_risk_engine = app_module._state.get("risk_engine")
+        reset_recovery_engine()
+        yield
+        reset_recovery_engine()
+        app_module.set_state("risk_engine", orig_risk_engine)
+
+    def _client(self):
+        from api.app import app
+        from fastapi.testclient import TestClient
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_orphan_hold_is_null_when_nothing_held(self):
+        with self._client() as c:
+            r = c.get("/api/system/reconciliation")
+        assert r.status_code == 200
+        assert r.json()["data"]["orphan_hold"] is None
+
+    def test_orphan_hold_reflects_active_hold(self):
+        from system_health.recovery_engine import get_recovery_engine
+        from unittest.mock import MagicMock
+        eng = get_recovery_engine()
+        dp = MagicMock()
+        dp.get_position_info.return_value = {
+            "symbol": "BTCUSDT", "side": "LONG", "positionAmt": 0.05,
+            "entryPrice": 67000.0, "markPrice": 67100.0, "leverage": 5,
+        }
+        dp.get_account_balance.return_value = 10_000.0
+        tm = MagicMock()
+        tm.place_stop_loss.return_value = {"orderId": 1, "status": "NEW"}
+        eng._protect_orphaned_exchange_position({"data_provider": dp, "trade_manager": tm})
+
+        with self._client() as c:
+            r = c.get("/api/system/reconciliation")
+        hold = r.json()["data"]["orphan_hold"]
+        assert hold is not None
+        assert hold["symbol"] == "BTCUSDT"
+
+    def test_acknowledge_with_no_hold_active(self):
+        with self._client() as c:
+            r = c.post("/api/system/reconciliation/acknowledge")
+        assert r.status_code == 200
+        assert r.json()["data"]["result"] == "no_hold_active"
+
+    def test_acknowledge_clears_active_hold(self):
+        from system_health.recovery_engine import get_recovery_engine
+        from unittest.mock import MagicMock
+        import api.app as app_module
+
+        eng = get_recovery_engine()
+        dp = MagicMock()
+        dp.get_position_info.return_value = {
+            "symbol": "BTCUSDT", "side": "LONG", "positionAmt": 0.05,
+            "entryPrice": 67000.0, "markPrice": 67100.0, "leverage": 5,
+        }
+        dp.get_account_balance.return_value = 10_000.0
+        tm = MagicMock()
+        tm.place_stop_loss.return_value = {"orderId": 1, "status": "NEW"}
+        risk = MagicMock()
+        eng._protect_orphaned_exchange_position(
+            {"data_provider": dp, "trade_manager": tm, "risk_engine": risk}
+        )
+        app_module.set_state("risk_engine", risk)
+
+        with self._client() as c:
+            r = c.post("/api/system/reconciliation/acknowledge")
+
+        assert r.status_code == 200
+        body = r.json()["data"]
+        assert body["result"] == "cleared"
+        assert body["orphan_hold"] is None
+        risk.clear_manual_hold.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # BUG-DASH-01: BusEvent must expose a monotonic "seq" so the dashboard
 # broadcast loop can detect new events. Previously the loop filtered on
 # a nonexistent "id" field, so `0 > 0` was always False and /ws/events

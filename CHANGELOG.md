@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## [Unreleased] — Hotfix: Live-Trading Risk Hardening (BUG-LIVE-RISK-01..04)
+
+Four real-money-risk bugs found via source inspection of `main` after
+BUG-V16-BP-05 (below) landed. Full detail: `PATCH_NOTES.md`,
+`MIGRATION.md`, `docs/architecture.md`.
+
+### Fixed
+- **BUG-LIVE-RISK-01** — `config/settings.py`'s `API_AUTH_ENABLED`
+  defaulted to `False` with nothing stopping a live run from using it.
+  Now defaults to `True`; `api/app.py` refuses to start at all when
+  `EXECUTION_MODE=live` and auth is off.
+- **BUG-LIVE-RISK-02** — a real exchange position with no journal record
+  (`system_health/recovery_engine.py`) got zero automatic protection.
+  Now auto-places a protective SL and blocks new entries
+  (`RiskEngine.set_manual_hold()`) until a human acknowledges via the
+  new `POST /api/system/reconciliation/acknowledge`.
+- **BUG-LIVE-RISK-03** — `execution/trade_manager.py`'s `execute_trade()`
+  discarded `set_leverage()`'s return value and sized against the
+  intended leverage even when the exchange call failed. Now re-queries
+  and sizes against the actual current leverage, aborting if that can't
+  be verified either.
+- **BUG-LIVE-RISK-04** — `close_position()`'s retry budget (2 attempts)
+  was lower than `place_stop_loss`'s (5), despite being the fallback
+  used when SL placement exhausts all of ITS retries. Aligned to match.
+
+### Added
+- `tests/test_recovery_engine.py` — first-ever test coverage for
+  `system_health/recovery_engine.py` (12 tests).
+- 18 further new tests across `tests/test_api_auth.py`,
+  `tests/test_execution.py`, `tests/test_v16_execution_idempotency.py`,
+  and `tests/test_audit_fixes.py`.
+- `conftest.py`: autouse fixture preserving the old auth-off-by-default
+  behavior for the existing test suite.
+
+### Impact
+`config/settings.py`, `api/app.py`, `risk/risk_engine.py`,
+`system_health/recovery_engine.py`, `execution/trade_manager.py`.
+`RiskEngine.can_trade()` and `TradeManager.execute_trade()` keep their
+existing signatures/contracts — internal logic only. **Operator impact:**
+see `MIGRATION.md` — `.env` without an explicit `API_AUTH_ENABLED` will
+now require `API_KEYS`/`JWT_SECRET` to avoid 401s, and
+`EXECUTION_MODE=live` can no longer start with auth off at all.
+Full suite: `pytest -m unit -q` → 1948 passed, 0 failed (1918 baseline +
+30 new). `ruff check .` clean.
+
 ## [Unreleased] — Hotfix: Live Trading Client Wiring (BUG-V16-BP-05)
 
 ### Fixed

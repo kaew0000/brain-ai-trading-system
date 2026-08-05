@@ -1,112 +1,146 @@
-# PATCH NOTES — V16 Phase 4C Step 1: Autonomous Learning Pipeline
+# PATCH NOTES — Live-Trading Risk Hardening (BUG-LIVE-RISK-01..04)
 
-Branch: `feature/phase4c-step1-autonomous-learning`
-Base: `main` (post Phase 4B Step 3D merge, tag `v16-engine-phase4b-step3d`, 1783 passing)
-Track: A only (`docs/architecture/SEPARATION_POLICY.md`)
+Branch: `feature/live-trading-risk-hardening`
+Base: `main` (post PR #29 / BUG-V16-BP-05 merge, commit `fdf864f`, 1918 passing)
+Track: A (backend/engine) only — no Track B (`world/`) files touched.
+Source: `KNOWN_BUGS_LIVE_TRADING_RISK.md`, a 4-item bug list found via
+source inspection of `main` *after* BUG-V16-BP-05 landed (i.e. these are
+independent of, and not fixed by, PR #29).
 
 ## Summary
 
-New `learning/` package: Trade Closed -> Journal -> Execution
-Attribution (existing) -> Dataset Builder -> Statistics -> Pattern
-Miner -> Recommendation Engine -> Snapshot -> Reports. READ ONLY
-throughout — no automatic weight, parameter, strategy, execution,
-portfolio, or risk changes anywhere in this phase.
+Four real-money-risk bugs found and fixed in one bundle, each verified
+independently against a fresh clone of `main` before any code was
+written. All four were confirmed still present as described in the
+source report; findings and the exact fix chosen for each were confirmed
+with the repo owner before implementation (auth: flip default + fail-fast
+on live; orphan position: auto-protect + hold-until-acknowledged;
+leverage: re-query and size against actual).
 
-## Discovery — read before writing any code
+## BUG-LIVE-RISK-01 — Dashboard API had no authentication by default
 
-1. The Learning Dataset already exists — `journal_v2.get_ensemble_learning_dataset()`
-   (Phase 4B Step 2). This phase wraps it, never re-queries the DB.
-2. Real surfacing gap found: `get_trade_attribution()` was already
-   storing `reason`/`source`/`duration_seconds`/close-time `confidence`
-   (Phase 4B Step 3D) but never returning them. Fixed additively — 13
-   new dict keys, nothing renamed/removed. The one deliberate exception
-   to "do not modify Journal behavior" this phase makes, flagged
-   explicitly.
-3. `regime`/`signal_confidence`/`score`/`mtf_aligned`/`smc_flags` are
-   only real for legacy single-symbol trades — `_record_trade_opened()`
-   (Phase 4B Step 2) never threaded market_context into the multi-symbol
-   `TradeRecord`. Pre-existing, not fixed here (would touch
-   ExecutionOrchestrator, forbidden this phase).
-4. `market_context`/`volatility`/`atr`/`spread` aren't stored anywhere
-   for any trade today — always `None`, schema-ready not fabricated.
-5. `get_ensemble_learning_dataset()`'s N+1 read pattern doesn't scale
-   past ~1,000 trades (see Benchmark) — a real, measured, pre-existing
-   characteristic, not fixed here.
+**Root cause:** `config/settings.py`'s `API_AUTH_ENABLED` defaulted to
+`False`, and nothing stopped `EXECUTION_MODE=live` from running with it
+left at that default. Auth machinery (`api/auth.py`) already existed and
+worked correctly — it just wasn't on unless an operator remembered to
+flip it in `.env`.
 
-## New modules (Track A, `learning/`)
+**Fix:**
+- `config/settings.py`: `API_AUTH_ENABLED` now defaults to `True`.
+- `api/app.py`'s `lifespan()`: refuses to start (`RuntimeError`) if
+  `EXECUTION_MODE=live` and `API_AUTH_ENABLED=false`, regardless of how
+  it got that way. Checked at server-startup time, not at bare import, so
+  importing `api.app` for tests/introspection never raises.
+- `conftest.py`: new autouse fixture pins the *test-time* default back to
+  `False` (matching the old behavior) so the ~18 other test files with
+  unauthenticated `TestClient(app)` calls don't need individual changes.
 
-| File | Purpose |
-|---|---|
-| `learning/dataset_builder.py` | `LearningDatasetBuilder(journal).build()` -> `LearningDataset`. Adds `cumulative_pnl`/`running_drawdown` (genuinely derived, not raw storage). |
-| `learning/_stats_utils.py` | Private shared `trade_stats()`/`streaks()` helpers. |
-| `learning/symbol_statistics.py`, `regime_statistics.py`, `agent_statistics.py`, `feature_statistics.py` | Per-dimension breakdowns. |
-| `learning/performance_tracker.py` | Overall stats, streaks, drawdown, hour/weekday breakdowns. |
-| `learning/pattern_miner.py` | `PatternMiner(min_sample_size=5).mine(dataset)` — every requested pattern kind, sample-size gated. Includes joint symbol×regime and first-half-vs-second-half trend patterns so the brief's own recommendation examples are grounded in real correlations, not glued-together independent facts. |
-| `learning/recommendation_engine.py` | Patterns -> human-readable, traceable Recommendations. Negative/actionable patterns only — positive ones don't get a redundant recommendation. |
-| `learning/learning_snapshot.py` | Immutable `LearningSnapshot` + `save_snapshot()` (timestamp-named JSON files, never overwritten). |
-| `learning/learning_report.py` | `LearningReportGenerator` — wires everything, writes the 4 requested JSON reports (these DO get overwritten each run). |
+## BUG-LIVE-RISK-02 — Pre-existing/orphaned exchange positions got zero automatic protection
 
-## Changes to existing modules
+**Root cause:** `system_health/recovery_engine.py`'s
+`attempt_reconciliation_recovery()` only handled the "ghost journal row"
+case (journal thinks a position is open, exchange is flat). The opposite
+and more dangerous case — a real exchange position with no journal
+record at all (pre-existing before this bot session, or opened outside
+the bot's lifecycle) — fell through to `"no_safe_auto_action"` with
+nothing beyond a log line. No SL/TP, no alert, no block on new entries.
+
+**Fix:**
+- `system_health/recovery_engine.py`: new
+  `_protect_orphaned_exchange_position()` — re-queries the live position,
+  auto-places a protective SL sized off `settings.RISK_PER_TRADE_MAX`
+  (same convention `TradeManager.calculate_position_size()` already
+  uses), and sets a hold via the new `RiskEngine.set_manual_hold()`.
+  Idempotent: won't re-place a second SL on repeated cycles for the same
+  position. New `acknowledge_orphaned_position()` clears the hold —
+  intended to be called by a human after they've reviewed the position,
+  not automatically.
+- `risk/risk_engine.py`: new manual-hold mechanism
+  (`set_manual_hold`/`clear_manual_hold`/`has_manual_hold`), checked
+  first in `can_trade()`. Deliberately separate from the existing
+  `disable_trading_today()` — that auto-clears at the UTC day boundary
+  (correct for daily-loss limits), which would be wrong here; an
+  unprotected position must stay blocked across day boundaries until a
+  human clears it.
+- `api/app.py`: `GET /api/system/reconciliation` now includes an
+  `orphan_hold` field. New `POST /api/system/reconciliation/acknowledge`
+  (OPERATOR role required) clears the hold.
+
+## BUG-LIVE-RISK-03 — Leverage-change failure was logged but never checked before sizing
+
+**Root cause:** `execution/trade_manager.py`'s `execute_trade()` called
+`self.set_leverage(...)` and discarded its bool return value, then sized
+the position against the *intended* leverage regardless of whether the
+exchange call actually succeeded (e.g. `"Margin type cannot be changed if
+there exists position"`). Could silently size a larger notional than the
+account actually supports at the leverage it's really running at.
+
+**Fix:** `execute_trade()` now checks `set_leverage()`'s return. On
+failure, new `_query_actual_leverage()` re-queries the exchange's real
+current leverage via `get_position_risk()` and sizes against that instead
+of the intended value. If the re-query itself can't be verified, the
+trade aborts (`RuntimeError`) rather than guessing. `_query_actual_leverage()`
+re-raises retryable `ClientError`s (same classification helper
+`close_position`/`place_market_order` already use) so its own
+`@retry_api_call(retries=3)` is real — silently swallowing them would be
+BUG-V16-EXEC-01(b) again, just relocated.
+
+## BUG-LIVE-RISK-04 — Emergency close had a lower retry budget than the SL it's a fallback for
+
+**Root cause:** `close_position()` — the call used to flatten a naked
+position when SL placement fails after all of `place_stop_loss`'s
+retries — had `retries=2, delay=2.0`, lower than `place_stop_loss`'s
+`retries=5, delay=3.0`. The fallback was more likely to give up than the
+thing it's a fallback for.
+
+**Fix:** `close_position()`'s retry budget aligned to `retries=5,
+delay=3.0`, matching `place_stop_loss`. Deliberately did **not** add
+`breaker=_TRADE_BREAKER` (unlike `place_stop_loss`/`place_market_order`/
+`place_take_profit`): if the breaker were already open from the
+preceding SL failures, wrapping the emergency close in the same breaker
+would fast-fail it instead of attempting it.
+
+## Files changed
 
 | File | Change |
 |---|---|
-| `journal/journal_v2.py` | `get_trade_attribution()` +13 keys (Discovery #2) — additive only. |
-| `README.md` | `learning/` added to Repository layout. |
-| `CLAUDE.md` | Status/priorities updated; backfills Step 3C/3D (neither updated this file either). |
-| `docs/architecture.md` | +§33 (this phase). |
-
-`agents/`, `execution/` (besides the one dict extension), `portfolio/`,
-`risk/`, `world/`, every dashboard/API module — **not touched**.
-
-## Compatibility analysis
-
-`get_trade_attribution()`: new keys only, existing callers unaffected.
-`get_ensemble_learning_dataset()`: unchanged signature/behavior.
-CEOAgent, ExecutionOrchestrator, PortfolioManager, RiskEngine,
-TradeLifecycle: untouched.
+| `config/settings.py` | `API_AUTH_ENABLED` default `False` → `True` |
+| `api/app.py` | Fail-fast startup check; `orphan_hold` field + acknowledge endpoint |
+| `risk/risk_engine.py` | New manual-hold mechanism |
+| `system_health/recovery_engine.py` | New orphan-position auto-protect + hold |
+| `execution/trade_manager.py` | Leverage re-query on failure; `close_position` retry budget |
+| `conftest.py` | Autouse fixture preserving test-time auth-off default |
+| `tests/test_api_auth.py` | Updated default-value test; new fail-fast tests |
+| `tests/test_execution.py` | New `RiskEngine` manual-hold tests |
+| `tests/test_v16_execution_idempotency.py` | New leverage re-query + retry-budget tests |
+| `tests/test_recovery_engine.py` | **New file** — first-ever coverage for `RecoveryEngine` |
+| `tests/test_audit_fixes.py` | New `orphan_hold` API tests |
+| `docs/architecture.md` | New hotfix section |
+| `CHANGELOG.md` | New entry |
 
 ## Testing
 
-```
-pytest tests/ -q   → 1885 passed, 0 failed  (1783 baseline + 102 new)
-ruff check .        → clean
-```
+`pytest -m unit -q` → **1948 passed, 0 failed** (1918 baseline + 30 new).
+`ruff check .` → clean, whole project. Verified in a second, independent
+fresh clone (see MIGRATION.md) before commit.
 
-102 new tests across 6 files + a shared `tests/_learning_helpers.py`
-seeding helper that writes real trades through `TradeJournalV2` +
-`record_trade_outcome()` (not hand-built dicts).
+## Known follow-up (not fixed here, out of scope for this bundle)
 
-## Benchmark
-
-```
-n=    10 trades   0.016s    0.15 MB peak
-n=   100 trades   0.107s    0.64 MB peak
-n=  1000 trades   1.183s    4.76 MB peak
-n= 10000 trades  28.550s   47.55 MB peak
-```
-
-**Not linear at the high end** (1,000→10,000 is ~24x, not ~10x) — root
-cause is `get_ensemble_learning_dataset()`'s N+1 `get_trade_attribution()`
-call pattern, a real, pre-existing characteristic of the method this
-phase reuses. Memory scales linearly, stays modest (47.6 MB at n=10,000).
-Not fixed here — see Future Phase Proposal.
-
-## Risk analysis
-
-- Performance ceiling on large journals (latency risk, not correctness).
-- Every unavailable field is `None`/`[]`, never fabricated —
-  `RegimeStatistics.coverage` and every `Pattern.sample_size` make data
-  gaps visible.
-- No automatic-action risk: `learning/` imports nothing from `agents/`,
-  `execution/`, `portfolio/`, `risk/` — structurally cannot change
-  trading behavior.
-- `min_sample_size` is a design choice (default 5), not a statistical
-  significance test.
-
-## Future Phase Proposal
-
-Fix the N+1 read pattern; persist a market-context snapshot at
-trade-open time; thread regime/confidence into multi-symbol
-`TradeRecord`s; wire per-agent attribution for CEO-gated multi-symbol
-trades; a scheduled snapshot job; Phase 4C Step 2+ (actual weight
-learning — explicitly out of scope for Step 1).
+- The orphan-position protective SL is sized off `RISK_PER_TRADE_MAX`
+  only — it does not also place a TP. Acceptable for a defensive action
+  (limiting further loss matters more than locking in a target on a
+  position the bot didn't open), but worth revisiting.
+- `acknowledge_orphaned_position()` does not re-verify exchange state
+  itself before clearing the hold — acknowledgement is a deliberate human
+  judgment call, not an automatic re-check. If that's ever considered
+  insufficient, a "re-verify flat or protected before allowing
+  acknowledge" step would be a natural, separately-scoped follow-up.
+- `tests/test_execution_factory.py` mutates `os.environ["EXECUTION_MODE"]`
+  and `config.settings.EXECUTION_MODE` across several tests and never
+  restores it (the file's last call happens to leave it at `"paper"`, so
+  today this is latent, not active). Flagged during investigation of this
+  bundle, not fixed — touching an unrelated test file's cleanup logic was
+  out of scope here, and the new live-mode fail-fast check was
+  deliberately written to read `EXECUTION_MODE` fresh from the
+  environment each time rather than trust an import-time binding, which
+  sidesteps the specific hazard this leak could otherwise cause.
