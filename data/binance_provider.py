@@ -511,3 +511,97 @@ class BinanceDataProvider:
             "oi_delta":       oi_delta,
             "oi_history":     oi_hist,
         }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # C1 Exchange State Manager accessors (additive, read-only)
+    #
+    # These exist solely so exchange_state/manager.py never has to parse
+    # raw Binance JSON itself — this class remains the single place that
+    # translates UMFutures responses into plain dicts, exactly like
+    # get_account_balance()/get_position_info() above already do.
+    # Unlike get_position_info() (scoped to self.symbol only), these two
+    # cover the whole account, since C1 serves multi-symbol consumers
+    # (World/Dashboard/CEO context).
+    # ─────────────────────────────────────────────────────────────────────
+
+    @retry_api_call(retries=3, delay=2.0, backoff=2.0)
+    def get_account_snapshot(self) -> dict:
+        """One /fapi/v3/account call → wallet/margin totals AND every open
+        position (Binance returns positions embedded in this response, so
+        this is a single upstream call, not one-call-per-field)."""
+        try:
+            with _TRADE_BREAKER:
+                raw = self.trade_client.account(recvWindow=5000)
+        except CircuitBreakerOpen as exc:
+            logger.warning(f"get_account_snapshot skipped — trade circuit open: {exc}")
+            raise
+        except ClientError as exc:
+            logger.error(f"get_account_snapshot error: {exc}")
+            raise
+
+        positions = []
+        for p in raw.get("positions", []):
+            amt = float(p.get("positionAmt", 0.0))
+            if amt == 0.0:
+                continue
+            positions.append({
+                "symbol":            p.get("symbol"),
+                "side":              "LONG" if amt > 0 else "SHORT",
+                "quantity":          abs(amt),
+                "entry_price":       float(p.get("entryPrice", 0.0)),
+                "mark_price":        float(p.get("markPrice", 0.0)),
+                "unrealized_pnl":    float(p.get("unrealizedProfit", p.get("unRealizedProfit", 0.0))),
+                "leverage":          int(p.get("leverage", settings.LEVERAGE)),
+                "margin_type":       p.get("marginType", "UNKNOWN"),
+                "liquidation_price": float(p.get("liquidationPrice", 0.0)),
+            })
+
+        return {
+            "wallet_balance":       float(raw.get("totalWalletBalance", 0.0)),
+            "available_balance":    float(raw.get("availableBalance", 0.0)),
+            "unrealized_pnl":       float(raw.get("totalUnrealizedProfit", 0.0)),
+            "total_margin_balance": float(raw.get("totalMarginBalance", 0.0)),
+            "maintenance_margin":   float(raw.get("totalMaintMargin", 0.0)),
+            "initial_margin":       float(raw.get("totalInitialMargin", 0.0)),
+            "positions":            positions,
+        }
+
+    @retry_api_call(retries=3, delay=2.0, backoff=2.0)
+    def get_open_orders(self, symbol: str | None = None) -> list[dict]:
+        """All open orders, optionally filtered to one symbol. Uses
+        GET /fapi/v1/openOrders (get_orders — safe with no symbol), not
+        the single-order lookup endpoint."""
+        kwargs = {"recvWindow": 5000}
+        if symbol:
+            kwargs["symbol"] = symbol
+        try:
+            with _TRADE_BREAKER:
+                raw = self.trade_client.get_orders(**kwargs)
+        except CircuitBreakerOpen as exc:
+            logger.warning(f"get_open_orders skipped — trade circuit open: {exc}")
+            raise
+        except ClientError as exc:
+            logger.error(f"get_open_orders error: {exc}")
+            raise
+
+        return [
+            {
+                "symbol":           o.get("symbol"),
+                "order_id":         int(o.get("orderId", 0)),
+                "client_order_id":  o.get("clientOrderId", ""),
+                "side":             o.get("side"),
+                "type":             o.get("type"),
+                "status":           o.get("status"),
+                "stop_price":       float(o.get("stopPrice", 0.0)),
+                "orig_qty":         float(o.get("origQty", 0.0)),
+                "executed_qty":     float(o.get("executedQty", 0.0)),
+                "reduce_only":      bool(o.get("reduceOnly", False)),
+            }
+            for o in raw
+        ]
+
+    def get_server_time(self) -> int:
+        """Thin wrapper around the market client's time endpoint — reuses
+        the same client _sync_time_offset() already calls internally."""
+        raw = self.market_client.time()
+        return int(raw["serverTime"])

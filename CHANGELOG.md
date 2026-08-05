@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## [Unreleased] — C1: Exchange State Manager (v2, rewritten from rejected v1 draft)
+
+New read-only package `exchange_state/` — single source of truth for
+account/position/order state for World (C2), Dashboard (C3), and CEO/AI
+context (C4). Nothing in the trading engine's decision path depends on
+it; purely additive.
+
+Rewritten from scratch after the repo owner reviewed an externally
+produced v1 draft and rejected it pending fixes. v2 addresses every point
+raised: no duplicate Binance JSON parsing (manager only calls two new
+additive `BinanceDataProvider` methods), one `ExchangeSnapshot` cache
+instead of six per-field caches, one 2-call `refresh()` instead of four
+separate round trips, funding rate removed (it's market data, not
+exchange state), and `snapshot_revision`/`position.version`/
+`snapshot_uuid`/`sync_reason`/`last_sync_source`/`stale_reason`/
+`health_score` added. Full design in
+`docs/architecture/EXCHANGE_STATE_MANAGER.md`.
+
+### Added
+- `exchange_state/models.py` — frozen dataclasses: `AccountSnapshot`,
+  `PositionSnapshot` (with per-symbol `version`), `OrderSnapshot` (with
+  `is_sl`/`is_tp`), `ExchangeSnapshot`.
+- `exchange_state/manager.py` — `ExchangeStateManager` (TTL cache,
+  degraded/stale fallback, thread-safe via one `RLock` per manager) and
+  `get_manager()` singleton registry keyed by `(mode, exchange, account_id)`.
+- `exchange_state/constants.py` — valid modes, default TTL.
+- `data/binance_provider.py` — two new additive methods:
+  `get_account_snapshot()` (one `/fapi/v3/account` call → wallet/margin
+  totals + all open positions) and `get_open_orders(symbol=None)` (one
+  `/fapi/v1/openOrders` call). Reuses the existing parsing convention from
+  `get_account_balance()`/`get_position_info()`; no new abstraction.
+  Also added `get_server_time()` (thin wrapper, no new call pattern).
+- Tests: `tests/test_exchange_state_models.py`,
+  `tests/test_exchange_state_manager.py`,
+  `tests/test_binance_provider_c1_additions.py`.
+
+### Impact
+Additive only. No existing file's existing methods changed behavior.
+Full suite: `pytest -m unit -q` → all passing. `ruff check` and
+`vulture --min-confidence 80` clean on all new/changed files.
+
 ## [Unreleased] — Hotfix: Live-Trading Risk Hardening (BUG-LIVE-RISK-01..04)
 
 Four real-money-risk bugs found via source inspection of `main` after
