@@ -465,8 +465,8 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 - Phase W7 (**done**): Live Office Simulation — `world/simulation/`: 7 character behaviours + 6 room activity levels derived purely from Phase W5's `WorldState`, abstract logical movement (Dijkstra over the real Phase W2 navigation graph), metadata-only event descriptors, a play/pause/resume/seek `Timeline`, and the 8-function `world.simulation.api`. No renderer-specific code. See `world/docs/SIMULATION.md`.
 - Phase W8 (**done**): Renderer Integration (the Phase W6 half that never happened) — `world.frontend.renderer.renderer.SceneGraphRenderer` implements the Phase W3 `Renderer` ABC as a backend scene-graph compiler targeting Phaser 3; `RenderWorldStateProvider` implements the Phase W3 `WorldStateProvider` ABC by projecting Phase W5 + W7 state down to the renderer-facing shape; all 17 real rooms render end to end. See `world/docs/RENDERER.md`. *(This entry was not updated when W8 actually merged — corrected now, alongside the W9 update below, rather than left to drift further.)*
 - Phase W9 (**done**): Interactive Command Center — `world/interaction/`: selection/hover/inspector/focus/timeline-seek/notification-center/search/filters/command-dispatch/history, all read-only over Phase W5+W7 state plus the Phase W8 camera controller. No trading-code, `dashboard/`, or renderer-pixel changes. See `world/docs/INTERACTION_LAYER.md`.
-- Phase W10: Live Command Center UI — implement the full UI panel set already specified in `world/ui/specs/` (minimap, inspectors, activity feed, notification center, relationship viewer, time control, simulation controls) as an actual browser frontend (React + Vite + Phaser 3) consuming the Phase W8 `RenderFrame` wire format and the Phase W9 interaction API.
-- Phase W11: Real-time Operations Center — point real `DataSource` instances (Phase W4) at whatever the trading engine actually emits and schedule `RuntimeManager.run_once()` (a `Watcher`-gated loop or fixed interval), so the Phase W10 UI reflects live engine state instead of the current idle placeholders.
+- Phase W10 (**done**): Live Command Center UI — the full UI panel set specified in `world/ui/specs/` (minimap, inspectors, activity feed, notification center, relationship viewer, time control, simulation controls) as an actual browser frontend (React + Vite + Phaser 3) consuming the Phase W8 `RenderFrame` wire format and the Phase W9 interaction API. See `world/docs/LIVE_COMMAND_CENTER.md`.
+- Phase W11 (**done**): Real-time Operations Center — `telemetry/world_export.py` wires real `DataSource` instances (Phase W4) to what the trading engine actually emits (agent telemetry, subsystem heartbeats, circuit-breaker latency, missions, portfolio PnL/drawdown/win-rate, recent events, CPU/RAM), scheduled once per trading cycle alongside `RuntimeManager.run_once()`. The Phase W10 UI now reflects live engine state instead of idle placeholders. *(This entry previously said "outstanding" — corrected here; see `world/docs/roadmap.md` item 13 and PR #30.)* See `world/docs/LIVE_OPERATIONS_CENTER.md`.
 - Sub-departments and new characters can be added without breaking schemas, since arrays are additive.
 
 ## 8. Development Roadmap
@@ -482,8 +482,8 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 9. **W7 (done):** Live Office Simulation — character behaviour, room activity, movement, event descriptors, timeline, simulation API, statistics.
 10. **W8 (done):** Renderer Integration — `WorldStateProvider` ABC binding, Phaser-3-targeting scene-graph renderer, static scene rendering against live W5+W7 data.
 11. **W9 (done):** Interactive Command Center — selection, hover, inspector, focus/camera commands, timeline seek/replay, notification center, search, filters, event bus, interaction history.
-12. **W10:** Live Command Center UI — the full UI panel set from `world/ui/specs/` as an actual browser frontend.
-13. **W11:** Real-time Operations Center — live `DataSource` wiring so W10's UI reflects real engine state.
+12. **W10 (done):** Live Command Center UI — the full UI panel set from `world/ui/specs/` as an actual browser frontend.
+13. **W11 (done):** Real-time Operations Center — live `DataSource` wiring so W10's UI reflects real engine state.
 
 ## 9. Risks
 
@@ -524,5 +524,9 @@ No arrow ever points back into the engine. `missions.json` is narrative flavor d
 *`world/docs/LIVE_COMMAND_CENTER.md` for current canon. Phase W10 (Live*
 *Command Center UI) is also complete and is the first phase with any*
 *Track A footprint — a small, additive, defensively-wrapped one, fully*
-*documented in `LIVE_COMMAND_CENTER.md`. Live engine data (Phase W11)*
-*remains outstanding.*
+*documented in `LIVE_COMMAND_CENTER.md`. Phase W11 (Real-time Operations*
+*Center — live engine data wired into the Phase W10 UI, see*
+*`world/docs/LIVE_OPERATIONS_CENTER.md`) is also complete. (This*
+*paragraph previously said Phase W11 "remains outstanding"; corrected*
+*during the C2 repository consolidation pass — see PR #30 and*
+*`world/docs/roadmap.md` item 13, both of which already had it right.)*
