@@ -124,6 +124,7 @@ class TestCmdImport:
                     return_value=[bundle_path]), \
              patch("tools.bundle_manager.github_actions.import_bundle",
                    return_value=preview_result) as import_bundle, \
+             patch("tools.bundle_manager.git_utils.get_dirty_files", return_value=[]), \
              patch("tools.bundle_manager.ui.confirm", return_value=False):
             rc = bundle_manager.cmd_import(args)
 
@@ -141,6 +142,7 @@ class TestCmdImport:
                     return_value=[bundle_path]), \
              patch("tools.bundle_manager.github_actions.import_bundle",
                    side_effect=[preview_result, real_result]), \
+             patch("tools.bundle_manager.git_utils.get_dirty_files", return_value=[]), \
              patch("tools.bundle_manager.ui.confirm") as confirm, \
              patch("tools.bundle_manager.BundleHistory") as history_cls:
             history_cls.return_value.save = MagicMock()
@@ -160,11 +162,33 @@ class TestCmdImport:
                     return_value=[bundle_path]), \
              patch("tools.bundle_manager.github_actions.import_bundle",
                    side_effect=[preview_result, real_result]), \
+             patch("tools.bundle_manager.git_utils.get_dirty_files", return_value=[]), \
              patch("tools.bundle_manager.BundleHistory") as history_cls:
             history_cls.return_value.save = MagicMock()
             rc = bundle_manager.cmd_import(args)
 
         assert rc == 1
+
+    def test_dirty_tracked_files_abort_before_confirmation(self, tmp_path):
+        args = self._args(tmp_path, yes=False)   # confirm() must NOT be reached
+        bundle_path = tmp_path / "x.bundle"
+        bundle_path.write_bytes(b"x")
+        preview_result = ImportResult(bundle_path, "feature/x", "sha1", "dry_run", None)
+
+        with patch("tools.bundle_manager.bundle_utils.find_incoming_bundles",
+                    return_value=[bundle_path]), \
+             patch("tools.bundle_manager.github_actions.import_bundle",
+                   return_value=preview_result) as import_bundle, \
+             patch("tools.bundle_manager.git_utils.get_dirty_files",
+                   return_value=["bundle_history.json"]), \
+             patch("tools.bundle_manager.ui.confirm") as confirm, \
+             patch("tools.bundle_manager.ui.error") as error:
+            rc = bundle_manager.cmd_import(args)
+
+        assert rc == 2
+        confirm.assert_not_called()
+        import_bundle.assert_called_once()   # only the dry-run preview call, no real pass
+        assert "bundle_history.json" in error.call_args[0][0]
 
     def test_corrupt_history_file_returns_error_code_without_crashing(self, tmp_path):
         args = self._args(tmp_path, yes=True)

@@ -188,6 +188,24 @@ def checkout_branch(branch: str, cwd: Path, timeout: int = 60) -> GitResult:
     return run_git(["checkout", branch], cwd=cwd, timeout=timeout)
 
 
+def get_dirty_files(cwd: Path, timeout: int = 60) -> list[str]:
+    """Tracked files with uncommitted local changes (staged and/or
+    unstaged). Deliberately excludes untracked files via
+    --untracked-files=no — an untracked file never blocks `git
+    checkout`, so surfacing it here would just be noise.
+
+    checkout_branch() above is a bare `git checkout <branch>` with no
+    dirty-tree handling of its own: git refuses that checkout whenever
+    a tracked file differs between the working tree and the target
+    ref, and raises a raw stderr message mid-workflow. Callers doing a
+    checkout (github_actions.import_bundle, sync.py) should call this
+    first and fail with a clear, actionable message instead."""
+    result = run_git(
+        ["status", "--porcelain=v1", "--untracked-files=no"], cwd=cwd, timeout=timeout,
+    )
+    return [line[3:] for line in result.stdout.splitlines() if line.strip()]
+
+
 def branch_exists(branch: str, cwd: Path) -> bool:
     result = run_git(
         ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=cwd, check=False,
