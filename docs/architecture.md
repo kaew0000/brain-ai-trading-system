@@ -3254,3 +3254,109 @@ file's last call happens to leave it at `"paper"`. BUG-LIVE-RISK-01's
 fail-fast check was deliberately written to read `EXECUTION_MODE` fresh
 from the environment each time (not an import-time binding) specifically
 to sidestep this hazard rather than depend on it staying benign.
+
+## Hotfix (2026-08-06): Unified Order State Manager — Ghost Position Elimination (V16 Phase ORDER-01)
+
+### Reported symptom
+Production dashboard reported an open `LONG qty=0.1062 uPnL=-115` for the
+configured symbol while Binance showed no open futures position, margin
+balance confirmed no active position, and the journal had no open trade
+row.
+
+### Investigation (not guessed — read against the actual `main` branch)
+The brief's premise (a class called `PositionManager`, and a green-field
+`execution/order_state_manager.py`) didn't match the repository. What
+exists instead, and is reused rather than duplicated:
+
+- `exchange_state/manager.py` — `ExchangeStateManager` (C1), never wired
+  into any live component before this phase.
+- `system_health/reconciliation.py` — `ReconciliationEngine`, already
+  compares exchange/journal/bot views and classifies
+  `PRESENCE_MISMATCH`/`SIDE_MISMATCH`/`QUANTITY_MISMATCH`/
+  `DUPLICATE_JOURNAL_TRADES`.
+- `system_health/recovery_engine.py` — `RecoveryEngine`, already
+  auto-clears a stale journal row and protects a genuine orphaned
+  exchange position.
+- `execution/trade_lifecycle.py` — `TradeLifecycle`/`TradeHandle`,
+  already models per-symbol OPENING/CLOSING granularity.
+- The actual runtime position cache is `portfolio/portfolio_state.py`'s
+  `PortfolioState`, owned by `ExecutionScheduler`.
+
+**Root cause, in three parts, all confirmed by reading the code, not
+assumed:**
+
+1. `ReconciliationEngine._read_bot()` returned
+   `dict(exchange, source="exchange_mirrored")` in live mode — a literal
+   copy of the exchange view, not an independent read. "Bot" and
+   "exchange" were definitionally identical in live mode, so no runtime
+   cache could ever be detected as stale.
+2. `PortfolioState.remove_position()` was called from exactly one place
+   in the entire codebase — `execution/execution_orchestrator.py`'s
+   replacement-close path. A position closed via stop-loss, take-profit,
+   manual exchange close, or reconciliation recovery never cleared it.
+   This is what actually produces a ghost entry.
+3. The live `PortfolioState` instance was never registered into either
+   shared-state dict (`main.py`'s `components`, used by the
+   trading-loop thread's scheduled reconciliation, or `api/app.py`'s
+   `_state`, used by the API thread) — so even a fixed comparison had
+   nothing to read.
+
+World layer and paper mode were checked and ruled out as blind spots:
+World (`world/runtime/state_builder.py`) reads a static JSON snapshot
+file, not a live object (W11 — real DataSource wiring — hasn't landed
+yet, so there is no active live blind spot there today). Paper mode is
+already read independently via `paper_engine.get_open_positions()`, not
+mirrored.
+
+### Change
+- `system_health/reconciliation.py`:
+  `_read_bot()` now reads `sys["portfolio_state"]` independently in live
+  mode (falls back to the old mirrored behavior when it isn't wired in —
+  no regression for any existing caller). Added `get_last_views()`,
+  always refreshed on every `run()` call regardless of the existing
+  publish-suppression logic, for callers that need "what does
+  reconciliation see right now."
+- `system_health/recovery_engine.py`:
+  `attempt_reconciliation_recovery()` refactored from one exact
+  three-way pattern match into independent per-source clears — a stale
+  journal row and a stale `PortfolioState` entry are each detected and
+  cleared on their own, whether stale together or alone. New
+  `_clear_runtime_ghost()` calls `PortfolioState.remove_position()` only
+  after `ReconciliationEvent.exchange_view` has already confirmed flat
+  this cycle, and publishes `GHOST_POSITION_REMOVED`.
+- `system_health/order_state.py` (new):
+  `OrderStateManager` — composes the above into the eight canonical
+  states (`NO_POSITION`, `OPENING`, `OPEN`, `CLOSING`, `CLOSED`,
+  `DESYNC`, `GHOST`, `UNKNOWN`), publishes
+  `ORDER_STATE_CHANGED`/`GHOST_POSITION_DETECTED`/`POSITION_DESYNC`/
+  `POSITION_RECOVERED`/`POSITION_SYNCED` on canonical-state transitions
+  only (not every poll), and tracks `sync_count`/`desync_count`/
+  `ghost_count`/`recovery_count`/average sync latency. Never talks to
+  Binance directly, never mutates any component — purely a read/mapping
+  layer over infrastructure that already exists.
+- `main.py`: `ExecutionScheduler.portfolio_state` threaded through
+  `build_system()`'s return dict and into `_start_api_server()`'s new
+  `portfolio_state=`/`trade_lifecycle=`/`reconciliation_engine=`
+  parameters, so the trading-loop thread and the API thread read the
+  same live objects, not two copies.
+- `api/app.py`: `GET /api/order-state` (optional `?symbol=`) and
+  `GET /api/order-state/metrics`, both read-only, following the existing
+  `_ok()`/never-500 pattern used by `/api/system/reconciliation`.
+
+### Blast radius
+No changes to AI/Decision Engine, Learning, CEO, Dashboard frontend, or
+Trading Strategy code. `ReconciliationEngine.run()`'s public contract
+and every existing caller's behavior is unchanged when `portfolio_state`
+isn't wired in. `attempt_reconciliation_recovery()`'s existing ghost-
+journal-row and orphan-exchange-position behaviors are preserved exactly
+(verified: all 12 pre-existing `test_recovery_engine.py` tests pass
+unchanged).
+
+### Testing
+45 new tests: `tests/test_reconciliation.py` (16 — first-ever coverage
+for `ReconciliationEngine`, none existed before this phase),
+`tests/test_order_state.py` (18), `tests/test_order_state_api.py` (5),
+6 new cases added to `tests/test_recovery_engine.py` (18 total, 12
+pre-existing unchanged). Full suite: `pytest -q` → 2049 passed, 0
+failed. `ruff check .` clean. Verified in a second, independent fresh
+clone before bundling.

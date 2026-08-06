@@ -31,6 +31,14 @@ class ReconciliationEngine:
         # mismatch — even of the same type — always fires fresh.
         self._last_fired_sig: tuple | None = None
         self._suppressed_repeat_count: int = 0
+        # V16 Phase ORDER-01: the freshest exchange/journal/bot views and
+        # classification, updated on EVERY run() call regardless of the
+        # publish-suppression logic below. _last_fired_sig/_buf only track
+        # what was actually *published*; a caller that needs "what does
+        # reconciliation currently see" every cycle (e.g.
+        # system_health/order_state.py) needs this even while an unchanged
+        # mismatch is being suppressed from re-publishing.
+        self._last_views: dict | None = None
 
     def run(self, sys: dict) -> ReconciliationEvent | None:
         try:
@@ -39,6 +47,11 @@ class ReconciliationEngine:
             jv = self._read_journal(sys)
             self._last_run = datetime.now(timezone.utc).isoformat()
             mt, sev, detail = self._classify(ex, jv, bot)
+            self._last_views = {
+                "exchange": ex, "journal": jv, "bot": bot,
+                "mismatch_type": mt, "severity": sev, "detail": detail,
+                "checked_at": self._last_run,
+            }
             if mt is None:
                 self._last_result = "OK"
                 # Condition cleared — next mismatch (even if same type as
@@ -90,6 +103,13 @@ class ReconciliationEngine:
     def get_recent(self, limit: int = 50) -> list[dict]:
         with self._lock: return [e.to_dict() for e in self._buf[-limit:][::-1]]
 
+    def get_last_views(self) -> dict | None:
+        """V16 Phase ORDER-01: the exchange/journal/bot views and
+        classification from the most recent run() call, always fresh
+        (unlike get_recent(), which only reflects *published*, non-
+        suppressed mismatches). None if run() has never been called."""
+        return dict(self._last_views) if self._last_views is not None else None
+
     def status(self) -> dict:
         return {"last_run": self._last_run, "last_result": self._last_result,
                 "event_count": len(self._buf),
@@ -115,6 +135,40 @@ class ReconciliationEngine:
                 p = pos[0]
                 return {"has_position": True, "side": p.get("direction") or p.get("side"),
                         "qty": abs(float(p.get("quantity", p.get("qty", 0)))), "source": "paper"}
+            except Exception as exc:
+                return {"has_position": None, "side": None, "qty": None, "source": "error", "error": str(exc)}
+        # V16 Phase ORDER-01 (BUG-LIVE-ORDER-01 root cause): live mode
+        # previously returned `dict(exchange, source="exchange_mirrored")`
+        # here — a literal copy of the exchange view, not an independent
+        # read. That made "bot" and "exchange" definitionally identical in
+        # live mode, so this engine could never detect a stale runtime
+        # position cache (portfolio/portfolio_state.py's PortfolioState,
+        # whose own docstring already admits nothing keeps it in sync with
+        # reality). PortfolioState.remove_position() is called from
+        # exactly one place in the codebase today
+        # (execution/execution_orchestrator.py's replacement-close path) —
+        # a position closed via stop-loss, take-profit, manual exchange
+        # close, or reconciliation recovery itself never clears it,
+        # leaving a ghost entry indefinitely. Reading it independently
+        # here is what makes that ghost visible to `_classify()` at all.
+        # execution/execution_scheduler.py owns the one live PortfolioState
+        # instance; main.py registers it into this same `sys` dict as
+        # "portfolio_state" (see main.py bootstrap + api/app.py set_state
+        # calls). Falls back to the old mirrored behavior when no
+        # PortfolioState is wired in (e.g. this bot session hasn't started
+        # ExecutionScheduler, or a test doesn't pass one) — that fallback
+        # cannot itself introduce a false ghost/desync, only under-detect,
+        # matching this engine's existing bias toward not firing on
+        # insufficient information (`_classify`'s `len(ver) < 2` guard).
+        ps = sys.get("portfolio_state")
+        if ps is not None:
+            try:
+                from config.settings import settings
+                pos = ps.get_position(settings.SYMBOL)
+                if pos is None:
+                    return {"has_position": False, "side": None, "qty": None, "source": "portfolio_state"}
+                return {"has_position": True, "side": pos.direction,
+                        "qty": abs(float(pos.quantity)), "source": "portfolio_state"}
             except Exception as exc:
                 return {"has_position": None, "side": None, "qty": None, "source": "error", "error": str(exc)}
         return dict(exchange, source="exchange_mirrored")

@@ -176,7 +176,7 @@ def _run_world_runtime_manager(components: dict) -> None:
 
 # ── Dashboard / API server ────────────────────────────────────────────────────
 
-def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent_layer=None, risk_engine=None, host: str = "0.0.0.0", port: int = 8000) -> None:
+def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent_layer=None, risk_engine=None, portfolio_state=None, trade_lifecycle=None, reconciliation_engine=None, host: str = "0.0.0.0", port: int = 8000) -> None:
     """
     Start the FastAPI dashboard server in a daemon background thread.
     Runs alongside the trading loop — does not block main.
@@ -201,6 +201,19 @@ def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent
     # build a live RiskEngine.report() without a circular import into main.py.
     if risk_engine is not None:
         _api_module.set_state("risk_engine", risk_engine)
+    # V16 Phase ORDER-01 — expose the live runtime position cache and its
+    # supporting singletons so GET /api/order-state (and any other API
+    # route) reads the SAME objects the trading-loop thread's
+    # reconciliation cycle already reads, not a second copy. event_bus is
+    # `bus` above, already injected as _BUS_INSTANCE; also registered
+    # under the "event_bus" state key since that's the key
+    # system_health/reconciliation.py._read_bot() and
+    # system_health/order_state.py both look for via sys.get(...).
+    _api_module.set_state("portfolio_state", portfolio_state)
+    _api_module.set_state("trade_lifecycle", trade_lifecycle)
+    _api_module.set_state("event_bus", bus)
+    if reconciliation_engine is not None:
+        _api_module.set_state("reconciliation_engine", reconciliation_engine)
     from api.app import app
 
     config = uvicorn.Config(
@@ -463,10 +476,21 @@ def build_system() -> dict:
     reconciliation_engine = get_reconciliation_engine()
     get_heartbeat().beat("dashboard_api", meta={"phase": "bootstrap"})
 
+    # V16 Phase ORDER-01: the live runtime position cache, owned by
+    # ExecutionScheduler. Threaded through `components` here so both the
+    # trading-loop thread (schedule.every(60).seconds.do(
+    # run_position_reconciliation, components)) and, via
+    # _start_api_server()'s new portfolio_state= arg below, the API
+    # thread's api/app.py._state end up reading the SAME PortfolioState
+    # instance — not a second copy. See system_health/reconciliation.py
+    # _read_bot() and system_health/order_state.py for why this matters.
+    live_portfolio_state = execution_scheduler.portfolio_state if execution_scheduler else None
+
     logger.info("=" * 62)
 
     return {
         "data_provider":         data_provider,
+        "portfolio_state":       live_portfolio_state,
         "smc_engine":            smc_engine,
         "volume_engine":         volume_engine,
         "regime_engine":         regime_engine,
@@ -1465,6 +1489,9 @@ def main() -> None:
         data_provider = components["data_provider"],
         agent_layer   = components["agent_layer"],
         risk_engine   = components["risk_engine"],
+        portfolio_state       = components["portfolio_state"],
+        trade_lifecycle       = components["trade_lifecycle"],
+        reconciliation_engine = components["reconciliation_engine"],
     )
     _open_browser(api_port)
 

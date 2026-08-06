@@ -91,6 +91,129 @@ class TestGhostJournalRow:
         assert result == "missing_journal_or_trade_id"
 
 
+class TestRuntimeGhostClear:
+    """V16 Phase ORDER-01 (BUG-LIVE-ORDER-01): exchange flat, journal
+    empty/absent, but the runtime PortfolioState cache still reports an
+    open position — the exact bug reported in production (Binance flat,
+    margin balance confirms no position, journal empty, yet the runtime
+    cache reported LONG qty=0.1062 uPnL=-115). Only fires when
+    bot_view["source"] == "portfolio_state" (set by
+    reconciliation.py's fixed _read_bot()), so it never misfires on the
+    pre-existing orphan-exchange-position bot_view shape below, which has
+    no "source" key at all."""
+
+    def _fake_removed_position(self):
+        removed = MagicMock()
+        removed.to_dict.return_value = {"direction": "LONG", "quantity": 0.1062}
+        return removed
+
+    def test_clears_stale_portfolio_state_entry(self):
+        from system_health.recovery_engine import RecoveryEngine
+        eng = RecoveryEngine()
+        ps = MagicMock()
+        ps.remove_position.return_value = self._fake_removed_position()
+        s = _sys(portfolio_state=ps)
+        evt = _FakeEvent(
+            "PRESENCE_MISMATCH",
+            exchange_view={"has_position": False},
+            journal_view={"has_position": False},
+            bot_view={"has_position": True, "side": "LONG", "qty": 0.1062, "source": "portfolio_state"},
+        )
+        result = eng.attempt_reconciliation_recovery(evt, s)
+        assert result == "cleared_runtime_ghost"
+        ps.remove_position.assert_called_once_with("BTCUSDT")
+
+    def test_publishes_ghost_position_removed_event(self):
+        from system_health.recovery_engine import RecoveryEngine
+        eng = RecoveryEngine()
+        ps = MagicMock()
+        ps.remove_position.return_value = self._fake_removed_position()
+        bus = MagicMock()
+        s = _sys(portfolio_state=ps, event_bus=bus)
+        evt = _FakeEvent(
+            "PRESENCE_MISMATCH",
+            exchange_view={"has_position": False},
+            journal_view={"has_position": False},
+            bot_view={"has_position": True, "side": "LONG", "qty": 0.1062, "source": "portfolio_state"},
+        )
+        eng.attempt_reconciliation_recovery(evt, s)
+        bus.publish.assert_called_once()
+        args, kwargs = bus.publish.call_args
+        assert args[1] == "GHOST_POSITION_REMOVED"
+        assert kwargs["payload"]["symbol"] == "BTCUSDT"
+
+    def test_missing_portfolio_state_is_safe_noop(self):
+        from system_health.recovery_engine import RecoveryEngine
+        eng = RecoveryEngine()
+        s = _sys(portfolio_state=None)
+        evt = _FakeEvent(
+            "PRESENCE_MISMATCH",
+            exchange_view={"has_position": False},
+            journal_view={"has_position": False},
+            bot_view={"has_position": True, "side": "LONG", "qty": 0.1062, "source": "portfolio_state"},
+        )
+        result = eng.attempt_reconciliation_recovery(evt, s)
+        assert result == "missing_portfolio_state"
+
+    def test_already_clear_is_reported_distinctly(self):
+        """remove_position() returning None (nothing was there after
+        all — e.g. cleared by a concurrent cycle) is reported as
+        'runtime_ghost_already_clear', not silently identical to a real
+        clear, so operators/tests can tell the two apart."""
+        from system_health.recovery_engine import RecoveryEngine
+        eng = RecoveryEngine()
+        ps = MagicMock()
+        ps.remove_position.return_value = None
+        s = _sys(portfolio_state=ps)
+        evt = _FakeEvent(
+            "PRESENCE_MISMATCH",
+            exchange_view={"has_position": False},
+            journal_view={"has_position": False},
+            bot_view={"has_position": True, "side": "LONG", "qty": 0.1062, "source": "portfolio_state"},
+        )
+        result = eng.attempt_reconciliation_recovery(evt, s)
+        assert result == "runtime_ghost_already_clear"
+
+    def test_does_not_fire_when_bot_source_is_not_portfolio_state(self):
+        """Guards against misclassifying an exchange-mirrored or paper
+        bot_view (no independent signal) as a confirmed runtime ghost."""
+        from system_health.recovery_engine import RecoveryEngine
+        eng = RecoveryEngine()
+        ps = MagicMock()
+        s = _sys(portfolio_state=ps)
+        evt = _FakeEvent(
+            "PRESENCE_MISMATCH",
+            exchange_view={"has_position": False},
+            journal_view={"has_position": False},
+            bot_view={"has_position": True, "side": "LONG", "qty": 0.1062, "source": "exchange_mirrored"},
+        )
+        result = eng.attempt_reconciliation_recovery(evt, s)
+        assert result == "no_safe_auto_action"
+        ps.remove_position.assert_not_called()
+
+    def test_clears_both_journal_row_and_runtime_cache_together(self):
+        """Both the journal AND the runtime PortfolioState are stale at
+        once — the two clears are independent per-source actions (not one
+        exact three-way pattern), so both fire in the same call."""
+        from system_health.recovery_engine import RecoveryEngine
+        eng = RecoveryEngine()
+        ps = MagicMock()
+        ps.remove_position.return_value = self._fake_removed_position()
+        lifecycle = MagicMock()
+        lifecycle.request_exit.return_value = "handle-456"
+        s = _sys(portfolio_state=ps, trade_lifecycle=lifecycle)
+        evt = _FakeEvent(
+            "PRESENCE_MISMATCH",
+            exchange_view={"has_position": False},
+            journal_view={"has_position": True, "trade_id": 99},
+            bot_view={"has_position": True, "side": "LONG", "qty": 0.1062, "source": "portfolio_state"},
+        )
+        result = eng.attempt_reconciliation_recovery(evt, s)
+        assert result == "closed_ghost_journal_row+cleared_runtime_ghost"
+        ps.remove_position.assert_called_once_with("BTCUSDT")
+        lifecycle.request_exit.assert_called_once()
+
+
 class TestOrphanedExchangePosition:
     """V16 BUG-LIVE-RISK-02: exchange has a real position, journal has
     nothing on it at all."""
