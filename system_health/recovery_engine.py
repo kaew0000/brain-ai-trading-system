@@ -95,44 +95,27 @@ class RecoveryEngine:
             ex = event.exchange_view
             bot = event.bot_view
             jv = event.journal_view
-            if (ex.get("has_position") is False and bot.get("has_position") is False
-                    and jv.get("has_position") is True):
-                jrn = sys.get("journal_v2")
-                tid = jv.get("trade_id")
-                if not jrn or tid is None:
-                    return "missing_journal_or_trade_id"
-                # V16 Phase 4B Step 3D: routed through TradeLifecycle
-                # (Part C/F: "Recovery must never update journal
-                # directly. Recovery must call lifecycle."). jv (this
-                # reconciliation check's own _read_journal() output) has
-                # no symbol key — reconciliation is inherently scoped to
-                # this bot's one configured symbol (same reasoning
-                # applied to this exact code path in V16 Phase 4B
-                # Step 3A), so settings.SYMBOL is the real value here,
-                # not a fabricated placeholder.
-                lifecycle = sys.get("trade_lifecycle")
-                if lifecycle is not None:
-                    from config.settings import settings
-                    handle = lifecycle.request_exit(
-                        settings.SYMBOL, CloseSource.RECONCILIATION,
-                        "presence_mismatch_ghost_row", trade_id=tid,
-                    )
-                    if handle is not None:
-                        lifecycle.exit_executing(handle)
-                        lifecycle.exit_confirmed(handle, result="CANCELLED", exit_price=0.0, pnl=0.0)
-                    else:
-                        # Duplicate-close guard fired — already closed
-                        # through the lifecycle by another path. Fall
-                        # back to the direct write so this recovery
-                        # action's own long-standing guarantee (a
-                        # detected ghost row always gets cleared) isn't
-                        # silently dropped.
-                        jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
-                else:
-                    jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
-                self._record("recon_recovery", f"trade_id={tid}", "closed_ghost_row")
-                logger.warning(f"Recon recovery: closed ghost journal trade #{tid}")
-                return "closed_ghost_journal_row"
+
+            # V16 Phase ORDER-01: exchange is the root authority. When it's
+            # flat, ANY runtime/journal source still claiming an open
+            # position is stale and gets cleared — checked independently
+            # per source (not as one exact three-way pattern) so a journal
+            # ghost row and a stale PortfolioState cache each get cleared
+            # on their own, whether they're stale together or alone. This
+            # replaces the old all-or-nothing condition
+            # (`ex flat AND bot flat AND jv open`), which could never fire
+            # at all once a real independent bot-side view existed and
+            # happened to also be stale (bot=True would have blocked it).
+            if ex.get("has_position") is False:
+                actions: list[str] = []
+
+                if jv.get("has_position") is True:
+                    actions.append(self._clear_ghost_journal_row(sys, jv))
+
+                if bot.get("has_position") is True and bot.get("source") == "portfolio_state":
+                    actions.append(self._clear_runtime_ghost(sys, bot))
+
+                return "+".join(actions) if actions else "no_safe_auto_action"
 
             # V16 BUG-LIVE-RISK-02: the OPPOSITE case — a real exchange
             # position exists that the journal has no record of at all
@@ -149,6 +132,86 @@ class RecoveryEngine:
         except Exception as exc:
             logger.error(f"attempt_reconciliation_recovery failed: {exc}", exc_info=True)
             return f"error:{exc}"
+
+    def _clear_ghost_journal_row(self, sys: dict, jv: dict) -> str:
+        """Exchange flat, journal thinks a trade is still open. Pre-
+        existing path (previously the only branch of
+        attempt_reconciliation_recovery), extracted unchanged so it can be
+        combined with _clear_runtime_ghost() below without duplicating
+        either."""
+        jrn = sys.get("journal_v2")
+        tid = jv.get("trade_id")
+        if not jrn or tid is None:
+            return "missing_journal_or_trade_id"
+        # V16 Phase 4B Step 3D: routed through TradeLifecycle
+        # (Part C/F: "Recovery must never update journal
+        # directly. Recovery must call lifecycle."). jv (this
+        # reconciliation check's own _read_journal() output) has
+        # no symbol key — reconciliation is inherently scoped to
+        # this bot's one configured symbol (same reasoning
+        # applied to this exact code path in V16 Phase 4B
+        # Step 3A), so settings.SYMBOL is the real value here,
+        # not a fabricated placeholder.
+        lifecycle = sys.get("trade_lifecycle")
+        if lifecycle is not None:
+            from config.settings import settings
+            handle = lifecycle.request_exit(
+                settings.SYMBOL, CloseSource.RECONCILIATION,
+                "presence_mismatch_ghost_row", trade_id=tid,
+            )
+            if handle is not None:
+                lifecycle.exit_executing(handle)
+                lifecycle.exit_confirmed(handle, result="CANCELLED", exit_price=0.0, pnl=0.0)
+            else:
+                # Duplicate-close guard fired — already closed
+                # through the lifecycle by another path. Fall
+                # back to the direct write so this recovery
+                # action's own long-standing guarantee (a
+                # detected ghost row always gets cleared) isn't
+                # silently dropped.
+                jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
+        else:
+            jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
+        self._record("recon_recovery", f"trade_id={tid}", "closed_ghost_row")
+        logger.warning(f"Recon recovery: closed ghost journal trade #{tid}")
+        return "closed_ghost_journal_row"
+
+    def _clear_runtime_ghost(self, sys: dict, bot: dict) -> str:
+        """V16 Phase ORDER-01 (BUG-LIVE-ORDER-01): exchange flat, but
+        portfolio/portfolio_state.py's PortfolioState still holds an entry
+        for this symbol — the ghost the phase brief describes (Binance
+        flat, journal empty, runtime still reports an open LONG/SHORT).
+        Never verified against a stale read: this method is only ever
+        reached with `ex.get("has_position") is False` from the *same*
+        ReconciliationEvent whose exchange_view was read this cycle by
+        ReconciliationEngine._read_exchange() — i.e. "clear() only after
+        exchange verification", per the phase brief's Automatic Recovery
+        section, not a blind clear.
+        """
+        ps = sys.get("portfolio_state")
+        if ps is None:
+            return "missing_portfolio_state"
+        from config.settings import settings
+        removed = ps.remove_position(settings.SYMBOL)
+        result = "cleared_runtime_ghost" if removed is not None else "runtime_ghost_already_clear"
+        self._record("runtime_ghost_clear", settings.SYMBOL, result)
+        logger.warning(
+            f"Recon recovery: cleared stale runtime PortfolioState entry for "
+            f"{settings.SYMBOL} (exchange verified flat) — {result}"
+        )
+        try:
+            bus = sys.get("event_bus")
+            if bus is not None:
+                bus.publish(
+                    "RECOVERY_ENGINE", "GHOST_POSITION_REMOVED",
+                    f"Cleared stale runtime position cache for {settings.SYMBOL}",
+                    severity="warning",
+                    payload={"symbol": settings.SYMBOL, "removed": removed.to_dict() if removed else None,
+                             "bot_view": bot},
+                )
+        except Exception as exc:
+            logger.debug(f"Runtime ghost clear: event publish failed: {exc}")
+        return result
 
     # ── V16 BUG-LIVE-RISK-02: orphaned exchange position ────────────────────
 

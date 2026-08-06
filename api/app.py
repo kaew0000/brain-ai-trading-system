@@ -74,6 +74,7 @@ from commander.control_state import get_control_state
 from system_health.watchdog import get_watchdog
 from system_health.reconciliation import get_reconciliation_engine
 from system_health.recovery_engine import get_recovery_engine
+from system_health.order_state import get_order_state_manager
 from utils.logger import get_logger
 
 # V16 Phase 2C — Portfolio API (REST + WebSocket). See api/portfolio_api.py
@@ -1444,6 +1445,40 @@ async def system_reconciliation(limit: int = Query(default=50, ge=1, le=200)):
         logger.error(f"/api/system/reconciliation error: {exc}", exc_info=True)
         return _ok({"status": {}, "events": [], "recovery_log": [], "orphan_hold": None,
                     "timestamp": datetime.now(timezone.utc).isoformat(), "error": str(exc)})
+
+
+@app.get("/api/order-state")
+async def order_state(symbol: str | None = Query(default=None)):
+    """V16 Phase ORDER-01: canonical per-symbol order-state view.
+
+    Composed read-only from ExchangeStateManager + ReconciliationEngine +
+    RecoveryEngine + TradeLifecycle (see system_health/order_state.py) —
+    this endpoint never places, cancels, or modifies an order, and never
+    holds position data of its own; every field is read fresh on each
+    call. `symbol` defaults to settings.SYMBOL when omitted.
+    """
+    try:
+        manager = get_order_state_manager()
+        snapshot = manager.get_order_state(_state, symbol=symbol)
+        return _ok(snapshot.to_dict())
+    except Exception as exc:
+        logger.error(f"/api/order-state error: {exc}", exc_info=True)
+        return _ok({
+            "canonical_state": "UNKNOWN", "error": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+
+@app.get("/api/order-state/metrics")
+async def order_state_metrics():
+    """V16 Phase ORDER-01: sync/desync/ghost/recovery counters and
+    average sync latency — see system_health/order_state.py Status()."""
+    try:
+        manager = get_order_state_manager()
+        return _ok(manager.status())
+    except Exception as exc:
+        logger.error(f"/api/order-state/metrics error: {exc}", exc_info=True)
+        return _ok({"error": str(exc), "timestamp": datetime.now(timezone.utc).isoformat()})
 
 
 @app.post("/api/system/reconciliation/acknowledge")
