@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 
 from config.settings import settings
-from tools import bundle_utils, github_actions, sync as sync_module, ui
+from tools import bundle_utils, git_utils, github_actions, sync as sync_module, ui
 from tools.history import BundleHistory
 from utils.logger import get_logger
 
@@ -101,6 +101,24 @@ def cmd_import(args: argparse.Namespace) -> int:
     if not actionable:
         ui.warn("Nothing to import (all bundles invalid, duplicate, or already handled).")
         return 0
+
+    # Every real pass does at least one checkout_branch() call (the feature
+    # branch, always — plus the base branch if not already on it). Neither
+    # does its own dirty-tree handling, so check here: a raw git checkout
+    # error mid-batch is a confusing way to learn bundle_history.json (or
+    # anything else) was left uncommitted from an earlier session.
+    dirty = git_utils.get_dirty_files(repo_dir)
+    if dirty:
+        ui.error(
+            "Working tree has uncommitted changes to tracked file(s): "
+            + ", ".join(dirty) + ". `git checkout` will refuse to switch "
+            "branches while these are dirty, so every bundle below would "
+            "fail partway through. Commit or stash them first, e.g.:\n"
+            "  git add " + " ".join(dirty) + " && git commit -m 'sync bundle history'\n"
+            "  git push " + remote + " " + base_branch + "\n"
+            "then re-run the import."
+        )
+        return 2
 
     if not args.yes:
         proceed = ui.confirm(

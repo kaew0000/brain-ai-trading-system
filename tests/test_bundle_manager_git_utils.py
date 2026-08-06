@@ -146,6 +146,35 @@ class TestFetchBranchFromBundle:
         assert args[-1].startswith("+")
 
 
+class TestGetDirtyFiles:
+
+    def test_clean_tree_returns_empty_list(self):
+        with patch("tools.git_utils.run_git",
+                    return_value=git_utils.GitResult([], 0, "", "")):
+            assert git_utils.get_dirty_files(Path(".")) == []
+
+    def test_parses_modified_and_staged_paths(self):
+        stdout = " M bundle_history.json\nM  config/settings.py\n"
+        with patch("tools.git_utils.run_git",
+                    return_value=git_utils.GitResult([], 0, stdout, "")):
+            assert git_utils.get_dirty_files(Path(".")) == [
+                "bundle_history.json", "config/settings.py",
+            ]
+
+    def test_ignores_blank_lines(self):
+        stdout = " M bundle_history.json\n\n"
+        with patch("tools.git_utils.run_git",
+                    return_value=git_utils.GitResult([], 0, stdout, "")):
+            assert git_utils.get_dirty_files(Path(".")) == ["bundle_history.json"]
+
+    def test_passes_untracked_files_no_flag(self):
+        with patch("tools.git_utils.run_git",
+                    return_value=git_utils.GitResult([], 0, "", "")) as run_git:
+            git_utils.get_dirty_files(Path("."))
+        args = run_git.call_args[0][0]
+        assert "--untracked-files=no" in args
+
+
 class TestBranchExists:
 
     def test_true_when_show_ref_succeeds(self):
