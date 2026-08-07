@@ -21,6 +21,9 @@ POST /api/chat                         — interactive agent chat
 POST /api/auth/token                   — P1-A: exchange API key for bearer token
 POST /api/auth/rotate                  — P1-A: rotate the caller's bearer token
 
+GET  /api/recommendations              — V16 Phase 4C Step 3: active/skipped learning recommendations
+GET  /api/recommendations/metrics      — V16 Phase 4C Step 3: recommendation application runtime metrics
+
 GET  /api/portfolio/state              — V16 Phase 2C: latest persisted decision's positions (not live)
 GET  /api/portfolio/decision/latest    — V16 Phase 2C: latest persisted OrchestratedDecision
 GET  /api/portfolio/history            — V16 Phase 2C: paginated decision history (limit/offset/symbol/sector)
@@ -58,6 +61,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config.settings import settings
+from dataclasses import asdict
+from learning.application.recommendation_context import build_recommendation_set
+from learning.application.recommendation_metrics import get_recommendation_metrics
 from api.auth import (
     Role, AuthError, authenticate_request, enforce_ws_role,
     issue_token_for_api_key, rotate_token, log_unauthorized,
@@ -915,6 +921,52 @@ async def ceo_decisions(
     if symbol:
         rows = [r for r in rows if r.get("symbol") == symbol]
     return _ok(rows)
+
+
+@app.get("/api/recommendations")
+async def recommendations(
+    symbol: str = Query(default="", description="Filter to one symbol; omit for every symbol"),
+    regime: str = Query(default="", description="Filter to one regime; omit for every regime"),
+):
+    """V16 Phase 4C Step 3 (Part F) — the current recommendation
+    application state: which learning/ recommendations are currently
+    "active" (passed Part A's validator + context filters — symbol/
+    regime/expiry/contradiction — and are eligible to influence a
+    decision) versus "skipped", each skip with its exact reason
+    (learning/application/recommendation_context.py's own "if ignored,
+    show WHY" guarantee).
+
+    Zero new persistence: reads `_state["learning_recommendations"]`,
+    an in-memory slot nothing populates yet in this phase — no
+    scheduler wires a live learning snapshot's recommendations into the
+    running process today (that wiring is explicitly out of scope for
+    this phase; see PATCH_NOTES.md's "known follow-up work", same
+    "groundwork, not a behavior change" boundary
+    agents/decision_context.py drew around portfolio_state/
+    existing_positions/risk_snapshot in Phase 4B Step 3B).
+
+    Returns an honest empty `active`/`skipped` — not an error — until
+    that wiring exists, same convention as /api/ceo-decisions above
+    when CEO_MULTI_SYMBOL_ENABLED is off."""
+    loaded = _state.get("learning_recommendations", [])
+    rset = build_recommendation_set(loaded, symbol=symbol or None, regime=regime or None)
+    return _ok({
+        "active":  [asdict(r) for r in rset.applied],
+        "skipped": [s.to_dict() for s in rset.skipped],
+        "symbol": rset.symbol, "regime": rset.regime, "generated_at": rset.generated_at,
+    })
+
+
+@app.get("/api/recommendations/metrics")
+async def recommendations_metrics():
+    """V16 Phase 4C Step 3 (Part E, exposed via Part F) — runtime
+    counters for the recommendation application layer: loaded/applied/
+    skipped/expired/contradictory/invalid, average recommendation
+    score, average application latency. All zero/None until
+    `CEOAgent.decide_with_recommendations()` has actually run at least
+    once (RECOMMENDATION_APPLICATION_ENABLED=true) — an honest starting
+    state, not an error."""
+    return _ok(get_recommendation_metrics().to_dict())
 
 
 @app.get("/api/paper")

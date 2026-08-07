@@ -143,6 +143,60 @@ class Settings(BaseSettings):
     # on every single decision cycle.
     DYNAMIC_WEIGHT_REFRESH_SECONDS: int = Field(default=300, alias="DYNAMIC_WEIGHT_REFRESH_SECONDS")
 
+    # ── Recommendation Application Layer — V16 Phase 4C Step 3 (Track A) ───
+    # Off by default: recommendations are advisory-only and CEOAgent.decide()
+    # (the pre-existing, unmodified method) keeps working identically
+    # whether this is on or off. Only CEOAgent.decide_with_recommendations()
+    # — a new, additive method nothing pre-existing calls — reads any of
+    # these. Existing protections (Risk Manager, Circuit Breaker, CEO
+    # BLOCKED veto) are evaluated before this layer runs and are never
+    # reachable from it — see agents/ceo_agent.py and
+    # learning/application/recommendation_advisor.py.
+    RECOMMENDATION_APPLICATION_ENABLED: bool = Field(default=False, alias="RECOMMENDATION_APPLICATION_ENABLED")
+    # How long a generated Recommendation is considered current before
+    # RecommendationValidator marks it "expired". Recommendations are
+    # regenerated from a live dataset each learning-report run (there is no
+    # scheduled cadence today), so this is a safety ceiling against a stale
+    # snapshot being reused long after the market conditions it described.
+    RECOMMENDATION_TTL_HOURS: float = Field(default=24.0, alias="RECOMMENDATION_TTL_HOURS")
+    # Minimum `based_on.metric.sample_size` (or `.length` for streak
+    # patterns) before a recommendation is trusted enough to be applied —
+    # same floor pattern_miner.py's own DEFAULT_MIN_SAMPLE_SIZE (5) uses,
+    # kept as its own setting since the two are validated for different
+    # purposes (pattern detection vs. decision-application) and may need to
+    # diverge later.
+    RECOMMENDATION_MIN_SAMPLE_SIZE: int = Field(default=5, alias="RECOMMENDATION_MIN_SAMPLE_SIZE")
+    # Sample size at which the scoring layer's "coverage"/"sample_size"
+    # sub-scores saturate to 1.0 (a diminishing-returns cap, not a hard
+    # cutoff — pattern_miner's "high" confidence bucket already starts at
+    # 30; this is set a little above that so "high confidence" patterns
+    # still have room to be scored better than "just barely high").
+    RECOMMENDATION_SCORE_SATURATION_N: int = Field(default=50, alias="RECOMMENDATION_SCORE_SATURATION_N")
+    # Scoring-component weights for recommendation_scoring.py — must sum to
+    # 1.0 (validated by that module's own tests). Historical win-rate and
+    # validator status are weighted highest because they are the most
+    # directly decision-relevant; recency is weighted lowest because a
+    # recommendation's expiry (RECOMMENDATION_TTL_HOURS) already handles
+    # the "too stale to use at all" case on its own.
+    RECOMMENDATION_SCORE_WEIGHT_CONFIDENCE: float = Field(default=0.20, alias="RECOMMENDATION_SCORE_WEIGHT_CONFIDENCE")
+    RECOMMENDATION_SCORE_WEIGHT_SUCCESS: float = Field(default=0.25, alias="RECOMMENDATION_SCORE_WEIGHT_SUCCESS")
+    RECOMMENDATION_SCORE_WEIGHT_SAMPLE_SIZE: float = Field(default=0.15, alias="RECOMMENDATION_SCORE_WEIGHT_SAMPLE_SIZE")
+    RECOMMENDATION_SCORE_WEIGHT_RECENCY: float = Field(default=0.10, alias="RECOMMENDATION_SCORE_WEIGHT_RECENCY")
+    RECOMMENDATION_SCORE_WEIGHT_COVERAGE: float = Field(default=0.10, alias="RECOMMENDATION_SCORE_WEIGHT_COVERAGE")
+    RECOMMENDATION_SCORE_WEIGHT_VALIDATOR: float = Field(default=0.20, alias="RECOMMENDATION_SCORE_WEIGHT_VALIDATOR")
+    # Hard ceiling on how much a recommendation may move CEODecision.confidence
+    # (percentage points, since CEODecision.confidence is 0-100). Bounded so
+    # no combination of recommendations can single-handedly flip a decision
+    # across the existing >=40-point action threshold on its own — see
+    # decide_with_recommendations()'s own docstring for the exact clamp.
+    RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT: float = Field(default=5.0, alias="RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT")
+    # Maximum number of applied recommendations counted toward one
+    # decision's confidence adjustment — prevents a symbol with many
+    # simultaneously-applicable recommendations from compounding past the
+    # max-adjustment ceiling in a way that's hard to explain to a human
+    # reading the decision's `reasons`.
+    RECOMMENDATION_MAX_APPLIED_PER_DECISION: int = Field(default=5, alias="RECOMMENDATION_MAX_APPLIED_PER_DECISION")
+
     # ── Market Scanner (V16 Phase 2, Part 1) ───────────────
     # Off by default: (1) this is a brand-new background thread making live
     # exchange calls — it must never auto-start just because main.py or a

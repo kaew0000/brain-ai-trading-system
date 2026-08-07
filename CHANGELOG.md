@@ -1,6 +1,95 @@
 # CHANGELOG
 
-## [Unreleased] — C1: Exchange State Manager (v2, rewritten from rejected v1 draft)
+## [Unreleased] — V16 Phase 4C Step 3: Recommendation Application Layer (Track A)
+
+Connects `learning/`'s (Phase 4C Step 1) recommendations to the live
+decision pipeline as ADVISORY inputs only. No autonomous strategy
+rewriting, no automatic parameter mutation — every applied
+recommendation is bounded, explainable, and reversible by inspection.
+
+**Verification note:** this phase's brief assumed a "Phase 4C Step 2"
+had already been merged. An independent fresh clone (two separate
+clones, same HEAD `90a7e4e`) found no such phase anywhere in
+`git log --all` — only Step 1 exists. The missing prerequisite schema
+work (recommendation identity/lifecycle fields) is folded into this
+bundle instead of a separate phase, per instruction. See PATCH_NOTES.md
+for the full gap report.
+
+### Added
+- **`learning/application/` package** (new): `recommendation_validator.py`
+  (deterministic `validator_status`: valid/expired/insufficient_sample/
+  invalid), `recommendation_context.py` (Part A — filters by symbol/
+  regime/direction/confidence/expiry/validator status into one canonical
+  `RecommendationSet`, with narrow best-vs-worst contradiction
+  detection), `recommendation_scoring.py` (Part D — deterministic
+  0.0-1.0 normalized score: confidence bucket + historical win-rate +
+  sample size + recency + coverage + validator status, weights in
+  `config/settings.py`, sum to 1.0), `recommendation_advisor.py`
+  (Part B+C — bounded, explainable `CEODecision` adjustment: BLOCKED
+  decisions pass through byte-identical; otherwise `confidence` moves by
+  at most `RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT` points, `action`/
+  `direction`/`score_breakdown`/`agreement_score` are never touched;
+  every recommendation — applied or skipped — gets one
+  `AppliedRecommendationExplanation`), `recommendation_metrics.py`
+  (Part E — in-process runtime counters, `events/event_bus.py`-style
+  singleton), `recommendation_events.py` (Part G — publishes
+  `RECOMMENDATION_LOADED`/`APPLIED`/`SKIPPED`/`EXPIRED`/`CONTRADICTED`
+  via the existing `EventBus`, no new transport),
+  `recommendation_service.py` (orchestrates all of the above into one
+  call).
+- **`agents/ceo_agent.py`**: `CEOAgent.decide_with_recommendations()` —
+  additive method, same thin-wrapper pattern as Phase 4B Step 3B's
+  `decide_from_context()`. Calls the existing, UNCHANGED `decide()`
+  first; nothing pre-existing calls this new method, so `decide()` and
+  `decide_from_context()` behave identically to before this phase.
+- **`api/app.py`**: `GET /api/recommendations` (active/skipped + reasons,
+  optional `symbol`/`regime` filters), `GET /api/recommendations/metrics`
+  (Part E counters). Both follow the existing honest-empty-state
+  convention (`/api/ceo-decisions`) — zero and empty until a future
+  scheduler populates `_state["learning_recommendations"]` (out of
+  scope here, see "Known follow-up work" below).
+- **`config/settings.py`**: `RECOMMENDATION_APPLICATION_ENABLED` (off by
+  default), `RECOMMENDATION_TTL_HOURS`, `RECOMMENDATION_MIN_SAMPLE_SIZE`,
+  `RECOMMENDATION_SCORE_SATURATION_N`, six
+  `RECOMMENDATION_SCORE_WEIGHT_*` (sum to 1.0),
+  `RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT`,
+  `RECOMMENDATION_MAX_APPLIED_PER_DECISION`.
+- **94 new tests** across 9 files (`tests/test_recommendation_*.py`,
+  `tests/test_ceo_decide_with_recommendations.py`,
+  `tests/test_recommendations_api.py`) covering loading, filtering,
+  expiry, contradiction, scoring, application, safety-ordering (BLOCKED
+  pass-through, confidence clamping, action/direction never touched),
+  dashboard API, event publishing, and decision integration.
+
+### Changed (additive, backward-compatible)
+- **`learning/recommendation_engine.py`**: `Recommendation` gains six
+  new defaulted fields — `id` (deterministic hash of
+  category+kind+subject, NOT random, so identity survives
+  regeneration), `symbol`, `regime` (both honestly `None` when the
+  underlying pattern isn't scoped to one), `generated_at`, `expires_at`,
+  `validator_status` (default `"unvalidated"`). `direction` was
+  requested by this phase's brief but was **not** added — no pattern
+  kind this engine reads is conditioned on trade direction anywhere in
+  `pattern_miner.py`; adding the field would mean fabricating values.
+  `RecommendationEngine.generate()` gained an optional `now` parameter
+  (defaults to `datetime.now(timezone.utc)`); every existing positional/
+  keyword call site and every existing test is unaffected.
+
+### Known follow-up work (explicitly out of scope for this phase)
+- No scheduler wires a live `LearningSnapshot`'s recommendations into
+  `_state["learning_recommendations"]` or into
+  `decide_with_recommendations()`'s live decision loop — both exist and
+  are fully tested, but nothing calls them from `main.py` yet. Same
+  "groundwork, not a behavior change" boundary Phase 4B Step 3B drew
+  around `CEODecisionContext.portfolio_state`.
+- Contradiction detection (Part A) is intentionally narrow (same-
+  category, same-symbol, best-vs-worst `based_on.kind` polarity) — not
+  a general-purpose text-contradiction detector.
+- `direction`-based filtering exists in `recommendation_context.py` but
+  is a no-op today (see above) until a future phase adds direction-
+  conditioned patterns to `pattern_miner.py`.
+
+
 
 New read-only package `exchange_state/` — single source of truth for
 account/position/order state for World (C2), Dashboard (C3), and CEO/AI
