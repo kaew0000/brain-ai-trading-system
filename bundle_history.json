@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-05T09:30:12Z",
+  "updated_at": "2026-08-06T07:40:49Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -206,6 +206,33 @@
       "bundle_filename": "c2-repository-consolidation.bundle",
       "status": "applied",
       "imported_at": "2026-08-05T09:30:12Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "112dfb183b0bb7849419318aaf2f1380e16b0f8e",
+      "branch": "feature/order-01-unified-order-state",
+      "bundle_filename": "order-01-unified-order-state.bundle",
+      "status": "applied",
+      "imported_at": "2026-08-06T07:09:02Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "9d0f370bd75362e1303f894c2c45b4975eb5f6a1",
+      "branch": "feature/phase4c-step2-learning-recommendation-integration",
+      "bundle_filename": "phase4c-step2-learning-recommendation-integration.bundle",
+      "status": "failed",
+      "imported_at": "2026-08-06T07:15:40Z",
+      "pushed": false,
+      "reason": "checkout failed: error: Your local changes to the following files would be overwritten by checkout:\n\tbundle_history.json\nPlease commit your changes or stash them before you switch branches.\nAborting"
+    },
+    {
+      "sha": "9ced793ba369cd44a4c7de9847aab39259073e16",
+      "branch": "fix/bundle-manager-dirty-tree-preflight",
+      "bundle_filename": "fix-bundle-manager-dirty-tree-preflight.bundle",
+      "status": "applied",
+      "imported_at": "2026-08-06T07:40:49Z",
       "pushed": true,
       "reason": null
     }
