@@ -422,6 +422,58 @@ class CEOAgent(BaseAgent):
         """
         return self.decide(context.market_context, context.confidence_result)
 
+    def decide_with_recommendations(
+        self,
+        market_context: dict,
+        confidence_result=None,
+        *,
+        recommendations: list | None = None,
+        dataset_row_count: int | None = None,
+    ) -> CEODecision:
+        """V16 Phase 4C Step 3 (Part B): thin wrapper — calls the EXISTING
+        decide() UNCHANGED to get the authoritative CEODecision, then
+        hands it to learning/application/recommendation_service.py's
+        `apply_learning_recommendations()` for a bounded, advisory-only
+        adjustment. Same "thin wrapper, real logic lives elsewhere"
+        pattern as decide_from_context() just above.
+
+        Nothing pre-existing calls this method — decide() and
+        decide_from_context() are both still called exactly as before by
+        every existing caller, with identical behavior. Only a caller
+        that explicitly opts into this new method, AND passes
+        `recommendations`, is affected.
+
+        `recommendations` is a plain list of
+        learning.recommendation_engine.Recommendation — the caller (a
+        future scheduler wiring, out of scope for this phase — see
+        PATCH_NOTES.md's "known follow-up work") is responsible for
+        loading them from the latest LearningSnapshot; this method does
+        not read learning_report.json or any file itself, keeping this
+        package's existing "read-only analysis, someone else owns the
+        schedule" boundary (learning/'s own Phase 4C Step 1 brief)
+        intact.
+
+        Safety: if `recommendations` is empty/None, OR
+        settings.RECOMMENDATION_APPLICATION_ENABLED is False, this
+        returns decide()'s result completely unchanged — same as if
+        this method didn't exist. See
+        learning/application/recommendation_advisor.py's module
+        docstring for the full BLOCKED / bounded-adjustment safety
+        ordering when recommendations ARE applied.
+        """
+        decision = self.decide(market_context, confidence_result)
+        if not recommendations or not settings.RECOMMENDATION_APPLICATION_ENABLED:
+            return decision
+
+        from learning.application.recommendation_service import apply_learning_recommendations
+
+        new_decision, _explanations, _rset = apply_learning_recommendations(
+            decision, recommendations,
+            symbol=market_context.get("symbol"), regime=market_context.get("regime"),
+            dataset_row_count=dataset_row_count,
+        )
+        return new_decision
+
     def analyse(self, market_context: dict) -> AgentReport:
         """BaseAgent interface — wraps decide() without ConfidenceResult."""
         dec = self.decide(market_context)
