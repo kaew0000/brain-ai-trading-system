@@ -13,14 +13,16 @@ import Inspector from './components/Inspector'
 import TimelinePanel from './components/TimelinePanel'
 import NotificationsPanel from './components/NotificationsPanel'
 import SettingsPanel from './components/SettingsPanel'
+import WorkspacePanel from './components/WorkspacePanel'
 
-type TabId = 'scene' | 'timeline' | 'alerts' | 'settings'
+type TabId = 'scene' | 'timeline' | 'alerts' | 'settings' | 'workspace'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'scene', label: 'Office' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'settings', label: 'Settings' },
+  { id: 'workspace', label: 'Workspace' },
 ]
 
 export default function WorldPage() {
@@ -155,6 +157,7 @@ export default function WorldPage() {
       {tab === 'timeline' && <TimelinePanel />}
       {tab === 'alerts' && <NotificationsPanel />}
       {tab === 'settings' && <SettingsPanel rooms={rooms.map((r) => r.roomId)} />}
+      {tab === 'workspace' && <WorkspacePanel />}
     </div>
   )
 }
