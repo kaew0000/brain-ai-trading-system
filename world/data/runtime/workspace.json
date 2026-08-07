@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "panels": [
+    {
+      "panelId": "ops-dashboard",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "agent-ceo",
+      "x": 300.0,
+      "y": 0.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "agent-risk",
+      "x": 600.0,
+      "y": 0.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "agent-execution",
+      "x": 900.0,
+      "y": 0.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "agent-market",
+      "x": 0.0,
+      "y": 220.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "agent-regime",
+      "x": 300.0,
+      "y": 220.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "agent-portfolio",
+      "x": 600.0,
+      "y": 220.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "agent-learning",
+      "x": 900.0,
+      "y": 220.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "notifications",
+      "x": 0.0,
+      "y": 440.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "missions",
+      "x": 300.0,
+      "y": 440.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "search",
+      "x": 600.0,
+      "y": 440.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "history",
+      "x": 900.0,
+      "y": 440.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    },
+    {
+      "panelId": "performance",
+      "x": 0.0,
+      "y": 660.0,
+      "width": 290.0,
+      "height": 200.0,
+      "collapsed": false,
+      "docked": true,
+      "zOrder": 0
+    }
+  ],
+  "openPanelIds": [
+    "ops-dashboard",
+    "agent-ceo",
+    "agent-risk",
+    "agent-execution",
+    "agent-market",
+    "agent-regime",
+    "agent-portfolio",
+    "agent-learning",
+    "notifications",
+    "missions",
+    "search",
+    "history",
+    "performance"
+  ]
+}

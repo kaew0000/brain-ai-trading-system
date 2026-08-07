@@ -99,6 +99,9 @@ from api.world_api import router as _world_router
 from api.world_ws import router as _world_ws_router
 from api.world_ws import check_and_broadcast as _world_ws_check
 
+# Phase W12 — Live Operations Workspace & Command Console. Same pattern.
+from api.workspace_api import router as _workspace_router
+
 logger = get_logger("api.app")
 
 # ── Startup time ──────────────────────────────────────────────────────────────
@@ -403,6 +406,10 @@ app.include_router(_lifecycle_router)
 # pattern as everything above — no auth changes needed.
 app.include_router(_world_router)
 app.include_router(_world_ws_router)
+
+# Phase W12 — Live Operations Workspace & Command Console. Same
+# /api/* auth coverage as everything above.
+app.include_router(_workspace_router)
 
 
 # ── P1-A: Dashboard authentication ─────────────────────────────────────────

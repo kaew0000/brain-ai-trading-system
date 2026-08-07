@@ -134,3 +134,13 @@ dashboard. See `LIVE_OPERATIONS_CENTER.md` in this folder for the full
 data-flow diagram, and `docs/architecture/SEPARATION_POLICY.md`'s "Phase
 W11 amendment" for what changed in the separation contract itself.
 
+**Operations Workspace (Phase W12, done):** `world/workspace/` sits
+alongside `world/interaction/` as another read-only composition layer
+over `WorldState`/`SimulationState`/`world.interaction` — 7 named agent
+panels, an operations dashboard, notification dock, mission workspace,
+search, quick nav, history, and a performance overlay, exposed via
+`api/workspace_api.py` (additive into `api/app.py`, same pattern as
+`api/world_api.py`) and a new "Workspace" tab in the dashboard. No new
+Track A footprint beyond one more `include_router` call. See
+`OPERATIONS_WORKSPACE.md` in this folder.
+

@@ -1,0 +1,23 @@
+{
+  "$id": "workspace.schema.json",
+  "type": "object",
+  "required": ["version", "panels", "openPanelIds"],
+  "properties": {
+    "version": {"type": "integer"},
+    "panels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["panelId", "x", "y", "width", "height", "collapsed", "docked", "zOrder"],
+        "properties": {
+          "panelId": {"type": "string"},
+          "x": {"type": "number"}, "y": {"type": "number"},
+          "width": {"type": "number"}, "height": {"type": "number"},
+          "collapsed": {"type": "boolean"}, "docked": {"type": "boolean"},
+          "zOrder": {"type": "integer"}
+        }
+      }
+    },
+    "openPanelIds": {"type": "array", "items": {"type": "string"}}
+  }
+}

@@ -85,11 +85,11 @@ export interface InspectorReport {
 
 export interface NotificationItem {
   id: string
-  timestamp: string
+  category: 'emergency' | 'meeting' | 'alert' | 'mission' | 'celebration' | 'system_status'
+  roomId: string
+  tickNumber: number
   message: string
-  severity: 'info' | 'success' | 'warning' | 'critical'
-  read: boolean
-  category?: string
+  agentId: string
 }
 
 export interface TimelineStatus {

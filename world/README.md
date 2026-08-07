@@ -56,6 +56,11 @@ deeper documentation (architecture, roadmap, conventions).
   `NotificationCenter`, `search`, `filters`, `CommandDispatcher`,
   `EventBus`, `InteractionHistory`, and the public `api.py` (Phase W9,
   read-only over Phase W5+W7+W8 state) — see `docs/INTERACTION_LAYER.md`
+- `workspace/` — 10 feature modules (layout, agent panels, operations
+  dashboard, notification dock, mission workspace, search, quick nav,
+  history, performance overlay) plus the public `api.py` (Phase W12,
+  read-only composition over Phase W5+W7+W9 state) — see
+  `docs/OPERATIONS_WORKSPACE.md`
 - `docs/` — architecture, roadmap, coding/naming/asset conventions,
   ingestion adapter, state provider, office layout & room specs (W2),
   asset pipeline & population reports (W6), the simulation layer (W7),
@@ -68,6 +73,16 @@ deeper documentation (architecture, roadmap, conventions).
   navigation/asset/simulation/renderer/interaction tests
 
 ## Status
+
+Phase W12 — Live Operations Workspace & Command Console is done:
+`world/workspace/` composes a business-facing workspace (7 named agent
+panels, operations dashboard, notification dock, mission workspace,
+search, quick nav, undo-only history, performance overlay) purely from
+already-public `world.runtime`/`world.simulation`/`world.interaction`
+APIs — no duplicated logic, no new polling loop. `api/workspace_api.py`
+is additively included into `api/app.py`, and a new "Workspace" tab
+joins the existing Office World page. See
+`world/docs/OPERATIONS_WORKSPACE.md`.
 
 Phase W10 — Live Command Center UI is done: Office World is now unified
 into the existing React/Vite/FastAPI dashboard (`dashboard_src/`) as one

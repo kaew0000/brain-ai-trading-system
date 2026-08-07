@@ -21,6 +21,11 @@ RUNTIME_FILE_TO_SCHEMA = {
     "portfolio.json": "portfolio.schema.json",
     "telemetry.json": "telemetry.schema.json",
     "notifications.json": "notifications.schema.json",
+    # Phase W12: workspace.json is UI layout state (world.workspace.
+    # layout_manager), not a Phase W4 RuntimeManager snapshot — but it
+    # lives in the same directory per this phase's own explicit
+    # instruction, so it's covered by the same drift check.
+    "workspace.json": "workspace.schema.json",
 }
 
 
@@ -36,7 +41,7 @@ def test_runtime_file_matches_schema(runtime_file, schema_file):
     jsonschema.validate(instance=data, schema=schema)
 
 
-def test_all_six_runtime_files_present():
+def test_all_seven_runtime_files_present():
     assert set(os.listdir(RUNTIME_DIR)) == set(RUNTIME_FILE_TO_SCHEMA.keys())
 
 

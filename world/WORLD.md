@@ -1,8 +1,8 @@
 # Brain AI Command World — Phase W1: Foundation Architecture
 
 **Status:** Implemented (W1, W1A). Superseded in part by Phase W2 — see notes
-below. Extended, not superseded, by Phase W3, W4, W5, W6, W7, W8, W9, and
-W10.
+below. Extended, not superseded, by Phase W3, W4, W5, W6, W7, W8, W9,
+W10, W11, and W12.
 **Scope:** Through Phase W9, everything lived under `world/` only, with
 `agents/`, `execution/`, `portfolio/`, `journal/`, `risk/`, `api/`,
 `dashboard/`, `dashboard_src/`, `main.py`, `config/`, `scanner/`,
@@ -155,6 +155,27 @@ remain completely untouched through W10.
 > unmodified `main`) was found and fixed, since otherwise this phase's
 > own deliverable — and the dashboard generally — couldn't be built at
 > all.
+
+> **Phase W11 update (backfilled):** Live Operations Center is done —
+> `telemetry/world_export.py` (Track A) feeds all five Phase W4 readers
+> real data (agent telemetry, heartbeats, missions, portfolio PnL/
+> drawdown/win-rate, CPU/RAM), scheduled defensively per trading cycle
+> alongside Phase W10's simulation tick. See
+> `world/docs/LIVE_OPERATIONS_CENTER.md` and `docs/architecture/
+> SEPARATION_POLICY.md`'s "Phase W11 amendment."
+
+> **Phase W12 update:** the Live Operations Workspace & Command Console
+> is done — `world/workspace/` composes 7 named agent panels, an
+> operations dashboard, notification dock, mission workspace, search,
+> quick nav, undo-only history, and a performance overlay purely from
+> already-public Phase W5/W7/W9 APIs, exposed via `api/workspace_api.py`
+> (additive) and a new "Workspace" tab. Supersedes the earlier, narrower
+> "W12 (proposed)" roadmap placeholder (never built) — carried forward
+> as W13. Two real bugs were found and fixed while building this phase,
+> not hidden: a Phase W4 test (`test_all_six_runtime_files_present`)
+> needed honest updating for the new `workspace.json`, and a real
+> pre-existing shape bug in Phase W10's own `NotificationsPanel.tsx` was
+> caught and corrected. See `world/docs/OPERATIONS_WORKSPACE.md`.
 
 ---
 

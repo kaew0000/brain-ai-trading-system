@@ -145,7 +145,25 @@
     and true exchange/API-call latency remain future work (no verified
     read-only accessor was found for either — see
     `world/docs/LIVE_OPERATIONS_CENTER.md` "Known Gaps"). **Done.**
-14. **W12 (proposed)** — Close the two gaps W11 documented rather than
+14. **W12** — Live Operations Workspace & Command Console: `world/workspace/`
+    (10 feature modules: layout persistence, 7 named agent panels,
+    operations dashboard top strip, notification dock with pin/read/
+    clear, mission workspace grouped by status bucket, in-memory search,
+    Ctrl+P quick nav, undo-only navigation history, logical performance
+    overlay) plus `api.py`'s public facade — every feature reads only
+    `world.runtime`/`world.simulation`/`world.interaction`, nothing new
+    duplicates business logic or polls outside the existing pipeline.
+    `api/workspace_api.py` (REST, `/api/workspace/*`) included
+    additively into `api/app.py`; a new "Workspace" tab in the existing
+    Office World page (`dashboard_src/.../WorkspacePanel.tsx`).
+    Supersedes the narrower "W12 (proposed)" placeholder below (never
+    built), which is carried forward as W13. Two documented gaps found
+    and fixed along the way: `test_all_six_runtime_files_present`
+    (Phase W4) needed updating for the new `workspace.json`, and a real
+    pre-existing bug in Phase W10's own `NotificationsPanel.tsx` (wrong
+    assumed shape for `InteractionNotification`) was caught and fixed —
+    see `world/docs/OPERATIONS_WORKSPACE.md`. **Done.**
+15. **W13 (proposed)** — Close the two gaps W11 documented rather than
     guessed: (a) a real mapping between `events/event_bus.py`'s
     subsystem agent names and the Phase W1 district `assignedAgents`
     codenames, so live events place themselves in the correct room
@@ -154,4 +172,5 @@
     opposed to the most recent portfolio-decision-cycle figures W11
     wired), if one gets built in Track A. Both are additive,
     Track-B-visualization-quality improvements, not corrections to
-    anything W11 shipped.
+    anything W11 shipped. Would also close Phase W12's own two honesty
+    gaps (`OperationsSummary.mode`/`account_equity`).
