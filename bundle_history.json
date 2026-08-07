@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-06T07:40:49Z",
+  "updated_at": "2026-08-07T05:23:36Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -235,6 +235,15 @@
       "imported_at": "2026-08-06T07:40:49Z",
       "pushed": true,
       "reason": null
+    },
+    {
+      "sha": "a3822cf5382ac4ba405990e9d79b92c1eb453649",
+      "branch": "main",
+      "bundle_filename": "track-c3-phase1-order-timeline.bundle.txt",
+      "status": "failed",
+      "imported_at": "2026-08-07T05:23:36Z",
+      "pushed": false,
+      "reason": "fetch failed: fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/data/data/com.termux/files/home/brain-ai-trading-system'"
     }
   ]
 }
