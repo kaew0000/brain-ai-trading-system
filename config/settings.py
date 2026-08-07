@@ -292,6 +292,34 @@ class Settings(BaseSettings):
     # of registered strategies and what each one requires.
     STRATEGY_NAME: str = Field(default="portfolio_signal_provider", alias="STRATEGY_NAME")
 
+    # ── Track C3 Phase 1: Unified Order/Trade Timeline (read-model) ─────
+    # Off by default — same posture as SCHEDULER_ENABLED/CEO_MULTI_SYMBOL_
+    # ENABLED above: this starts a new background poller
+    # (execution/order_timeline.py) that only READS execution/
+    # trade_lifecycle.py's TradeLifecycle and exchange_state/manager.py's
+    # ExchangeStateManager (C1) — it never mutates either, and neither's
+    # existing behavior changes whether this is on or off. False = byte-
+    # identical to before this phase.
+    ORDER_TIMELINE_ENABLED: bool = Field(default=False, alias="ORDER_TIMELINE_ENABLED")
+    # Deliberately >= exchange_state/constants.py's DEFAULT_SNAPSHOT_TTL_
+    # SECONDS (3.0s): OrderTimeline never forces a refresh (get_orders()
+    # -> get_snapshot(force=False) respects C1's own TTL cache), so a
+    # poll interval below the TTL can never cause an EXTRA Binance call
+    # — C1 just returns its still-cached snapshot — but it would mean
+    # OrderTimeline is calling get_orders() more often than the
+    # underlying data can actually change. Keeping this >= the TTL keeps
+    # the two knobs aligned by convention, not by hard coupling.
+    ORDER_TIMELINE_POLL_INTERVAL_SECONDS: float = Field(
+        default=5.0, alias="ORDER_TIMELINE_POLL_INTERVAL_SECONDS"
+    )
+    # Row-count cap for order_timeline_history (operational history
+    # only — the journal, not this table, is the durable trade record).
+    # Trimmed lazily every _TRIM_CHECK_INTERVAL persisted batches (see
+    # execution/order_timeline.py) rather than on every insert.
+    ORDER_TIMELINE_HISTORY_MAX_ROWS: int = Field(
+        default=100_000, alias="ORDER_TIMELINE_HISTORY_MAX_ROWS"
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

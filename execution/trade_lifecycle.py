@@ -368,6 +368,41 @@ class TradeLifecycle:
         handle = self._handles.get(symbol)
         return handle.state if handle else None
 
+    def get_handle_snapshot(self, symbol: str) -> dict | None:
+        """Same row shape as one entry of snapshot() below, but for
+        exactly one symbol AND including terminal CLOSED/FAILED handles.
+        snapshot() deliberately excludes terminal handles (see its own
+        docstring — it's a "what's live right now" view for the
+        dashboard). A read-model that needs to observe the FINAL
+        transition into CLOSED/FAILED — e.g. execution/order_timeline.py
+        (Track C3), which persists every observed state change including
+        the terminal one — would otherwise lose exit_reason/trade_id the
+        same poll cycle the symbol drops out of snapshot(). Read-only;
+        does not affect snapshot(), __len__, or any transition method."""
+        handle = self._handles.get(symbol)
+        if handle is None:
+            return None
+        return {
+            "symbol":      handle.symbol,
+            "state":       handle.state.value,
+            "trade_id":    handle.trade_id,
+            "exit_reason": handle.exit_reason,
+            "exit_source": handle.exit_source.value if handle.exit_source else None,
+            "confidence":  handle.confidence,
+        }
+
+    def known_symbols(self) -> list[str]:
+        """Every symbol this TradeLifecycle currently holds ANY handle
+        for, live or terminal — a superset of snapshot()'s symbols.
+        Lets a poll-based read-model (execution/order_timeline.py,
+        Track C3) discover a symbol that went all the way to
+        CLOSED/FAILED between two of the read-model's OWN poll cycles
+        (or before its very first one) — get_handle_snapshot(symbol)
+        alone cannot do this since it requires already knowing the
+        symbol to look up. Read-only; does not affect snapshot(),
+        __len__, or any transition method."""
+        return list(self._handles.keys())
+
     def snapshot(self) -> list[dict]:
         """Every symbol currently open or in the middle of opening/
         closing — i.e. everything EXCEPT terminal CLOSED/FAILED handles,

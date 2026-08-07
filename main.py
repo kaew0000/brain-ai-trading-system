@@ -459,6 +459,33 @@ def build_system() -> dict:
                 logger.error(f"ExecutionScheduler failed to start (non-fatal): {exc}")
                 execution_scheduler = None
 
+    # Track C3 Phase 1 (Unified Order/Trade Timeline) — off by default
+    # (see config/settings.py ORDER_TIMELINE_ENABLED). Same guarded,
+    # best-effort, non-fatal pattern as MarketScanner/ExecutionScheduler
+    # above. Read-only: reuses the SAME trade_lifecycle instance already
+    # constructed above (not a second one) and, if EXECUTION_MODE has a
+    # usable data_provider, the SAME exchange_state singleton keyed by
+    # (mode, exchange, account_id) any other C1 consumer (World/
+    # Dashboard/CEO context) would get from get_manager() — never a
+    # second ExchangeStateManager for the same account.
+    order_timeline = None
+    if settings.ORDER_TIMELINE_ENABLED:
+        try:
+            from exchange_state.manager import get_manager as get_exchange_state_manager
+            from execution.order_timeline import get_order_timeline
+
+            exchange_manager = get_exchange_state_manager(data_provider, mode=EXECUTION_MODE)
+            order_timeline = get_order_timeline(
+                trade_lifecycle=trade_lifecycle,
+                exchange_manager=exchange_manager,
+                poll_interval_seconds=settings.ORDER_TIMELINE_POLL_INTERVAL_SECONDS,
+                max_history_rows=settings.ORDER_TIMELINE_HISTORY_MAX_ROWS,
+            )
+            order_timeline.start()
+        except Exception as exc:
+            logger.error(f"OrderTimeline failed to start (non-fatal): {exc}")
+            order_timeline = None
+
     logger.info("[9/9] All components ready.")
 
     # ── Agent Layer ───────────────────────────────────────────────────────────
@@ -510,6 +537,7 @@ def build_system() -> dict:
         "reconciliation_engine": reconciliation_engine,
         "market_scanner":        market_scanner,
         "execution_scheduler":   execution_scheduler,
+        "order_timeline":        order_timeline,
         "current_mission_id":    None,
     }
 
@@ -1535,6 +1563,14 @@ def main() -> None:
         time.sleep(1)
 
     watchdog_supervisor.stop()
+    # Track C3 Phase 1 — graceful stop for OrderTimeline's own background
+    # poller so it isn't left as an unmanaged daemon thread. Scoped to
+    # this phase's own new service only: market_scanner/execution_
+    # scheduler have the same "daemon thread, no explicit stop() at
+    # shutdown" gap pre-existing this phase — flagged separately rather
+    # than silently fixed here, since neither is part of Track C3.
+    if components.get("order_timeline") is not None:
+        components["order_timeline"].stop()
     logger.info("Bot stopped. Final report:")
     daily_report(components)
 
