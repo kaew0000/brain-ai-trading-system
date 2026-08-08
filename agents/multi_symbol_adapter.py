@@ -84,6 +84,8 @@ class MultiSymbolCEOAdapter:
         portfolio_state=None,
         existing_positions=None,
         risk_snapshot=None,
+        recommendations=None,
+        dataset_row_count=None,
     ):
         """Returns a CEODecision, or None when signal_provider itself has
         nothing usable for `symbol` this cycle (e.g. incomplete OHLCV,
@@ -92,10 +94,15 @@ class MultiSymbolCEOAdapter:
         Never raises: a single bad symbol must not be able to break a
         caller looping over many symbols in one cycle, matching this
         project's "safety wrapping at every touchpoint" rule (see e.g.
-        PortfolioSignalProvider.get_signal()'s own docstring)."""
+        PortfolioSignalProvider.get_signal()'s own docstring).
+
+        `recommendations`/`dataset_row_count` (V16 Phase 4C Step 4): see
+        decide_with_signal()'s own docstring — default None on both
+        preserves this method's exact prior behavior."""
         decision, _signal = self.decide_with_signal(
             symbol, portfolio_state=portfolio_state,
             existing_positions=existing_positions, risk_snapshot=risk_snapshot,
+            recommendations=recommendations, dataset_row_count=dataset_row_count,
         )
         return decision
 
@@ -105,6 +112,8 @@ class MultiSymbolCEOAdapter:
         portfolio_state=None,
         existing_positions=None,
         risk_snapshot=None,
+        recommendations=None,
+        dataset_row_count=None,
     ):
         """V16 Phase 4B Step 3C: same computation as decide(), but also
         returns the already-priced ExecutionSignal
@@ -115,7 +124,25 @@ class MultiSymbolCEOAdapter:
         ConfidenceEngine/RegimeEngine computation get_signal_with_context()
         already did once. Returns (None, None) under the same "nothing
         usable this cycle" conditions decide() returns None for. Never
-        raises, same reasoning as decide()."""
+        raises, same reasoning as decide().
+
+        `recommendations`/`dataset_row_count` (V16 Phase 4C Step 4 — live
+        scheduler wiring design audit, Part D/L): optional. When
+        `recommendations` is a non-empty list AND
+        settings.RECOMMENDATION_APPLICATION_ENABLED is True, this calls
+        agents.ceo_agent.CEOAgent.decide_from_context_with_recommendations()
+        instead of decide_from_context() — bounded, advisory-only
+        confidence adjustment layered on top of the SAME CEODecision,
+        never a second decision engine. Any other combination (None/empty
+        recommendations, or the flag off, which is the default) calls
+        decide_from_context() exactly as before — byte-identical to this
+        method's pre-Step-4 behavior. The caller (execution/
+        ceo_gated_signal_provider.py, via main.py's live wiring) is
+        responsible for sourcing `recommendations` from
+        _state["learning_recommendations"]; this adapter does not read
+        that state itself, keeping the same "caller supplies data, this
+        module only orchestrates the CEO call" boundary the rest of this
+        class already has."""
         try:
             result = self.signal_provider.get_signal_with_context(symbol)
         except Exception as exc:
@@ -134,7 +161,13 @@ class MultiSymbolCEOAdapter:
         )
 
         try:
-            decision = self.ceo_agent.decide_from_context(context)
+            if recommendations:
+                decision = self.ceo_agent.decide_from_context_with_recommendations(
+                    context, recommendations=recommendations,
+                    dataset_row_count=dataset_row_count,
+                )
+            else:
+                decision = self.ceo_agent.decide_from_context(context)
         except Exception as exc:
             logger.error(f"MultiSymbolCEOAdapter: CEOAgent.decide_from_context failed for {symbol}: {exc}")
             return None, None

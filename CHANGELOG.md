@@ -1,5 +1,91 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C Step 4: Live Scheduler Wiring (Track A)
+
+Connects Phase 4C Step 3's recommendation application layer to the ONE
+real live decision gate — `agents/multi_symbol_adapter.py::
+MultiSymbolCEOAdapter.decide_with_signal()`'s call to
+`CEOAgent.decide_from_context()`, reached via `execution/
+ceo_gated_signal_provider.py::CEOGatedSignalProvider` in the
+CEO-gated multi-symbol scheduler path (`SCHEDULER_ENABLED` +
+`CEO_MULTI_SYMBOL_ENABLED`, both off by default).
+
+**Design audit note:** a fresh-clone, code-first audit (this phase's own
+brief, "ANALYSIS / SPEC ONLY") traced the real call path from
+`main.py`/`ExecutionScheduler` down to the exact decision function and
+found: (1) the legacy single-symbol path's `CEOAgent.decide()` call
+(`main.py:833`) does NOT gate execution at all — `ConfidenceEngine`'s
+own `decision.action` does — so wiring recommendations there would have
+zero effect on real trades; (2) `learning/learning_report.py::
+LearningReportGenerator` (Phase 4C Step 1) was never invoked anywhere
+in live code — nothing ever populated `_state["learning_recommendations"]`
+despite `/api/recommendations` reading it since Step 3. Both gaps are
+closed by this phase. Full audit trail in PATCH_NOTES.md.
+
+### Added
+- **`CEOAgent.decide_from_context_with_recommendations()`**
+  (`agents/ceo_agent.py`): the `decide_from_context()` counterpart to
+  Step 3's `decide_with_recommendations()` — same thin-wrapper pattern,
+  same safety contract (BLOCKED byte-identical, action/direction/
+  score_breakdown/agreement_score never touched, confidence bounded by
+  `RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT`), now additionally wrapped
+  in try/except so a recommendation-application failure falls back to
+  the unmodified decision instead of propagating into a live decision
+  cycle. The pre-existing `decide_with_recommendations()` gained the
+  same try/except (closes a gap found during this phase's own safety
+  audit — Part G, Case 3).
+- **`main.run_learning_recommendation_refresh()`**: new scheduled job
+  (daily at 02:30, same cadence class as the existing nightly retrain
+  job at 02:00) that calls the existing `LearningReportGenerator`
+  unchanged and writes its output to the existing `_state[
+  "learning_recommendations"]` slot via the existing `set_state()`
+  helper — no new persistence layer, no new scheduler. Gated on
+  `RECOMMENDATION_APPLICATION_ENABLED` (re-checked live every run); a
+  no-op, journal-untouched no-op when the flag is off.
+- `MultiSymbolCEOAdapter.decide()`/`decide_with_signal()`
+  (`agents/multi_symbol_adapter.py`) and `CEOGatedSignalProvider`
+  (`execution/ceo_gated_signal_provider.py`) both gained optional,
+  default-`None` parameters (`recommendations`, `dataset_row_count`,
+  `recommendation_provider`) to thread recommendations from
+  `_state["learning_recommendations"]` down to the new CEO method —
+  every default preserves prior behavior exactly; `main.py` is the only
+  call site that opts in, via a small injected callable
+  (`recommendation_provider`) rather than a hard `api.app` import inside
+  `execution/ceo_gated_signal_provider.py`, preserving that module's
+  existing dependency-injection/testability idiom.
+
+### Verified unchanged
+- `CEOAgent.decide()` and `decide_from_context()` — full existing test
+  suites (`tests/test_multi_symbol_ceo_integration.py`,
+  `tests/test_ceo_gated_signal_provider.py`,
+  `tests/test_ceo_symbol_cache.py`,
+  `tests/test_ceo_decide_with_recommendations.py`,
+  `tests/test_ceo_ensemble_fusion.py`) pass unmodified.
+- The legacy single-symbol path (`main.py::run_trading_cycle`) — not
+  touched; its `ceo.decide()` call was confirmed (Part B of the audit)
+  to already be decision-inert, so it was correctly left alone.
+- Default configuration (`RECOMMENDATION_APPLICATION_ENABLED=False`,
+  `CEO_MULTI_SYMBOL_ENABLED=False`, `SCHEDULER_ENABLED=False`) — zero
+  behavioral change; the new scheduled job never touches the journal
+  while disabled (tested), and every new adapter/provider parameter
+  defaults to `None`/unused.
+
+### Tests
+- `tests/test_ceo_live_recommendation_wiring.py` (new, 22 tests):
+  backward compatibility, BLOCKED byte-identity (via a
+  ConfidenceEngine-hard-block fixture, since a risk-manager circuit
+  breaker alone only ever produces WAIT — confirmed by reading
+  `decide()`'s actual branch logic), recommendation-application-failure
+  fallback (both new and pre-existing wrapper methods), multi-symbol
+  isolation, `MultiSymbolCEODispatcher` kwarg forwarding,
+  `CEOGatedSignalProvider.recommendation_provider` wiring and failure
+  isolation, and the refresh job's disabled/enabled/generation-failure
+  paths.
+- Full suite: 2197 → 2219 (22 new, 0 removed, 0 weakened, 0 failing).
+- `ruff check . --exclude dashboard_src --exclude dashboard`: clean.
+- `vulture . --exclude dashboard_src,dashboard,tests --min-confidence 80`:
+  clean (no output).
+
 ## [Unreleased] — V16 Phase 4C Step 3: Recommendation Application Layer (Track A)
 
 Connects `learning/`'s (Phase 4C Step 1) recommendations to the live

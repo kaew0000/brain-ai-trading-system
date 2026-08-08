@@ -129,6 +129,7 @@ class CEOGatedSignalProvider:
         ceo_adapter: MultiSymbolCEOAdapter,
         journal=None,
         enabled: Optional[bool] = None,
+        recommendation_provider=None,
     ) -> None:
         self.signal_provider = signal_provider
         self.ceo_adapter = ceo_adapter
@@ -139,6 +140,18 @@ class CEOGatedSignalProvider:
         # An explicit True/False (mainly for tests) pins the behavior
         # regardless of settings.
         self._enabled_override = enabled
+        # V16 Phase 4C Step 4 (live scheduler wiring): optional zero-arg
+        # callable returning the current `list[Recommendation]` — main.py
+        # wires this to `lambda: api.app.get_state("learning_recommendations",
+        # [])` in production. Kept as an injected callable (not a direct
+        # api.app import here) so this module stays independently
+        # testable with a fake, same idiom as every other dependency in
+        # this constructor. None (default) means "never pass
+        # recommendations to the CEO adapter" — byte-identical to this
+        # class's pre-Step-4 behavior, regardless of
+        # RECOMMENDATION_APPLICATION_ENABLED (that flag is checked one
+        # layer further down, inside CEOAgent itself).
+        self.recommendation_provider = recommendation_provider
         logger.info(f"CEOGatedSignalProvider ready | enabled_override={enabled}")
 
     @property
@@ -158,8 +171,26 @@ class CEOGatedSignalProvider:
         return self._get_signal_ceo_enabled(symbol)
 
     def _get_signal_ceo_enabled(self, symbol: str) -> Optional[ExecutionSignal]:
+        # V16 Phase 4C Step 4: only pass a `recommendations=` kwarg through
+        # to ceo_adapter.decide_with_signal() when a recommendation_provider
+        # was actually configured. Calling with recommendations=None
+        # unconditionally would require every ceo_adapter duck-type
+        # (including test fakes with the pre-Step-4 decide_with_signal(self,
+        # symbol) signature) to accept an extra kwarg it has no reason to
+        # know about — this keeps the pre-Step-4 call shape byte-identical
+        # whenever recommendation wiring isn't configured, same
+        # "byte-identical unless explicitly opted into" contract this
+        # class's own module docstring already promises for
+        # CEO_MULTI_SYMBOL_ENABLED.
+        kwargs = {}
+        if self.recommendation_provider is not None:
+            try:
+                kwargs["recommendations"] = self.recommendation_provider()
+            except Exception as exc:
+                logger.error(f"CEOGatedSignalProvider: recommendation_provider failed for "
+                              f"{symbol}, proceeding without recommendations: {exc}")
         try:
-            ceo_decision, underlying_signal = self.ceo_adapter.decide_with_signal(symbol)
+            ceo_decision, underlying_signal = self.ceo_adapter.decide_with_signal(symbol, **kwargs)
         except Exception as exc:
             logger.error(f"CEOGatedSignalProvider: CEO decision failed for {symbol}: {exc}")
             return None
