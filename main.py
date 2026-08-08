@@ -1285,6 +1285,35 @@ def run_position_reconciliation(sys: dict) -> None:
         logger.error(f"run_position_reconciliation error: {exc}", exc_info=True)
 
 
+def run_ghost_reconciliation_check(sys: dict) -> None:
+    """Track C3 Phase 2 — off by default (settings.ORDER_RECONCILIATION_
+    ENABLED). system_health/ghost_reconciliation.py's
+    GhostReconciliationMonitor.check() calls the SAME read path every
+    other consumer of this data already uses — OrderStateManager.
+    get_order_state() -> ReconciliationEngine.run() ->
+    data_provider.get_position_info() (protected by the existing
+    _TRADE_BREAKER circuit breaker, same as every other caller) — not a
+    second, independently-polling loop with its own cadence or its own
+    exchange client.
+
+    Known, pre-existing characteristic this job does NOT change:
+    ReconciliationEngine.run() has no caching of its own — the existing
+    60s run_position_reconciliation() job above, EVERY GET /api/
+    order-state request, and this job each cause their own live
+    get_position_info() call. Enabling this job adds one more such call
+    at its own configured cadence (default: matches the existing 60s
+    job); it does not fan out per-consumer within a single check(), and
+    it never calls refresh(force=True) or queries Binance through any
+    path other than the one every existing consumer already uses. See
+    docs/architecture/GHOST_RECONCILIATION.md's Known Limitations
+    section for the full accounting."""
+    try:
+        from system_health.ghost_reconciliation import get_ghost_reconciliation_monitor
+        get_ghost_reconciliation_monitor().check(sys)
+    except Exception as exc:
+        logger.error(f"run_ghost_reconciliation_check error: {exc}", exc_info=True)
+
+
 def run_nightly_retrain_job() -> None:
     """Phase 3C: Nightly ML retrain scheduled job (no sys dict needed)."""
     try:
@@ -1626,6 +1655,13 @@ def main() -> None:
     schedule.every(settings.LOOP_INTERVAL).seconds.do(run_trading_cycle,  components)
     schedule.every(30).seconds.do(monitor_open_trades, components)
     schedule.every(60).seconds.do(run_position_reconciliation, components)
+    # Track C3 Phase 2 — off by default; see config/settings.py
+    # ORDER_RECONCILIATION_ENABLED and run_ghost_reconciliation_check()'s
+    # own docstring above.
+    if settings.ORDER_RECONCILIATION_ENABLED:
+        schedule.every(settings.ORDER_RECONCILIATION_INTERVAL_SECONDS).seconds.do(
+            run_ghost_reconciliation_check, components
+        )
     schedule.every(1).hours.do(daily_report,            components)
     schedule.every().day.at("02:00").do(run_nightly_retrain_job)
     # V16 Phase 4C Step 4 — refresh _state["learning_recommendations"]

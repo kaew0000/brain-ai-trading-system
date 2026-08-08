@@ -1,5 +1,106 @@
 # CHANGELOG
 
+## [Unreleased] — Track C3 Phase 2: Ghost Detection, Timeline Cross-Check & Reconciliation Metrics (Track A)
+
+Fresh-clone gap audit against `main` at `830d10d` (post W13-CI-1) found
+the runtime-ghost-position bug this phase was originally scoped to fix
+(`ReconciliationEngine._read_bot()` mirroring exchange state in live
+mode instead of reading `PortfolioState` independently) was **already
+fixed** — merged as PR #35, V16 Phase ORDER-01 — and confirmed
+byte-identical, unmodified, on this baseline. Degraded-exchange safety
+(`OrderState.UNKNOWN` short-circuit before any GHOST/DESYNC logic) was
+independently verified correct and was likewise left untouched. No
+duplicate `ReconciliationEngine`, `RecoveryEngine`, `OrderManager`,
+World runtime, WebSocket transport, or command-dispatch system was
+created; every existing authority is reused exactly as-is.
+
+Four genuine, narrow gaps remained and are what this phase adds:
+
+1. `execution/order_timeline.py`'s `OrderTimeline` (C3-1) had exactly
+   one consumer anywhere in the codebase —
+   `telemetry/world_export.py::orders_payload()` — and that consumer
+   only *displays* `current_state()`, never cross-checks it against
+   independently-verified exchange truth. A stale timeline entry
+   (exchange flat, timeline's last recorded state still "OPEN") was
+   structurally undetectable. New: `TIMELINE_DESYNC`.
+2. `OrderStateManager`'s `GHOST`/`DESYNC` canonical states don't say
+   *which* source was stale, or distinguish an orphaned real exchange
+   position from a side/quantity/duplicate-journal mismatch — the data
+   to do so already exists in `OrderStateSnapshot.exchange_position` /
+   `.runtime_position` / `.journal_position` / `.mismatch_type`, just
+   not exposed as a queryable classification. New: `GHOST_RUNTIME`,
+   `GHOST_JOURNAL`, `ORPHAN_EXCHANGE`, `SIDE_MISMATCH`,
+   `QUANTITY_MISMATCH` sub-classification.
+3. A failed automatic recovery attempt was logged but never published
+   on the event bus — silent by default. New: `RECONCILIATION_FAILED`
+   event, plus `RUNTIME_POSITION_MISMATCH` (a gap `POSITION_DESYNC`
+   alone doesn't cover — see module docstring's "reuse first"
+   section for exactly which existing events are deliberately **not**
+   duplicated) and `ORDER_TIMELINE_DESYNC`.
+4. No read-only endpoint exposed recent ghost/desync/timeline-desync
+   findings, and `GET /api/order-state/metrics` didn't carry any of
+   this phase's counters.
+
+### Added
+- `system_health/ghost_reconciliation.py` — `GhostReconciliationMonitor`,
+  a composition over `OrderStateManager` (unchanged) + `OrderTimeline`
+  (unchanged), read-only. Full architecture/safety rationale, including
+  which existing events are reused vs. which three are genuinely new,
+  is in the module's own docstring.
+- `GET /api/order-state/ghosts` — current + recent findings for a
+  symbol. Read-only; runs the same read path every existing consumer
+  of this data already uses, never places/cancels/modifies an order,
+  never calls `refresh(force=True)`.
+- `GET /api/order-state/metrics` — additively merges this phase's
+  counters (`ghost_detected_count`, `orphan_exchange_count`,
+  `timeline_desync_count`, `recovery_success_count`,
+  `recovery_failure_count`, `reconciliation_latency_ms`,
+  `timeline_sync_latency_ms`, ...) into the existing response. Every
+  ORDER-01 key is unchanged.
+- `config/settings.py`: `ORDER_RECONCILIATION_ENABLED` (default
+  `False`), `ORDER_RECONCILIATION_INTERVAL_SECONDS` (default `60.0`),
+  `ORDER_RECONCILIATION_DEDUP_SECONDS` (default `30.0`).
+- `main.py`: `run_ghost_reconciliation_check()`, an optional scheduled
+  job registered **only** when `ORDER_RECONCILIATION_ENABLED=True` —
+  with the flag at its default, `main.py`'s scheduling behavior is
+  byte-identical to before this phase.
+- `tests/test_ghost_reconciliation.py` (26 tests),
+  `tests/test_ghost_reconciliation_api.py` (8 tests) — classification
+  for every scenario in the phase brief's test matrix, degraded-input
+  handling, event-transition dedup (including a same-window
+  flap-then-return case), a real measurement proving one `check()`
+  cycle causes exactly one exchange read (no per-consumer fan-out),
+  real-money safety (orphan exchange positions never produce a "close"
+  recovery result, structurally — no close-order code path exists
+  anywhere in `recovery_engine.py`), and read-only/backward-compatible
+  API behavior.
+
+### Known limitations (deliberately out of scope for this phase)
+- Metrics and findings history are in-memory only, not persisted
+  across a restart — same caveat `OrderStateManager.status()` already
+  carries for its own counters.
+- `TIMELINE_DESYNC` is detection-only; no automatic recovery action is
+  attempted for it (not yet backed by a proven recovery policy in
+  `RecoveryEngine` — a C3-3 candidate).
+- If `ORDER_RECONCILIATION_ENABLED=True`, the optional background job
+  causes one additional live `get_position_info()` call per its own
+  configured interval, on top of the existing always-on 60s
+  `run_position_reconciliation()` job. `ReconciliationEngine.run()` has
+  no caching of its own today — this is a pre-existing characteristic
+  (the same call already happens on every `GET /api/order-state`
+  request), not something this phase introduces; documented here for
+  operators deciding whether to enable it.
+
+### Impact
+`system_health/ghost_reconciliation.py` (new), `api/app.py`,
+`main.py`, `config/settings.py` — additive only. No trading, risk,
+CEO-decision, execution, `ReconciliationEngine`, `RecoveryEngine`,
+`OrderTimeline`, or World-runtime code modified.
+`pytest tests/ -q`: 2250 → 2284 passed (34 new, 0 removed, 0 modified).
+`pytest world/tests/ -q -m ""`: 565 passed, unchanged.
+`ruff check .` / `vulture . --min-confidence 80`: clean, no new
+findings. `python -c "import main"`: OK.
+
 ## [Unreleased] — W13-CI-1: World Test Coverage & Dependency Hygiene
 
 Independent post-W13 audit found `world/tests/` (565 tests, including

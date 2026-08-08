@@ -374,6 +374,32 @@ class Settings(BaseSettings):
         default=100_000, alias="ORDER_TIMELINE_HISTORY_MAX_ROWS"
     )
 
+    # ── Track C3 Phase 2: Ghost Detection + Reconciliation Metrics ──────
+    # Off by default — same posture as ORDER_TIMELINE_ENABLED above. This
+    # gates ONLY the optional scheduled background job (main.py's
+    # run_ghost_reconciliation_check(), mirroring the existing
+    # unconditional run_position_reconciliation() 60s job). The read
+    # path (system_health/ghost_reconciliation.py's check(), and the
+    # GET /api/order-state/ghosts + /api/order-state/metrics API
+    # routes) works on-demand regardless of this flag — same
+    # relationship OrderStateManager has with ORDER_TIMELINE_ENABLED's
+    # background poller. False = byte-identical to before this phase:
+    # no new schedule.every(...) job is registered at all.
+    ORDER_RECONCILIATION_ENABLED: bool = Field(default=False, alias="ORDER_RECONCILIATION_ENABLED")
+    ORDER_RECONCILIATION_INTERVAL_SECONDS: float = Field(
+        default=60.0, alias="ORDER_RECONCILIATION_INTERVAL_SECONDS"
+    )
+    # Minimum seconds between two publishes of the SAME new event type
+    # (RUNTIME_POSITION_MISMATCH/ORDER_TIMELINE_DESYNC/RECONCILIATION_
+    # FAILED) for the same symbol, even across repeated status
+    # transitions — a secondary guard against event-storming on a
+    # rapidly flapping condition, on top of (not instead of) C3-2's
+    # primary transition-only dedup (see ghost_reconciliation.py's
+    # _maybe_publish()).
+    ORDER_RECONCILIATION_DEDUP_SECONDS: float = Field(
+        default=30.0, alias="ORDER_RECONCILIATION_DEDUP_SECONDS"
+    )
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

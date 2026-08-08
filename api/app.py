@@ -81,6 +81,7 @@ from system_health.watchdog import get_watchdog
 from system_health.reconciliation import get_reconciliation_engine
 from system_health.recovery_engine import get_recovery_engine
 from system_health.order_state import get_order_state_manager
+from system_health.ghost_reconciliation import get_ghost_reconciliation_monitor
 from utils.logger import get_logger
 
 # V16 Phase 2C — Portfolio API (REST + WebSocket). See api/portfolio_api.py
@@ -1531,13 +1532,59 @@ async def order_state(symbol: str | None = Query(default=None)):
 @app.get("/api/order-state/metrics")
 async def order_state_metrics():
     """V16 Phase ORDER-01: sync/desync/ghost/recovery counters and
-    average sync latency — see system_health/order_state.py Status()."""
+    average sync latency — see system_health/order_state.py Status().
+
+    Track C3 Phase 2: additively merges GhostReconciliationMonitor's own
+    counters (ghost_detected_count, orphan_exchange_count, timeline_
+    desync_count, recovery_success_count/recovery_failure_count,
+    reconciliation_latency_ms, timeline_sync_latency_ms, ...) under the
+    same top-level object — every ORDER-01 key above is unchanged, this
+    only adds keys, so no existing dashboard/consumer reading this
+    endpoint is affected.
+    """
     try:
         manager = get_order_state_manager()
-        return _ok(manager.status())
+        body = manager.status()
+        try:
+            body.update(get_ghost_reconciliation_monitor().status())
+        except Exception as exc:
+            logger.warning(f"/api/order-state/metrics: C3-2 metrics unavailable (non-fatal): {exc}")
+        return _ok(body)
     except Exception as exc:
         logger.error(f"/api/order-state/metrics error: {exc}", exc_info=True)
         return _ok({"error": str(exc), "timestamp": datetime.now(timezone.utc).isoformat()})
+
+
+@app.get("/api/order-state/ghosts")
+async def order_state_ghosts(
+    symbol: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """Track C3 Phase 2: recent ghost/desync/timeline-desync findings.
+
+    Runs one on-demand GhostReconciliationMonitor.check() for `symbol`
+    (default settings.SYMBOL) so the response reflects current state,
+    then returns the bounded, in-memory, most-recent-first findings
+    history (appended only on a status transition, not on every poll —
+    see ghost_reconciliation.py's _maybe_publish()). Read-only: never
+    places, cancels, or modifies an order, and triggers no extra
+    Binance call beyond the one path every existing consumer of this
+    data already uses (see that module's docstring).
+    """
+    try:
+        monitor = get_ghost_reconciliation_monitor()
+        current = monitor.check(_state, symbol=symbol)
+        return _ok({
+            "current": current.to_dict(),
+            "recent":  monitor.get_recent_findings(limit=limit),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        logger.error(f"/api/order-state/ghosts error: {exc}", exc_info=True)
+        return _ok({
+            "current": {"status": "UNKNOWN", "error": str(exc)}, "recent": [],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
 
 @app.post("/api/system/reconciliation/acknowledge")
