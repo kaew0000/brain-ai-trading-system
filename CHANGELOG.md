@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## [Unreleased] — W13-CI-1: World Test Coverage & Dependency Hygiene
+
+Independent post-W13 audit found `world/tests/` (565 tests, including
+the 14 new W13-2 command-audit-log tests) was never actually executed
+by CI: `pytest.ini`'s `testpaths = tests` excludes it from default
+collection, and its files almost never carry the `unit` marker that
+`addopts = -m "unit"` filters on, so even a direct
+`pytest world/tests/ -q` invocation silently selected zero tests
+rather than failing. Separately, 8 files under `world/tests/` (plus
+`world/scripts/validate_schemas.py`) hard-import `jsonschema`, which
+was never declared in `requirements.txt`.
+
+Fresh-clone audit reproduced both exactly as reported before any fix
+was written. No W13 implementation, World runtime architecture, or
+trading/risk/CEO/execution code was touched.
+
+### Fixed
+- **World test CI coverage** — new `world-tests` job in
+  `.github/workflows/ci.yml`, parallel to the existing `test` job,
+  running `pytest world/tests/ -q -m ""`. The `-m ""` override applies
+  only to this job; `pytest.ini`'s global `-m "unit"` default (relied
+  on by 97 of 99 files under `tests/`) is untouched, as is the
+  existing `test` job's invocation of `pytest tests/ -q`. pytest
+  itself exits non-zero on zero-collected, so a future regression back
+  to "0 selected" now fails the build instead of reporting green.
+
+### Added
+- `jsonschema>=4.17.0` in `requirements.txt` — genuinely required
+  (hard `import jsonschema`, no try/except) by 8 world/tests files;
+  added alongside the existing `pytest`/`pytest-mock` entries,
+  matching this repo's convention of declaring test tooling directly
+  in `requirements.txt` rather than a separate dev-requirements file.
+
+### Impact
+`requirements.txt`, `.github/workflows/ci.yml` only. No production,
+World-runtime, or test-behavior code changed.
+`pytest tests/ -q` (existing invocation): 2250 passed, unchanged.
+`pytest world/tests/ -q -m ""` (new invocation): 565 collected, 565
+passed — including all 14 W13-2 audit-log tests, verified
+individually. `ruff check . --exclude dashboard_src --exclude
+dashboard`: clean. `vulture . --exclude dashboard_src,dashboard,tests
+--min-confidence 80`: clean. No frontend changes; no frontend CI
+convention exists in this repo to run.
+
 ## [Unreleased] — V16 Phase 4C Step 5: Live Recommendation Scoring Completeness (Track A)
 
 Closes the one remaining gap Step 4's own design audit flagged: the
