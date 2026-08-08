@@ -1,5 +1,58 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C Step 5: Live Recommendation Scoring Completeness (Track A)
+
+Closes the one remaining gap Step 4's own design audit flagged: the
+live decision path threaded `recommendations` all the way from
+`_state` down to `recommendation_scoring._coverage_subscore()`
+(Step 3), but never threaded `dataset_row_count` alongside it — that
+value was written to `_state["learning_dataset_row_count"]` by
+`main.run_learning_recommendation_refresh()` (Step 4) but nothing ever
+read it back out, so the live path always called with
+`dataset_row_count=None` and `_coverage_subscore()` fell back to its
+own existing, correct `0.0` default.
+
+**Audit note:** a fresh-clone, code-first re-trace of the full chain
+(`CEOGatedSignalProvider` → `MultiSymbolCEODispatcher` →
+`MultiSymbolCEOAdapter` → `CEOAgent.decide_from_context_with_recommendations()`
+→ `apply_learning_recommendations()` → `recommendation_scoring`)
+confirmed every layer below `CEOGatedSignalProvider` already accepted
+and forwarded `dataset_row_count` (`MultiSymbolCEOAdapter`'s own
+`decide_with_signal(dataset_row_count=None)` parameter, unused in
+production; `MultiSymbolCEODispatcher`'s generic `**kwargs`
+passthrough) — the gap was exactly two missing lines: no reader on the
+`_state` side, no second provider slot on `CEOGatedSignalProvider`.
+
+### Added
+- `execution/ceo_gated_signal_provider.py`: `CEOGatedSignalProvider`
+  gains an optional `dataset_row_count_provider` constructor parameter
+  — same idiom, same defensive try/except, same "only added to kwargs
+  when actually configured" contract as the existing
+  `recommendation_provider` (Step 4). `None` (default): byte-identical
+  to pre-Step-5 behavior.
+- `main.py`: a `_get_learning_dataset_row_count()` reader (mirrors
+  `_get_learning_recommendations()` exactly), wired to
+  `CEOGatedSignalProvider(..., dataset_row_count_provider=...)`.
+- 16 new regression tests
+  (`tests/test_recommendation_dataset_row_count_wiring.py`): threading,
+  multi-symbol isolation (same global count to every symbol, no
+  cross-symbol leakage), provider-failure fallback, BLOCKED/action/
+  direction/score_breakdown/agreement_score untouched, and the refresh
+  job's own `learning_dataset_row_count` write (a narrow gap in Step
+  4's own test coverage, closed additively without modifying that
+  file).
+
+### Not changed
+No new architecture, no second recommendation engine/provider/
+scheduler/EventBus/decision engine/state store. The scoring formula,
+its weights, `RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT`, CEO decision
+authority, `decide()`/`decide_from_context()`, and every existing
+safety invariant (BLOCKED pass-through, action/direction/
+score_breakdown/agreement_score never touched, advisory-only) are
+unmodified — verified via the full pre-existing test suite passing
+unchanged (2219 → 2235, exactly the 16 new tests, zero pre-existing
+test modified).
+
 ## [Unreleased] — V16 Phase 4C Step 4: Live Scheduler Wiring (Track A)
 
 Connects Phase 4C Step 3's recommendation application layer to the ONE

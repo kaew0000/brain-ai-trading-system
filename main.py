@@ -425,11 +425,27 @@ def build_system() -> dict:
                             import api.app as _api_module
                             return _api_module.get_state("learning_recommendations", [])
 
+                        # V16 Phase 4C Step 5: same idiom as
+                        # _get_learning_recommendations() immediately
+                        # above — run_learning_recommendation_refresh()
+                        # has written this value to _state alongside
+                        # "learning_recommendations" since Step 4
+                        # (main.py's own set_state("learning_dataset_row_count",
+                        # ...) call), but nothing ever read it back out
+                        # until now, so recommendation_scoring.py's
+                        # _coverage_subscore() always saw None on the
+                        # live path and fell back to its existing,
+                        # unchanged 0.0 default.
+                        def _get_learning_dataset_row_count():
+                            import api.app as _api_module
+                            return _api_module.get_state("learning_dataset_row_count", None)
+
                         signal_provider = CEOGatedSignalProvider(
                             signal_provider=signal_provider,
                             ceo_adapter=ceo_dispatcher,
                             journal=journal_v2,
                             recommendation_provider=_get_learning_recommendations,
+                            dataset_row_count_provider=_get_learning_dataset_row_count,
                         )
                         logger.info("ExecutionScheduler: CEO Agent gating ENABLED")
                     else:

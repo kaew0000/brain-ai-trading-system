@@ -130,6 +130,7 @@ class CEOGatedSignalProvider:
         journal=None,
         enabled: Optional[bool] = None,
         recommendation_provider=None,
+        dataset_row_count_provider=None,
     ) -> None:
         self.signal_provider = signal_provider
         self.ceo_adapter = ceo_adapter
@@ -152,6 +153,24 @@ class CEOGatedSignalProvider:
         # RECOMMENDATION_APPLICATION_ENABLED (that flag is checked one
         # layer further down, inside CEOAgent itself).
         self.recommendation_provider = recommendation_provider
+        # V16 Phase 4C Step 5 (live recommendation scoring completeness):
+        # same idiom as recommendation_provider just above, one call
+        # later — optional zero-arg callable returning the current
+        # dataset row count (`int | None`). main.py wires this to a
+        # reader of `_state["learning_dataset_row_count"]`, the exact
+        # value `run_learning_recommendation_refresh()` already writes
+        # alongside `learning_recommendations` (Step 4) but that nothing
+        # downstream ever read until now. Kept as a SEPARATE provider —
+        # not folded into recommendation_provider's return value —
+        # because that callable's `-> list[Recommendation]` contract is
+        # already established and tested (Step 4); changing its return
+        # shape would be a breaking change to an existing, working
+        # interface for a value that has nothing to do with what
+        # recommendations exist. None (default, byte-identical to
+        # pre-Step-5 behavior): no `dataset_row_count` kwarg is ever
+        # added, and `recommendation_scoring._coverage_subscore()`
+        # keeps its existing, unchanged conservative fallback of 0.0.
+        self.dataset_row_count_provider = dataset_row_count_provider
         logger.info(f"CEOGatedSignalProvider ready | enabled_override={enabled}")
 
     @property
@@ -189,6 +208,18 @@ class CEOGatedSignalProvider:
             except Exception as exc:
                 logger.error(f"CEOGatedSignalProvider: recommendation_provider failed for "
                               f"{symbol}, proceeding without recommendations: {exc}")
+        # V16 Phase 4C Step 5: same defensive, opt-in pattern as
+        # recommendation_provider immediately above — only added to
+        # kwargs when actually configured, so a fake/adapter that
+        # doesn't accept a `dataset_row_count` kwarg (e.g. an existing
+        # test double, or recommendation_provider configured without
+        # this) is never handed one.
+        if self.dataset_row_count_provider is not None:
+            try:
+                kwargs["dataset_row_count"] = self.dataset_row_count_provider()
+            except Exception as exc:
+                logger.error(f"CEOGatedSignalProvider: dataset_row_count_provider failed for "
+                              f"{symbol}, proceeding without dataset_row_count: {exc}")
         try:
             ceo_decision, underlying_signal = self.ceo_adapter.decide_with_signal(symbol, **kwargs)
         except Exception as exc:
