@@ -184,6 +184,43 @@ class TelemetryState:
 
 
 @dataclass(frozen=True)
+class OrderTimelineState:
+    """Phase W13-1 — one symbol's read-only composite order-timeline
+    state, sourced from execution.order_timeline.OrderTimeline via
+    telemetry/world_export.py only (see world/readers/order_reader.py).
+    `state` is `None` when OrderTimeline has no last-known state for
+    this symbol yet — never fabricated."""
+
+    symbol: str
+    state: str | None = None
+
+    def to_dict(self) -> dict:
+        return {"symbol": self.symbol, "state": self.state}
+
+
+@dataclass(frozen=True)
+class ReconciliationState:
+    """Phase W13-1 — reconciliation-wide, read-only figures, mirroring
+    system_health.reconciliation.ReconciliationEngine.status()
+    verbatim. `None` on `WorldState` when the Phase W4 runtime file has
+    no `reconciliation` object this capture (engine hadn't run yet, or
+    an older payload shape) — never fabricated."""
+
+    last_run: str | None = None
+    last_result: str | None = None
+    event_count: int | None = None
+    suppressed_repeat_count: int | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "lastRun": self.last_run,
+            "lastResult": self.last_result,
+            "eventCount": self.event_count,
+            "suppressedRepeatCount": self.suppressed_repeat_count,
+        }
+
+
+@dataclass(frozen=True)
 class WorldState:
     """The immutable, in-memory aggregate `StateBuilder.build()` produces.
     Every collection field is a tuple. Construct only via `StateBuilder` —
@@ -202,6 +239,12 @@ class WorldState:
     notifications: tuple[NotificationState, ...] = field(default_factory=tuple)
     events: tuple[EventState, ...] = field(default_factory=tuple)
     telemetry: tuple[TelemetryState, ...] = field(default_factory=tuple)
+    #: Phase W13-1 — read-only composite order-timeline rows (additive;
+    #: empty tuple, not an error, when orders.json has no data yet).
+    orders: tuple[OrderTimelineState, ...] = field(default_factory=tuple)
+    #: Phase W13-1 — reconciliation-wide figures, or None if orders.json
+    #: had no reconciliation object this capture.
+    reconciliation: ReconciliationState | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -217,4 +260,6 @@ class WorldState:
             "notifications": [n.to_dict() for n in self.notifications],
             "events": [e.to_dict() for e in self.events],
             "telemetry": [t.to_dict() for t in self.telemetry],
+            "orders": [o.to_dict() for o in self.orders],
+            "reconciliation": self.reconciliation.to_dict() if self.reconciliation else None,
         }

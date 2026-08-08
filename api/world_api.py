@@ -190,7 +190,7 @@ async def timeline_seek(tick: int = Query(...)):
 
 @router.post("/timeline/jump-to-event")
 async def timeline_jump_to_event(event_id: str = Query(...)):
-    result = interaction_api.dispatch("jump_to_event", event_id=event_id)
+    result = interaction_api.dispatch("jump_to_event", actor="dashboard", event_id=event_id)
     if not result.ok:
         raise HTTPException(status_code=404, detail=result.detail)
     return _ok(result.to_dict())
@@ -222,7 +222,7 @@ async def dispatch_command(command: str, target: str = Query(default=""), speed:
             raise HTTPException(status_code=400, detail=f"target is required for {command!r}")
         kwargs[kwarg_name] = target
 
-    result = interaction_api.dispatch(command, **kwargs)
+    result = interaction_api.dispatch(command, actor="dashboard", **kwargs)
     if not result.ok:
         raise HTTPException(status_code=400, detail=result.detail or f"command {command!r} failed")
     return _ok(result.to_dict())

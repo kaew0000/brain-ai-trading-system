@@ -46,6 +46,12 @@ def populated_runtime_dir(tmp_path):
         {"id": "e1", "timestamp": "2026-08-01T00:00:00Z", "type": "trade_fill",
          "district": "execution-forge", "severity": "success", "agent": "FORGE", "message": "filled"},
     ]))
+    (d / "orders.json").write_text(json.dumps({
+        "timestamp": "2026-08-01T00:00:00Z",
+        "activeCount": 1,
+        "states": [{"symbol": "BTCUSDT", "state": "OPEN"}],
+        "reconciliation": {"lastRun": "2026-08-01T00:00:00Z", "lastResult": "clean", "eventCount": 1},
+    }))
     return str(d)
 
 
@@ -69,6 +75,8 @@ def test_build_with_no_runtime_files_defaults_cleanly(empty_runtime_dir):
     assert state.notifications == ()
     assert state.events == ()
     assert state.telemetry == ()
+    assert state.orders == ()
+    assert state.reconciliation is None
 
 
 def test_build_merges_every_populated_source(populated_runtime_dir):
@@ -82,6 +90,11 @@ def test_build_merges_every_populated_source(populated_runtime_dir):
     assert len(state.telemetry) == 1
     assert len(state.notifications) == 1
     assert len(state.events) == 1
+    assert len(state.orders) == 1
+    assert state.orders[0].symbol == "BTCUSDT"
+    assert state.orders[0].state == "OPEN"
+    assert state.reconciliation is not None
+    assert state.reconciliation.last_result == "clean"
 
 
 def test_portfolio_summary_parses_when_present(tmp_path):
@@ -158,3 +171,68 @@ def test_build_never_mutates_source_files(populated_runtime_dir):
     _builder(populated_runtime_dir).build()
     after_bytes = open(world_json_path, "rb").read()
     assert original_bytes == after_bytes
+
+
+# ---------------------------------------------------------------- W13-1 orders/reconciliation
+
+def test_orders_and_reconciliation_absent_when_orders_json_missing(empty_runtime_dir):
+    """No orders.json at all (pre-W13 runtime output, or W13 disabled)
+    -> WorldState still builds cleanly, orders empty, reconciliation
+    None — never fabricated."""
+    state = _builder(empty_runtime_dir).build()
+    assert state.orders == ()
+    assert state.reconciliation is None
+    assert state.to_dict()["orders"] == []
+    assert state.to_dict()["reconciliation"] is None
+
+
+def test_orders_parses_when_present(tmp_path):
+    (tmp_path / "orders.json").write_text(json.dumps({
+        "timestamp": "2026-08-01T00:00:00Z",
+        "activeCount": 2,
+        "states": [
+            {"symbol": "BTCUSDT", "state": "OPEN"},
+            {"symbol": "ETHUSDT", "state": "CLOSING"},
+        ],
+    }))
+    state = _builder(str(tmp_path)).build()
+    assert len(state.orders) == 2
+    assert {o.symbol for o in state.orders} == {"BTCUSDT", "ETHUSDT"}
+    assert state.to_dict()["orders"] == [
+        {"symbol": "BTCUSDT", "state": "OPEN"},
+        {"symbol": "ETHUSDT", "state": "CLOSING"},
+    ]
+
+
+def test_orders_skips_rows_missing_symbol(tmp_path):
+    (tmp_path / "orders.json").write_text(json.dumps({
+        "timestamp": "t", "activeCount": 2,
+        "states": [{"symbol": "BTCUSDT", "state": "OPEN"}, {"state": "CLOSED"}],
+    }))
+    state = _builder(str(tmp_path)).build()
+    assert len(state.orders) == 1
+
+
+def test_reconciliation_is_none_when_orders_json_has_no_reconciliation_key(tmp_path):
+    """Proves the Phase W13-1 payload shape without a reconciliation
+    object (engine hasn't run this capture) still builds a valid
+    WorldState with reconciliation simply absent."""
+    (tmp_path / "orders.json").write_text(json.dumps({
+        "timestamp": "t", "activeCount": 0, "states": [],
+    }))
+    state = _builder(str(tmp_path)).build()
+    assert state.reconciliation is None
+
+
+def test_reconciliation_with_partial_fields(tmp_path):
+    (tmp_path / "orders.json").write_text(json.dumps({
+        "timestamp": "t", "activeCount": 0, "states": [],
+        "reconciliation": {"lastResult": "clean"},
+    }))
+    state = _builder(str(tmp_path)).build()
+    assert state.reconciliation.last_result == "clean"
+    assert state.reconciliation.last_run is None
+    assert state.reconciliation.event_count is None
+    assert state.to_dict()["reconciliation"] == {
+        "lastRun": None, "lastResult": "clean", "eventCount": None, "suppressedRepeatCount": None,
+    }

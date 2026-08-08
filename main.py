@@ -122,7 +122,7 @@ _world_runtime_manager = None  # Phase W11 — lazily constructed, see below
 
 def _get_world_runtime_manager():
     """Phase W11 — lazily construct and cache the RuntimeManager wiring:
-    five Phase W4 readers, each bound to a JSONFileSource pointed at
+    six Phase W4/W13-1 readers, each bound to a JSONFileSource pointed at
     telemetry.world_export's staging directory. Built once per process;
     construction only wires object references together, no I/O happens
     until run_once() is actually called. Never touches agents/,
@@ -136,6 +136,7 @@ def _get_world_runtime_manager():
         from world.readers.event_reader import EventReader
         from world.readers.journal_reader import JournalReader
         from world.readers.mission_reader import MissionReader
+        from world.readers.order_reader import OrderReader
         from world.readers.portfolio_reader import PortfolioReader
         from world.readers.telemetry_reader import TelemetryReader
         from world.runtime.runtime_manager import RuntimeManager
@@ -149,26 +150,37 @@ def _get_world_runtime_manager():
             portfolio_reader=PortfolioReader(_src("portfolio.json")),
             mission_reader=MissionReader(_src("missions.json")),
             event_reader=EventReader(_src("events.json")),
+            order_reader=OrderReader(_src("orders.json")),
         )
         _world_runtime_manager = RuntimeManager(adapter)
     return _world_runtime_manager
 
 
 def _run_world_runtime_manager(components: dict) -> None:
-    """Phase W11 — capture one Track A -> World snapshot and write it to
-    world/data/runtime/*.json via the Phase W4 pipeline. Read-only from
-    the trading engine's perspective end to end: only ever calls
-    telemetry.world_export.export_snapshot() (which only calls existing
-    read-only accessors — see that module's own docstring for the
-    complete, individually-verified list) and RuntimeManager.run_once()
-    (which only ever writes to world/data/runtime/). Neither can
+    """Phase W11 (extended by Phase W13-1) — capture one Track A ->
+    World snapshot and write it to world/data/runtime/*.json via the
+    Phase W4 pipeline. Read-only from the trading engine's perspective
+    end to end: only ever calls telemetry.world_export.export_snapshot()
+    (which only calls existing read-only accessors — see that module's
+    own docstring for the complete, individually-verified list,
+    extended by Phase W13-1 to OrderTimeline.current_state() and
+    ReconciliationEngine.status()) and RuntimeManager.run_once() (which
+    only ever writes to world/data/runtime/). None of this can
     influence a trading decision — there is no path from here back into
-    agents/, execution/, risk/, or portfolio/. Wrapped defensively for
-    the same reason _tick_world_simulation() is: a World failure must
-    never affect the trading loop it rides alongside."""
+    agents/, execution/, risk/, or portfolio/, and OrderTimeline's own
+    background polling loop (started/stopped independently in
+    build_system()/shutdown, see components["order_timeline"]) is
+    completely untouched by this function — it is only ever read from.
+    Wrapped defensively for the same reason _tick_world_simulation() is:
+    a World failure must never affect the trading loop it rides
+    alongside."""
     try:
         from telemetry.world_export import export_snapshot
-        export_snapshot(journal=components.get("journal_v2"))
+        export_snapshot(
+            journal=components.get("journal_v2"),
+            order_timeline=components.get("order_timeline"),
+            reconciliation_engine=components.get("reconciliation_engine"),
+        )
         _get_world_runtime_manager().run_once()
     except Exception as exc:
         logger.debug(f"World runtime export tick skipped: {exc}")

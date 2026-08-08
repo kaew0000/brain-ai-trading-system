@@ -271,6 +271,49 @@ def portfolio_payload(journal=None) -> dict[str, Any]:
     return _safe(_load, {"positions": []}, "portfolio (drawdown/PnL/win-rate)")
 
 
+def orders_payload(order_timeline=None, reconciliation_engine=None) -> dict[str, Any]:
+    """Phase W13-1. `order_timeline` should be the trading engine's
+    already-constructed execution.order_timeline.OrderTimeline
+    instance (main.py's components["order_timeline"]);
+    `reconciliation_engine` similarly components["reconciliation_engine"].
+    Both optional — omitted, "states" is simply empty and
+    "reconciliation" is simply absent, never fabricated.
+
+    Calls ONLY OrderTimeline.current_state() (no symbol arg -> every
+    symbol's last-known composite state) and
+    ReconciliationEngine.status() — both already-existing, already-
+    tested, read-only accessors (see module docstring). Never calls
+    OrderTimeline.run_once(), any refresh(force=True), any exchange
+    API directly, or any recovery action — this function is the only
+    place in world/ or telemetry/world_export.py that imports either
+    class, and it only ever reads."""
+
+    def _load() -> dict[str, Any]:
+        states: list[dict[str, Any]] = []
+        if order_timeline is not None:
+            states = order_timeline.current_state()
+
+        payload: dict[str, Any] = {"states": states}
+
+        if reconciliation_engine is not None:
+            status = reconciliation_engine.status()
+            reconciliation: dict[str, Any] = {}
+            if status.get("last_run") is not None:
+                reconciliation["lastRun"] = status["last_run"]
+            if status.get("last_result") is not None:
+                reconciliation["lastResult"] = status["last_result"]
+            if status.get("event_count") is not None:
+                reconciliation["eventCount"] = status["event_count"]
+            if status.get("suppressed_repeat_count") is not None:
+                reconciliation["suppressedRepeatCount"] = status["suppressed_repeat_count"]
+            if reconciliation:
+                payload["reconciliation"] = reconciliation
+
+        return payload
+
+    return _safe(_load, {"states": []}, "orders (OrderTimeline/ReconciliationEngine)")
+
+
 # ── Top-level entry point ───────────────────────────────────────────────────
 
 def _write(staging_dir: str, filename: str, content: Any) -> None:
@@ -281,7 +324,13 @@ def _write(staging_dir: str, filename: str, content: Any) -> None:
     os.replace(tmp_path, path)  # atomic on POSIX — never a half-written file
 
 
-def export_snapshot(*, journal=None, staging_dir: str = DEFAULT_STAGING_DIR) -> str:
+def export_snapshot(
+    *,
+    journal=None,
+    order_timeline=None,
+    reconciliation_engine=None,
+    staging_dir: str = DEFAULT_STAGING_DIR,
+) -> str:
     """Capture one Track A -> World snapshot and write it as the raw
     payloads world/readers/*.py's JSONFileSource instances expect, into
     `staging_dir` (created if missing). Returns staging_dir.
@@ -291,6 +340,11 @@ def export_snapshot(*, journal=None, staging_dir: str = DEFAULT_STAGING_DIR) -> 
     components["journal_v2"]) if PnL/win-rate figures are wanted;
     omitted, those two fields are simply absent from the summary, not
     fabricated as 0.
+
+    `order_timeline` / `reconciliation_engine` (Phase W13-1) should be
+    main.py's components["order_timeline"] /
+    components["reconciliation_engine"]; omitted, orders.json simply
+    has no states/reconciliation this capture.
 
     Never raises: every individual source is wrapped in _safe(), and a
     failure writing one file is logged and skipped rather than
@@ -309,5 +363,6 @@ def export_snapshot(*, journal=None, staging_dir: str = DEFAULT_STAGING_DIR) -> 
     # investigation (see report) — kept as a valid, empty payload so
     # JournalReader never errors, rather than guessing column names.
     _write(staging_dir, "journal.json", [])
+    _write(staging_dir, "orders.json", orders_payload(order_timeline, reconciliation_engine))
 
     return staging_dir

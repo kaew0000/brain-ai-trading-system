@@ -106,6 +106,15 @@ class OperationsSummary:
     cpu_percent: float | None
     ram_percent: float | None
     clock: str
+    #: Phase W13-1/W13-4 — additive. len(WorldState.orders); 0 when
+    #: orders.json has no data yet (never fabricated, but 0 is a
+    #: legitimate real count, not a null-placeholder, hence int not
+    #: int | None — mirrors active_mission_count's own convention).
+    active_orders_count: int = 0
+    #: Phase W13-1/W13-4 — additive. None when WorldState.reconciliation
+    #: is None (engine hasn't run this capture, or an older payload).
+    reconciliation_last_result: str | None = None
+    reconciliation_event_count: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -115,6 +124,9 @@ class OperationsSummary:
             "exchangeConnected": self.exchange_connected,
             "heartbeatAgeSeconds": self.heartbeat_age_s,
             "cpuPercent": self.cpu_percent, "ramPercent": self.ram_percent, "clock": self.clock,
+            "activeOrdersCount": self.active_orders_count,
+            "reconciliationLastResult": self.reconciliation_last_result,
+            "reconciliationEventCount": self.reconciliation_event_count,
         }
 
 

@@ -80,6 +80,18 @@ def test_get_operations_summary(client):
     assert "engineStatus" in r.json()["data"]
 
 
+def test_get_operations_summary_includes_orders_and_reconciliation_fields(client):
+    """Phase W13-4 — proves orders/reconciliation state reaches the
+    dashboard through the EXISTING /api/workspace/operations route,
+    with no new /api/operations/* namespace created."""
+    r = client.get("/api/workspace/operations")
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert "activeOrdersCount" in data
+    assert "reconciliationLastResult" in data
+    assert "reconciliationEventCount" in data
+
+
 def test_get_notifications(client):
     r = client.get("/api/workspace/notifications")
     assert r.status_code == 200
