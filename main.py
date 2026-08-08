@@ -410,10 +410,26 @@ def build_system() -> dict:
                         ceo_dispatcher = MultiSymbolCEODispatcher(
                             signal_provider=signal_provider, ceo_agent_cache=ceo_agent_cache,
                         )
+                        # V16 Phase 4C Step 4: inject the recommendation
+                        # source as a callable rather than importing
+                        # api.app at module scope inside
+                        # ceo_gated_signal_provider.py — keeps that
+                        # module's existing dependency-injection idiom
+                        # (see its own constructor docstring) and its
+                        # existing testability with fakes. Import is
+                        # local/deferred, same "avoid import cycles with
+                        # api.app" pattern already used everywhere else
+                        # in this file (e.g. _start_api_server's own
+                        # `import api.app as _api_module` calls above).
+                        def _get_learning_recommendations():
+                            import api.app as _api_module
+                            return _api_module.get_state("learning_recommendations", [])
+
                         signal_provider = CEOGatedSignalProvider(
                             signal_provider=signal_provider,
                             ceo_adapter=ceo_dispatcher,
                             journal=journal_v2,
+                            recommendation_provider=_get_learning_recommendations,
                         )
                         logger.info("ExecutionScheduler: CEO Agent gating ENABLED")
                     else:
@@ -1253,6 +1269,62 @@ def run_nightly_retrain_job() -> None:
         logger.error(f"run_nightly_retrain_job error: {exc}", exc_info=True)
 
 
+def run_learning_recommendation_refresh(sys: dict) -> None:
+    """V16 Phase 4C Step 4 (live scheduler wiring): the previously-missing
+    producer for `_state["learning_recommendations"]` — api/app.py's
+    `/api/recommendations` endpoint and agents/multi_symbol_adapter.py's
+    CEO-gated live path have both read/consumed that key since Phase 4C
+    Step 3, but nothing ever wrote it (see PATCH_NOTES.md's "known
+    follow-up work" and this phase's own design audit, Part C).
+
+    Mirrors run_nightly_retrain_job()'s shape exactly: no `sys` dict
+    threading beyond the journal, guarded top-to-bottom, log-and-continue
+    on any failure — a broken learning pipeline must never be able to
+    take down the scheduler thread (same "safety wrapping at every
+    touchpoint" rule as every other scheduled job in this file).
+
+    Gated on settings.RECOMMENDATION_APPLICATION_ENABLED (default False,
+    same flag CEOAgent itself checks before ever applying a
+    recommendation) rather than a new setting — if recommendations are
+    not going to be applied to any live decision, there is no reason to
+    spend the (non-trivial: full trade-history scan + pattern mining)
+    computation generating them. Re-checked on every call (not just once
+    at schedule-registration) so flipping the setting at runtime takes
+    effect on the next scheduled run, same live-re-read convention
+    execution/ceo_gated_signal_provider.py's `enabled` property already
+    uses.
+
+    Does not create a new persistence layer: reuses the existing
+    learning/learning_report.py::LearningReportGenerator unchanged, and
+    the existing api/app.py::set_state() in-memory slot — no new state
+    mechanism, no new schedule library, no new file writes.
+    """
+    if not settings.RECOMMENDATION_APPLICATION_ENABLED:
+        logger.debug("Learning recommendation refresh skipped — "
+                     "RECOMMENDATION_APPLICATION_ENABLED is False")
+        return
+    try:
+        from learning.learning_report import LearningReportGenerator
+
+        jrn = sys["journal_v2"]
+        bundle = LearningReportGenerator(jrn).generate()
+
+        try:
+            import api.app as _api_module
+            _api_module.set_state("learning_recommendations", bundle.recommendations)
+            _api_module.set_state("learning_dataset_row_count", bundle.dataset.row_count)
+        except Exception as exc:
+            logger.debug(f"Dashboard state update skipped for learning recommendations: {exc}")
+
+        logger.info(
+            f"Learning recommendation refresh complete | "
+            f"rows={bundle.dataset.row_count} "
+            f"recommendations={len(bundle.recommendations)}"
+        )
+    except Exception as exc:
+        logger.error(f"run_learning_recommendation_refresh error: {exc}", exc_info=True)
+
+
 def daily_report(sys: dict) -> None:
     """Print formatted daily performance summary to log."""
     dp  = sys["data_provider"]
@@ -1528,6 +1600,16 @@ def main() -> None:
     schedule.every(60).seconds.do(run_position_reconciliation, components)
     schedule.every(1).hours.do(daily_report,            components)
     schedule.every().day.at("02:00").do(run_nightly_retrain_job)
+    # V16 Phase 4C Step 4 — refresh _state["learning_recommendations"]
+    # daily, off-peak (same cadence class as the nightly retrain job just
+    # above; recommendations carry their own RECOMMENDATION_TTL_HOURS
+    # (default 24h) expiry, so a daily refresh matches their own staleness
+    # window). No-ops internally when RECOMMENDATION_APPLICATION_ENABLED
+    # is False (see the job's own docstring) — registering it
+    # unconditionally here is safe and keeps this list of scheduled jobs
+    # a complete, truthful picture of what CAN run, same as every other
+    # entry in this list.
+    schedule.every().day.at("02:30").do(run_learning_recommendation_refresh, components)
     # Phase W10 — advance the World Simulation once per trading cycle,
     # same cadence as run_trading_cycle above (LOOP_INTERVAL). Additive;
     # see _tick_world_simulation()'s own docstring for why this can never

@@ -465,14 +465,76 @@ class CEOAgent(BaseAgent):
         if not recommendations or not settings.RECOMMENDATION_APPLICATION_ENABLED:
             return decision
 
-        from learning.application.recommendation_service import apply_learning_recommendations
+        try:
+            from learning.application.recommendation_service import apply_learning_recommendations
 
-        new_decision, _explanations, _rset = apply_learning_recommendations(
-            decision, recommendations,
-            symbol=market_context.get("symbol"), regime=market_context.get("regime"),
-            dataset_row_count=dataset_row_count,
-        )
-        return new_decision
+            new_decision, _explanations, _rset = apply_learning_recommendations(
+                decision, recommendations,
+                symbol=market_context.get("symbol"), regime=market_context.get("regime"),
+                dataset_row_count=dataset_row_count,
+            )
+            return new_decision
+        except Exception as exc:
+            logger.error(f"decide_with_recommendations: recommendation application failed, "
+                         f"falling back to unmodified decision: {exc}")
+            return decision
+
+    def decide_from_context_with_recommendations(
+        self,
+        context: CEODecisionContext,
+        *,
+        recommendations: list | None = None,
+        dataset_row_count: int | None = None,
+    ) -> CEODecision:
+        """V16 Phase 4C Step 4 (live scheduler wiring — Part D of the
+        design audit): the `decide_from_context()` counterpart to
+        `decide_with_recommendations()` just above — same thin-wrapper
+        pattern, same safety contract, only the input shape differs.
+
+        This exists because `decide_from_context()` is the ONE real live
+        decision gate (agents/multi_symbol_adapter.py::
+        MultiSymbolCEOAdapter.decide_with_signal() calls it, and that
+        adapter is what execution/ceo_gated_signal_provider.py's
+        CEOGatedSignalProvider uses to confirm/veto a live multi-symbol
+        trade) — `decide_with_recommendations()`'s bare
+        (market_context, confidence_result) signature doesn't match that
+        call site's CEODecisionContext, so rather than change that
+        method's signature (which would touch its own existing tests and
+        its own existing behavior), this is a second thin wrapper that
+        delegates to decide_from_context() first, then reuses the exact
+        same apply_learning_recommendations() call.
+
+        Nothing pre-existing calls this method — decide(),
+        decide_from_context(), and decide_with_recommendations() are all
+        still called exactly as before by every existing caller, with
+        identical behavior. Only a caller that explicitly opts into this
+        new method, AND passes `recommendations`, is affected.
+
+        Safety: identical to decide_with_recommendations() — empty/None
+        `recommendations`, or settings.RECOMMENDATION_APPLICATION_ENABLED
+        False, returns decide_from_context()'s result completely
+        unchanged. A failure inside recommendation application is caught
+        and logged; the unmodified decision is returned rather than
+        propagating the exception into a live decision cycle (this
+        catches the same class of failure decide_with_recommendations()
+        above now also guards against)."""
+        decision = self.decide_from_context(context)
+        if not recommendations or not settings.RECOMMENDATION_APPLICATION_ENABLED:
+            return decision
+
+        try:
+            from learning.application.recommendation_service import apply_learning_recommendations
+
+            new_decision, _explanations, _rset = apply_learning_recommendations(
+                decision, recommendations,
+                symbol=context.symbol, regime=context.market_context.get("regime"),
+                dataset_row_count=dataset_row_count,
+            )
+            return new_decision
+        except Exception as exc:
+            logger.error(f"decide_from_context_with_recommendations: recommendation "
+                         f"application failed, falling back to unmodified decision: {exc}")
+            return decision
 
     def analyse(self, market_context: dict) -> AgentReport:
         """BaseAgent interface — wraps decide() without ConfidenceResult."""
