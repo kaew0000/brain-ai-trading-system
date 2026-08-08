@@ -33,6 +33,25 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
+  world-tests:
+    # Phase W13-CI-1: world/tests/ is outside pytest.ini's `testpaths`
+    # and almost none of its files carry the `unit` marker that
+    # `addopts = -m "unit"` filters on, so the marker-based invocation
+    # the `test` job uses above would silently select zero tests here.
+    # `-m ""` overrides that filter for this job only — pytest.ini and
+    # the `test` job's behavior for tests/ are both left untouched.
+    # pytest exits non-zero when a run collects zero tests, so a
+    # future regression back to "0 selected" fails this job rather
+    # than reporting a silent green.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest world/tests/ -q -m ""
+
   security:
     runs-on: ubuntu-latest
     steps:
