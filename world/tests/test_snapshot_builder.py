@@ -12,6 +12,7 @@ from world.adapter.snapshot_builder import SnapshotBuilder
 from world.readers.event_reader import Event
 from world.readers.journal_reader import JournalEntry
 from world.readers.mission_reader import Mission
+from world.readers.order_reader import OrderTimelineEntry, ReconciliationSnapshot
 from world.readers.portfolio_reader import PortfolioPosition
 from world.readers.telemetry_reader import TelemetryPoint
 
@@ -35,7 +36,11 @@ def _sample_snapshot() -> EngineSnapshot:
             Event("e1", "t", "trade_fill", "execution-forge", "success", "FORGE", "filled"),
             Event("e2", "t", "risk_flag", "risk-fortress", "warning", "BASTION", "elevated exposure"),
         ],
-        sources_available={"journal": True, "telemetry": True, "portfolio": True, "missions": True, "events": True},
+        order_states=[OrderTimelineEntry("BTCUSDT", "OPEN")],
+        sources_available={
+            "journal": True, "telemetry": True, "portfolio": True,
+            "missions": True, "events": True, "orders": True,
+        },
     )
 
 
@@ -119,4 +124,51 @@ def test_build_notifications_matches_schema_and_derives_from_warning_and_critica
 
 def test_build_all_keys_match_runtime_filenames():
     outputs = SnapshotBuilder().build_all(_sample_snapshot())
-    assert set(outputs.keys()) == {"world", "events", "missions", "portfolio", "telemetry", "notifications"}
+    assert set(outputs.keys()) == {
+        "world", "events", "missions", "portfolio", "telemetry", "notifications", "orders",
+    }
+
+
+def test_build_orders_matches_schema():
+    data = SnapshotBuilder().build_orders(_sample_snapshot())
+    jsonschema.validate(instance=data, schema=_schema("orders.schema.json"))
+    assert data["activeCount"] == 1
+    assert data["states"] == [{"symbol": "BTCUSDT", "state": "OPEN"}]
+
+
+def test_build_orders_no_reconciliation_key_when_snapshot_has_none():
+    """Same discipline build_portfolio()'s `summary` key uses: absent
+    entirely, never fabricated as nulls/zeros."""
+    data = SnapshotBuilder().build_orders(_sample_snapshot())
+    assert "reconciliation" not in data
+
+
+def test_build_orders_includes_reconciliation_when_present():
+    snapshot = _sample_snapshot()
+    snapshot.reconciliation = ReconciliationSnapshot(
+        last_run="2026-07-30T00:00:00+00:00", last_result="clean",
+        event_count=3, suppressed_repeat_count=1,
+    )
+    data = SnapshotBuilder().build_orders(snapshot)
+    jsonschema.validate(instance=data, schema=_schema("orders.schema.json"))
+    assert data["reconciliation"] == {
+        "lastRun": "2026-07-30T00:00:00+00:00", "lastResult": "clean",
+        "eventCount": 3, "suppressedRepeatCount": 1,
+    }
+
+
+def test_build_orders_omits_individual_none_reconciliation_fields():
+    snapshot = _sample_snapshot()
+    snapshot.reconciliation = ReconciliationSnapshot(last_result="clean")  # everything else None
+    data = SnapshotBuilder().build_orders(snapshot)
+    assert data["reconciliation"] == {"lastResult": "clean"}
+    jsonschema.validate(instance=data, schema=_schema("orders.schema.json"))
+
+
+def test_build_orders_empty_when_no_order_states():
+    empty = EngineSnapshot(captured_at="t")
+    data = SnapshotBuilder().build_orders(empty)
+    jsonschema.validate(instance=data, schema=_schema("orders.schema.json"))
+    assert data["activeCount"] == 0
+    assert data["states"] == []
+    assert "reconciliation" not in data

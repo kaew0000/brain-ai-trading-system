@@ -18,8 +18,10 @@ from world.runtime.models import (
     EventState,
     MissionState,
     NotificationState,
+    OrderTimelineState,
     PortfolioState,
     PortfolioSummaryState,
+    ReconciliationState,
     RoomState,
     TelemetryState,
     WorldState,
@@ -127,7 +129,12 @@ class StateBuilder:
         )
         notifications = _load_json(os.path.join(self._runtime_dir, "notifications.json"), default=[])
         events = _load_json(os.path.join(self._runtime_dir, "events.json"), default=[])
-        return world, missions, portfolio, telemetry, notifications, events
+        # Phase W13-1
+        orders = _load_json(
+            os.path.join(self._runtime_dir, "orders.json"),
+            default={"activeCount": 0, "states": [], "timestamp": ""},
+        )
+        return world, missions, portfolio, telemetry, notifications, events, orders
 
     # -- build ------------------------------------------------------------
 
@@ -135,7 +142,7 @@ class StateBuilder:
         room_names = self._load_room_names()
         agent_refs = self._load_character_refs()
         home_rooms = self._load_home_rooms()
-        world, missions_raw, portfolio_raw, telemetry_raw, notifications_raw, events_raw = (
+        world, missions_raw, portfolio_raw, telemetry_raw, notifications_raw, events_raw, orders_raw = (
             self._load_runtime()
         )
 
@@ -213,6 +220,32 @@ class StateBuilder:
             for t in telemetry_raw.get("metrics", [])
         )
 
+        # Phase W13-1 — read-only composite order-timeline rows. Rows
+        # missing "symbol" are skipped (same "skip the bad row" rule
+        # every other collection in this method follows).
+        orders = tuple(
+            OrderTimelineState(symbol=str(o["symbol"]), state=o.get("state"))
+            for o in orders_raw.get("states", [])
+            if "symbol" in o
+        )
+
+        # Phase W13-1 — optional reconciliation-wide figures. Absent
+        # in the payload (engine hasn't run this capture, or an older
+        # orders.json shape) -> None, never a fabricated
+        # ReconciliationState of zeros.
+        reconciliation_raw = orders_raw.get("reconciliation")
+        reconciliation = (
+            ReconciliationState(
+                last_run=reconciliation_raw.get("lastRun"),
+                last_result=reconciliation_raw.get("lastResult"),
+                event_count=reconciliation_raw.get("eventCount"),
+                suppressed_repeat_count=reconciliation_raw.get("suppressedRepeatCount"),
+            )
+            if isinstance(reconciliation_raw, dict)
+            else None
+        )
+
+
         # -- agents: every real character, current room = dynamic active
         #    district (best-effort: first active district if the agent
         #    itself is active and any district is flagged active) else its
@@ -265,4 +298,6 @@ class StateBuilder:
             notifications=notifications,
             events=events,
             telemetry=telemetry,
+            orders=orders,
+            reconciliation=reconciliation,
         )

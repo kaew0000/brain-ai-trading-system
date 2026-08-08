@@ -26,6 +26,11 @@ RUNTIME_FILE_TO_SCHEMA = {
     # lives in the same directory per this phase's own explicit
     # instruction, so it's covered by the same drift check.
     "workspace.json": "workspace.schema.json",
+    # Phase W13-1: read-only composite order-timeline + reconciliation
+    # view (execution.order_timeline.OrderTimeline / system_health.
+    # reconciliation.ReconciliationEngine), bridged the same way every
+    # other Phase W4 file is — see telemetry/world_export.py.
+    "orders.json": "orders.schema.json",
 }
 
 
@@ -41,7 +46,7 @@ def test_runtime_file_matches_schema(runtime_file, schema_file):
     jsonschema.validate(instance=data, schema=schema)
 
 
-def test_all_seven_runtime_files_present():
+def test_all_eight_runtime_files_present():
     assert set(os.listdir(RUNTIME_DIR)) == set(RUNTIME_FILE_TO_SCHEMA.keys())
 
 

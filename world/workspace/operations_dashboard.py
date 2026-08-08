@@ -48,4 +48,10 @@ def build_operations_summary(state: WorldState) -> OperationsSummary:
         cpu_percent=_telemetry(state, "cpu_percent"),
         ram_percent=_telemetry(state, "ram_percent"),
         clock=state.captured_at,
+        # Phase W13-1/W13-4 — additive, sourced from the new
+        # WorldState.orders/.reconciliation fields; both simply
+        # empty/None when orders.json has no data yet, never fabricated.
+        active_orders_count=len(state.orders),
+        reconciliation_last_result=state.reconciliation.last_result if state.reconciliation else None,
+        reconciliation_event_count=state.reconciliation.event_count if state.reconciliation else None,
     )

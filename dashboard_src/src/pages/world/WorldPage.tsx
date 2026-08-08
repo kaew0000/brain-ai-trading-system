@@ -4,9 +4,10 @@
 // and /ws/world (api/world_api.py, api/world_ws.py — Track B, additive)
 // via world.runtime/world.simulation/world.interaction/world.frontend.
 // renderer's own already-public APIs.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { worldApi, wsWorld } from './api'
 import type { RenderFrame, RoomActivity, SimulationState } from './types'
+import { deriveWsStatus, WS_STATUS_CLASSNAME, WS_STATUS_LABEL } from './wsStatus'
 import OfficeScene from './components/OfficeScene'
 import RoomList from './components/RoomList'
 import Inspector from './components/Inspector'
@@ -31,7 +32,8 @@ export default function WorldPage() {
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
   const [frame, setFrame] = useState<RenderFrame | null>(null)
   const [tab, setTab] = useState<TabId>('scene')
-  const [connected, setConnected] = useState(false)
+  const [wsStatus, setWsStatus] = useState<'LIVE' | 'RECONNECTING' | 'DISCONNECTED'>('DISCONNECTED')
+  const hasEverConnectedRef = useRef(false)
 
   // Initial hydration via REST — matches the same "REST for initial
   // hydration, WebSocket for realtime" split the rest of this dashboard
@@ -59,7 +61,18 @@ export default function WorldPage() {
   }, [])
 
   useEffect(() => {
-    const id = setInterval(() => setConnected(wsWorld.readyState === 'OPEN'), 1000)
+    // Phase W13-3 — tri-state (LIVE/RECONNECTING/DISCONNECTED)
+    // presentation only; still just polls the one existing
+    // wsWorld.readyState (ManagedWS, src/lib/api.ts) — no second
+    // connection, no new polling target, no change to the WS client
+    // itself. hasEverConnectedRef distinguishes "still trying the
+    // very first connection" from "was live, lost it, backing off" —
+    // see wsStatus.ts's own docstring.
+    const id = setInterval(() => {
+      const readyState = wsWorld.readyState
+      if (readyState === 'OPEN') hasEverConnectedRef.current = true
+      setWsStatus(deriveWsStatus(readyState, hasEverConnectedRef.current))
+    }, 1000)
     return () => clearInterval(id)
   }, [])
 
@@ -93,11 +106,10 @@ export default function WorldPage() {
         <h1 className="text-xl font-semibold text-white">Office World</h1>
         <span
           data-testid="world-ws-status"
-          className={`text-xs rounded-full px-2 py-1 ${
-            connected ? 'bg-green-900 text-green-300' : 'bg-slate-800 text-slate-400'
-          }`}
+          data-ws-state={wsStatus}
+          className={`text-xs rounded-full px-2 py-1 ${WS_STATUS_CLASSNAME[wsStatus]}`}
         >
-          {connected ? 'Live' : 'Connecting…'}
+          {WS_STATUS_LABEL[wsStatus]}
         </span>
       </header>
 

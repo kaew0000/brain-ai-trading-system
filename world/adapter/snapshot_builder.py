@@ -118,6 +118,39 @@ class SnapshotBuilder:
             ],
         }
 
+    def build_orders(self, snapshot: EngineSnapshot) -> dict[str, Any]:
+        """Phase W13-1. `states` is the read-only composite view
+        `execution.order_timeline.OrderTimeline.current_state()`
+        already produces (see world/readers/order_reader.py — this
+        module never talks to OrderTimeline directly). `reconciliation`
+        is only present when the order reader's payload actually had
+        one this capture — omitted, not fabricated as zeros/nulls,
+        same discipline `build_portfolio()`'s `summary` key uses."""
+        out: dict[str, Any] = {
+            "timestamp": snapshot.captured_at,
+            "activeCount": len(snapshot.order_states),
+            "states": [
+                {"symbol": o.symbol, "state": o.state}
+                for o in snapshot.order_states
+            ],
+        }
+
+        r = snapshot.reconciliation
+        if r is not None:
+            reconciliation: dict[str, Any] = {}
+            if r.last_run is not None:
+                reconciliation["lastRun"] = r.last_run
+            if r.last_result is not None:
+                reconciliation["lastResult"] = r.last_result
+            if r.event_count is not None:
+                reconciliation["eventCount"] = r.event_count
+            if r.suppressed_repeat_count is not None:
+                reconciliation["suppressedRepeatCount"] = r.suppressed_repeat_count
+            if reconciliation:
+                out["reconciliation"] = reconciliation
+
+        return out
+
     def build_notifications(self, snapshot: EngineSnapshot) -> list[dict[str, Any]]:
         return [
             {
@@ -133,7 +166,9 @@ class SnapshotBuilder:
 
     def build_all(self, snapshot: EngineSnapshot) -> dict[str, Any]:
         """Convenience: every output keyed by its runtime filename
-        (without extension) - what `RuntimeManager` iterates over."""
+        (without extension) - what `RuntimeManager` iterates over.
+        Phase W13-1 adds "orders" as the seventh output; RuntimeManager
+        needs no change since it already just iterates this dict."""
         return {
             "world": self.build_world(snapshot),
             "events": self.build_events(snapshot),
@@ -141,4 +176,5 @@ class SnapshotBuilder:
             "portfolio": self.build_portfolio(snapshot),
             "telemetry": self.build_telemetry(snapshot),
             "notifications": self.build_notifications(snapshot),
+            "orders": self.build_orders(snapshot),
         }

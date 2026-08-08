@@ -20,6 +20,7 @@ from world.readers.base import (
 from world.readers.event_reader import EventReader
 from world.readers.journal_reader import JournalReader
 from world.readers.mission_reader import MissionReader
+from world.readers.order_reader import OrderReader
 from world.readers.portfolio_reader import PortfolioReader
 from world.readers.telemetry_reader import TelemetryReader
 
@@ -142,3 +143,70 @@ def test_event_reader_skips_invalid_severity(tmp_path):
     events = EventReader(JSONFileSource(str(p))).read()
     assert len(events) == 1
     assert events[0].event_id == "e1"
+
+
+# ---------------------------------------------------------------- W13-1 OrderReader
+
+def test_order_reader_happy_path(tmp_path):
+    p = tmp_path / "orders.json"
+    p.write_text(json.dumps({
+        "timestamp": "2026-08-07T00:00:00Z",
+        "states": [{"symbol": "BTCUSDT", "state": "OPEN"}],
+        "reconciliation": {
+            "lastRun": "2026-08-07T00:00:00Z", "lastResult": "clean",
+            "eventCount": 2, "suppressedRepeatCount": 0,
+        },
+    }))
+    reader = OrderReader(JSONFileSource(str(p)))
+    entries = reader.read()
+    assert len(entries) == 1
+    assert entries[0].symbol == "BTCUSDT"
+    assert entries[0].state == "OPEN"
+    assert reader.last_reconciliation.last_result == "clean"
+    assert reader.last_reconciliation.event_count == 2
+
+
+def test_order_reader_skips_rows_missing_symbol(tmp_path):
+    p = tmp_path / "orders.json"
+    p.write_text(json.dumps({
+        "timestamp": "t",
+        "states": [{"symbol": "BTCUSDT", "state": "OPEN"}, {"state": "CLOSED"}],
+    }))
+    entries = OrderReader(JSONFileSource(str(p))).read()
+    assert len(entries) == 1
+    assert entries[0].symbol == "BTCUSDT"
+
+
+def test_order_reader_no_reconciliation_key_leaves_none(tmp_path):
+    p = tmp_path / "orders.json"
+    p.write_text(json.dumps({"timestamp": "t", "states": []}))
+    reader = OrderReader(JSONFileSource(str(p)))
+    reader.read()
+    assert reader.last_reconciliation is None
+
+
+def test_order_reader_empty_payload(tmp_path):
+    p = tmp_path / "orders.json"
+    p.write_text(json.dumps({"timestamp": "t", "states": []}))
+    entries = OrderReader(JSONFileSource(str(p))).read()
+    assert entries == []
+
+
+def test_order_reader_resets_reconciliation_between_reads(tmp_path):
+    """Same discipline PortfolioReader.last_summary uses (see
+    test_portfolio_reader_summary.py::test_last_summary_resets_between_reads):
+    a capture with no reconciliation object must not leak the previous
+    capture's reconciliation into this one."""
+    p = tmp_path / "orders.json"
+    reader = OrderReader(JSONFileSource(str(p)))
+
+    p.write_text(json.dumps({
+        "timestamp": "t1", "states": [],
+        "reconciliation": {"lastResult": "clean"},
+    }))
+    reader.read()
+    assert reader.last_reconciliation is not None
+
+    p.write_text(json.dumps({"timestamp": "t2", "states": []}))
+    reader.read()
+    assert reader.last_reconciliation is None

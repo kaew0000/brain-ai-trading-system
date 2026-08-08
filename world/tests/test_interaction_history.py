@@ -14,7 +14,16 @@ def test_record_selection_and_command():
     assert records[0].kind == "selection"
     assert records[0].detail == {"selectionKind": "room", "targetId": "risk-fortress"}
     assert records[1].kind == "command"
-    assert records[1].detail == {"command": "focus_room", "ok": True, "detail": ""}
+    # Phase W13-2 — record_command() gained audit metadata fields, all
+    # with defaults matching the pre-W13-2 3-positional-arg call above
+    # exactly, so this call site (unchanged from Phase W9) still works.
+    assert records[1].detail["command"] == "focus_room"
+    assert records[1].detail["ok"] is True
+    assert records[1].detail["detail"] == ""
+    assert records[1].detail["actor"] == "unknown"
+    assert records[1].detail["parameters"] == {}
+    assert records[1].detail["durationMs"] is None
+    assert isinstance(records[1].detail["timestamp"], str) and records[1].detail["timestamp"]
 
 
 def test_history_window_bounds_memory():

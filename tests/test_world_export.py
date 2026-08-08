@@ -29,12 +29,14 @@ from telemetry.world_export import (
     event_rows,
     export_snapshot,
     mission_rows,
+    orders_payload,
     portfolio_payload,
     telemetry_rows,
 )
 from world.readers.base import JSONFileSource
 from world.readers.event_reader import EventReader
 from world.readers.mission_reader import MissionReader
+from world.readers.order_reader import OrderReader
 from world.readers.portfolio_reader import PortfolioReader
 from world.readers.telemetry_reader import TelemetryReader
 
@@ -67,6 +69,32 @@ class _FakeJournal:
 
     def get_daily_stats(self, day=None):
         return self._stats
+
+
+class _FakeOrderTimeline:
+    """Matches execution.order_timeline.OrderTimeline.current_state()'s
+    real, verified no-arg return shape exactly: `[{"symbol": s, "state":
+    st}, ...]` (see execution/order_timeline.py)."""
+
+    def __init__(self, states: list[dict]):
+        self._states = states
+
+    def current_state(self, symbol=None):
+        if symbol is not None:
+            return {"symbol": symbol, "state": None}
+        return self._states
+
+
+class _FakeReconciliationEngine:
+    """Matches system_health.reconciliation.ReconciliationEngine.status()'s
+    real, verified return shape exactly (snake_case keys — see
+    system_health/reconciliation.py)."""
+
+    def __init__(self, status: dict):
+        self._status = status
+
+    def status(self):
+        return self._status
 
 
 # ── telemetry_rows() ─────────────────────────────────────────────────────────
@@ -283,12 +311,101 @@ def test_portfolio_payload_is_consumable_by_portfolio_reader(tmp_path, monkeypat
     assert reader.last_summary.drawdown == 0.05
 
 
+# ── orders_payload() (Phase W13-1) ───────────────────────────────────────────
+
+def test_orders_payload_empty_states_and_no_reconciliation_by_default():
+    payload = orders_payload(order_timeline=None, reconciliation_engine=None)
+    assert payload == {"states": []}
+
+
+def test_orders_payload_includes_states_from_order_timeline():
+    ot = _FakeOrderTimeline([{"symbol": "BTCUSDT", "state": "OPEN"}])
+    payload = orders_payload(order_timeline=ot, reconciliation_engine=None)
+    assert payload["states"] == [{"symbol": "BTCUSDT", "state": "OPEN"}]
+    assert "reconciliation" not in payload
+
+
+def test_orders_payload_includes_reconciliation_translated_to_camel_case():
+    rc = _FakeReconciliationEngine({
+        "last_run": "2026-08-07T00:00:00Z", "last_result": "clean",
+        "event_count": 3, "suppressed_repeat_count": 1,
+    })
+    payload = orders_payload(order_timeline=None, reconciliation_engine=rc)
+    assert payload["reconciliation"] == {
+        "lastRun": "2026-08-07T00:00:00Z", "lastResult": "clean",
+        "eventCount": 3, "suppressedRepeatCount": 1,
+    }
+
+
+def test_orders_payload_omits_none_reconciliation_fields():
+    rc = _FakeReconciliationEngine({
+        "last_run": None, "last_result": "clean",
+        "event_count": 0, "suppressed_repeat_count": None,
+    })
+    payload = orders_payload(order_timeline=None, reconciliation_engine=rc)
+    # event_count == 0 is a real value (not None) and must survive.
+    assert payload["reconciliation"] == {"lastResult": "clean", "eventCount": 0}
+
+
+def test_orders_payload_survives_order_timeline_failure():
+    class _Broken:
+        def current_state(self, symbol=None):
+            raise RuntimeError("db locked")
+
+    payload = orders_payload(order_timeline=_Broken(), reconciliation_engine=None)
+    assert payload == {"states": []}
+
+
+def test_orders_payload_survives_reconciliation_engine_failure():
+    ot = _FakeOrderTimeline([{"symbol": "BTCUSDT", "state": "OPEN"}])
+
+    class _Broken:
+        def status(self):
+            raise RuntimeError("no data yet")
+
+    payload = orders_payload(order_timeline=ot, reconciliation_engine=_Broken())
+    # order_timeline's own read succeeded and reconciliation_engine's
+    # failure must not wipe it out - but orders_payload() wraps the
+    # WHOLE _load() in one _safe(), matching portfolio_payload()'s own
+    # "one _safe() around everything" contract, so a reconciliation
+    # failure here degrades the entire payload to the documented
+    # default rather than a partial one. This test documents that
+    # boundary rather than asserting something false.
+    assert payload == {"states": []}
+
+
+def test_orders_payload_never_calls_run_once_or_refresh():
+    """Explicit non-mutation guard: the fake exposes ONLY current_state()
+    and status() - the real read-only accessors - so any attempt by
+    orders_payload() to call run_once(), refresh(force=True), or any
+    other method would raise AttributeError, failing this test."""
+    ot = _FakeOrderTimeline([{"symbol": "ETHUSDT", "state": "CLOSING"}])
+    rc = _FakeReconciliationEngine({"last_result": "clean"})
+    payload = orders_payload(order_timeline=ot, reconciliation_engine=rc)
+    assert payload["states"][0]["symbol"] == "ETHUSDT"
+
+
+def test_orders_payload_is_consumable_by_order_reader(tmp_path):
+    ot = _FakeOrderTimeline([{"symbol": "BTCUSDT", "state": "OPEN"}])
+    rc = _FakeReconciliationEngine({"last_result": "clean", "event_count": 2})
+
+    path = tmp_path / "orders.json"
+    path.write_text(json.dumps(orders_payload(order_timeline=ot, reconciliation_engine=rc)))
+
+    reader = OrderReader(JSONFileSource(str(path)))
+    entries = reader.read()
+    assert len(entries) == 1
+    assert entries[0].symbol == "BTCUSDT"
+    assert reader.last_reconciliation.last_result == "clean"
+    assert reader.last_reconciliation.event_count == 2
+
+
 # ── export_snapshot() ────────────────────────────────────────────────────────
 
-def test_export_snapshot_writes_all_five_staging_files(tmp_path):
+def test_export_snapshot_writes_all_six_staging_files(tmp_path):
     staging_dir = export_snapshot(journal=None, staging_dir=str(tmp_path))
     assert staging_dir == str(tmp_path)
-    for name in ("telemetry.json", "events.json", "missions.json", "portfolio.json", "journal.json"):
+    for name in ("telemetry.json", "events.json", "missions.json", "portfolio.json", "journal.json", "orders.json"):
         path = os.path.join(staging_dir, name)
         assert os.path.isfile(path)
         with open(path) as f:
@@ -316,3 +433,16 @@ def test_export_snapshot_creates_staging_dir_if_missing(tmp_path):
     export_snapshot(journal=None, staging_dir=str(nested))
     assert nested.is_dir()
     assert (nested / "telemetry.json").is_file()
+
+
+def test_export_snapshot_wires_order_timeline_and_reconciliation_engine(tmp_path):
+    ot = _FakeOrderTimeline([{"symbol": "BTCUSDT", "state": "OPEN"}])
+    rc = _FakeReconciliationEngine({"last_result": "clean", "event_count": 1})
+
+    staging_dir = export_snapshot(
+        journal=None, order_timeline=ot, reconciliation_engine=rc, staging_dir=str(tmp_path),
+    )
+    with open(os.path.join(staging_dir, "orders.json")) as f:
+        data = json.load(f)
+    assert data["states"] == [{"symbol": "BTCUSDT", "state": "OPEN"}]
+    assert data["reconciliation"]["lastResult"] == "clean"
