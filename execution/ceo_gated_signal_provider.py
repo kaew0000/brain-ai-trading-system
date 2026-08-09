@@ -232,7 +232,20 @@ class CEOGatedSignalProvider:
 
     def _journal_ceo_decision(self, symbol: str, ceo_decision) -> None:
         """Part E — best-effort, non-fatal. Stores nothing if there's no
-        journal, or no decision was produced this cycle."""
+        journal, or no decision was produced this cycle.
+
+        V16 Phase 4C Step 6: also carries `recommendation_explanations`
+        (agents/ceo_agent.py's CEODecision field, populated only by
+        decide_with_recommendations()/decide_from_context_with_recommendations()
+        — empty list for every other call path, including this one when
+        recommendations weren't applied) into the SAME `details` dict
+        `reasons`/`agreement_score`/`direction` already go through — no
+        new journal table, no new column, no new endpoint. Serialized via
+        AppliedRecommendationExplanation.to_dict() (learning/application/
+        recommendation_advisor.py), the existing method that object
+        already has; nothing recalculated. Reachable afterward through
+        the existing `/api/ceo-decisions` (journal_v2.get_agent_decisions())
+        without any change to that endpoint."""
         if self.journal is None or ceo_decision is None:
             return
         try:
@@ -245,6 +258,9 @@ class CEOGatedSignalProvider:
                     "reasons": ceo_decision.reasons,
                     "agreement_score": ceo_decision.agreement_score,
                     "direction": ceo_decision.direction,
+                    "recommendation_explanations": [
+                        e.to_dict() for e in ceo_decision.recommendation_explanations
+                    ],
                 },
             )
         except Exception as exc:
