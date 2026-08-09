@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C Step 7: Per-Agent Vote Persistence for CEO-Gated Decisions (Track A)
+
+Roadmap-level audit (post-Step-6) found `docs/ROADMAP.md`'s "Planned"
+backlog item "Per-agent attribution for CEO-gated multi-symbol
+trades — agent votes still aren't persisted for that path" to be
+genuinely open (unlike two neighboring backlog items this same audit
+found stale/already-done: "Phase 4C Step 2+", closed by Steps 3-6, and
+"pass symbol= to RegimeEngine.classify()", closed back in Phase 4B
+Step 3C). This phase closes the genuinely-open part of it.
+
+**Audit finding (important, corrects a stale docstring):**
+`journal_v2.get_trade_attribution()`'s own docstring says "the
+pipeline doesn't run the agent layer" for V16 multi-symbol trades —
+accurate for the *plain* `execution/portfolio_signal_provider.py`
+path (which indeed never touches `CEOAgent`), but this phase's
+fresh-clone trace confirms it is **not** accurate for the CEO-gated
+path: `agents/ceo_symbol_cache.py::CEOAgentSymbolCache.get_ceo_agent()`
+builds a real, full 6-agent layer per symbol (`build_agent_layer()`),
+and `CEODecision.agent_reports`/`.weights_used` are genuinely
+populated on every CEO-gated multi-symbol decision. The real gap was
+purely that `execution/ceo_gated_signal_provider.py::_journal_ceo_decision()`
+never carried that already-computed data into the journal — the exact
+same shape of gap Step 6 closed for `recommendation_explanations`.
+
+### Added
+- `execution/ceo_gated_signal_provider.py`: `_journal_ceo_decision()`
+  additively carries `agent_reports` and `weights_used` (both already
+  computed by `CEOAgent.decide()`, nothing recalculated) into the same
+  `details` dict `reasons`/`agreement_score`/`direction`/
+  `recommendation_explanations` already go through. Same try/except,
+  same failure isolation, same `/api/ceo-decisions` reachability, zero
+  new architecture.
+- 12 new regression tests (`tests/test_ceo_agent_vote_persistence.py`),
+  run against the real live chain (`CEOGatedSignalProvider` → real
+  `MultiSymbolCEODispatcher`/`CEOAgentSymbolCache` with a real 6-agent
+  layer, not a fake). Includes an explicit regression test asserting
+  the agent layer genuinely runs for this path (guards against a
+  future change silently making this phase's premise false), and the
+  genuinely-empty-`agents={}` case journaling cleanly rather than
+  erroring.
+
+### Known follow-up work (explicitly NOT done in this phase)
+This makes per-agent votes inspectable **per decision cycle** via the
+existing `/api/ceo-decisions` — it does **not** make
+`journal_v2.get_trade_attribution()`'s `agent_participation` populate
+for these trades. That join is `trades.signal_id ==
+agent_decisions.signal_id`; `_journal_ceo_decision()` has never
+recorded a `signal_id` (every `save_agent_decision()` call here omits
+it, before and after this phase). Threading a shared `signal_id` from
+this signal-layer class through to
+`execution/execution_orchestrator.py`'s `save_trade(rec,
+signal_id=sig_id)` call — a separate write, in a different layer, at
+trade-open time rather than decision-cycle time — is a larger,
+cross-layer piece of work this phase's audit found but deliberately
+did not attempt, to stay within a minimal, single-file, additive
+patch. Flagged for its own future audit rather than attempted here
+under time/risk pressure.
+
 ## [Unreleased] — V16 Phase 4C Step 6: Live Recommendation Explanation Persistence (Track A)
 
 Closes the observability gap this phase's own fresh-clone audit found:

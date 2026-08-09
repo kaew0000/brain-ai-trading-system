@@ -245,7 +245,37 @@ class CEOGatedSignalProvider:
         recommendation_advisor.py), the existing method that object
         already has; nothing recalculated. Reachable afterward through
         the existing `/api/ceo-decisions` (journal_v2.get_agent_decisions())
-        without any change to that endpoint."""
+        without any change to that endpoint.
+
+        V16 Phase 4C Step 7: same pattern again, for
+        `ceo_decision.agent_reports` (each sub-agent's AgentReport.to_dict()
+        — already computed inside CEOAgent.decide(), see
+        agents/ceo_agent.py; this is the SAME real 6-agent layer
+        agents.ceo_symbol_cache.CEOAgentSymbolCache.get_ceo_agent()
+        builds per symbol via build_agent_layer() — confirmed by this
+        phase's own fresh-clone audit to be genuinely populated for
+        this CEO-gated path, not the empty-by-construction case
+        journal_v2.get_trade_attribution()'s docstring describes for
+        the *plain* execution/portfolio_signal_provider.py path, which
+        never runs CEOAgent at all) and `ceo_decision.weights_used`
+        (the per-agent weighting actually applied this cycle).
+
+        Scope note (read before extending this further): this makes
+        per-agent VOTES inspectable per DECISION cycle via
+        `/api/ceo-decisions`, same as Step 6 did for recommendations.
+        It does NOT yet make journal_v2.get_trade_attribution()'s
+        `agent_participation` populate for these trades — that join is
+        `trades.signal_id == agent_decisions.signal_id`
+        (journal_v2.py's own comment, line ~292), and this method has
+        never recorded a `signal_id` (every save_agent_decision() call
+        here, before and after this phase, omits it — defaults to
+        None). Threading a shared signal_id from this signal-layer
+        class through to execution/execution_orchestrator.py's
+        save_trade(rec, signal_id=sig_id) call (a separate write, at
+        trade-open time, in a different layer) is a larger, separate
+        piece of work this phase's own audit found and explicitly
+        did NOT attempt, to stay within a minimal, single-layer,
+        additive patch — see PATCH_NOTES.md."""
         if self.journal is None or ceo_decision is None:
             return
         try:
@@ -261,6 +291,14 @@ class CEOGatedSignalProvider:
                     "recommendation_explanations": [
                         e.to_dict() for e in ceo_decision.recommendation_explanations
                     ],
+                    # V16 Phase 4C Step 7 — already-computed by CEOAgent.decide()
+                    # (agents/ceo_agent.py), nothing recalculated here.
+                    # agent_reports values are already AgentReport.to_dict()-
+                    # shaped dicts (see ceo_agent.py's own agent_reports =
+                    # {k: v.to_dict() for k, v in reports.items()}), so no
+                    # further serialization is needed.
+                    "agent_reports": ceo_decision.agent_reports,
+                    "weights_used": ceo_decision.weights_used,
                 },
             )
         except Exception as exc:
