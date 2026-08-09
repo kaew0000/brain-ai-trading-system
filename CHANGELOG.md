@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## [Unreleased] — $20 Live-Money Safety Patch (Track A)
+
+Read-only GO/NO-GO audit (fresh clone @ `c564985`) found three ways a
+low-capital account's real risk/margin exposure could exceed its
+configured policy. This patch fixes exactly those three, and nothing
+else — no strategy, CEO/agent, risk-policy-value, dashboard, WebSocket,
+EventBus, OrderTimeline, or reconciliation code was touched.
+
+### Fixed
+- **Live/testnet configuration invariant** — `EXECUTION_MODE` and
+  `settings.BINANCE_TESTNET` previously could disagree
+  (`EXECUTION_MODE=testnet` + `BINANCE_TESTNET=false` could reach
+  Binance **mainnet**; `EXECUTION_MODE=live` + `BINANCE_TESTNET=true`
+  could silently run on testnet). `BinanceDataProvider.__init__` now
+  refuses to start with a clear `RuntimeError` (no credentials
+  included) whenever `testnet`/`live` mode and the testnet flag
+  disagree. Paper mode is unconstrained, matching prior behavior.
+- **Minimum-quantity safety behavior** — `TradeManager.calculate_position_size()`
+  previously clamped a risk/margin-derived quantity **up** to the
+  exchange's `LOT_SIZE` `minQty` whenever it floored below that
+  minimum, silently letting exposure exceed `RISK_PER_TRADE_MAX` /
+  `MAX_MARGIN_USAGE`. It now returns `0.0` (skip trade) instead,
+  reusing the existing "cannot size" convention already handled by
+  `execute_trade()`. `_round_qty()` itself is unchanged and still used
+  to format already-approved quantities for SL/TP orders.
+- **Minimum-notional preflight** — no proactive check against the
+  exchange's `MIN_NOTIONAL`/`NOTIONAL` filter existed; the system
+  relied entirely on Binance rejecting an under-notional order at
+  submission time. `calculate_position_size()` now validates locally
+  before ever calling `place_market_order()`, and fails closed (skips
+  the trade) if the filter is missing or unparseable rather than
+  guessing a value.
+
+### Added
+- `tests/test_live_money_safety.py` — 29 regression/safety tests
+  covering the quantity-skip matrix, the full
+  `EXECUTION_MODE`×`BINANCE_TESTNET` matrix, min-notional edge cases,
+  a strategy/CEO non-interference guard, and an offline $20 pre-flight
+  simulation. No test submits or can submit a real Binance order.
+
 ## [Unreleased] — V16 Phase 4C Step 7: Per-Agent Vote Persistence for CEO-Gated Decisions (Track A)
 
 Roadmap-level audit (post-Step-6) found `docs/ROADMAP.md`'s "Planned"
