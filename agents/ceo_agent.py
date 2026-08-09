@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from events.event_bus import conf_pub
 from telemetry.agent_telemetry import get_telemetry_registry
@@ -79,6 +79,20 @@ class CEODecision:
     # AgentReport.symbol is (market_context.get("symbol"), never
     # fabricated) at this dataclass's one construction site in decide().
     symbol:          str | None = None
+    # V16 Phase 4C Step 6: the per-recommendation explanations
+    # learning/application/recommendation_advisor.py already computes on
+    # every call to decide_with_recommendations()/
+    # decide_from_context_with_recommendations() (Part C's own
+    # AppliedRecommendationExplanation, one per recommendation
+    # considered — applied or skipped, always with a reason) but which
+    # those two methods previously discarded before returning, since
+    # their own return type is CEODecision, not a tuple. Populated ONLY
+    # by those two methods (see their own docstrings) — decide() and
+    # decide_from_context() never touch this field, so every
+    # pre-existing call site is unaffected; the empty-list default
+    # preserves every pre-existing CEODecision construction and every
+    # existing equality/serialization assumption.
+    recommendation_explanations: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -468,11 +482,18 @@ class CEOAgent(BaseAgent):
         try:
             from learning.application.recommendation_service import apply_learning_recommendations
 
-            new_decision, _explanations, _rset = apply_learning_recommendations(
+            new_decision, explanations, _rset = apply_learning_recommendations(
                 decision, recommendations,
                 symbol=market_context.get("symbol"), regime=market_context.get("regime"),
                 dataset_row_count=dataset_row_count,
             )
+            # V16 Phase 4C Step 6: attach (never mutate new_decision in
+            # place — same "always a new object" convention
+            # recommendation_advisor.py's own apply_recommendations()
+            # already uses) rather than changing this method's return
+            # type — every existing caller expects a bare CEODecision.
+            if explanations:
+                new_decision = replace(new_decision, recommendation_explanations=explanations)
             return new_decision
         except Exception as exc:
             logger.error(f"decide_with_recommendations: recommendation application failed, "
@@ -525,11 +546,19 @@ class CEOAgent(BaseAgent):
         try:
             from learning.application.recommendation_service import apply_learning_recommendations
 
-            new_decision, _explanations, _rset = apply_learning_recommendations(
+            new_decision, explanations, _rset = apply_learning_recommendations(
                 decision, recommendations,
                 symbol=context.symbol, regime=context.market_context.get("regime"),
                 dataset_row_count=dataset_row_count,
             )
+            # V16 Phase 4C Step 6 (live path): same attach-don't-mutate
+            # convention as decide_with_recommendations() just above.
+            # execution/ceo_gated_signal_provider.py::_journal_ceo_decision()
+            # is what actually persists this — nothing here writes to the
+            # journal directly, keeping that ownership where it already
+            # lives.
+            if explanations:
+                new_decision = replace(new_decision, recommendation_explanations=explanations)
             return new_decision
         except Exception as exc:
             logger.error(f"decide_from_context_with_recommendations: recommendation "

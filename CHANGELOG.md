@@ -1,5 +1,79 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C Step 6: Live Recommendation Explanation Persistence (Track A)
+
+Closes the observability gap this phase's own fresh-clone audit found:
+`CEOAgent.decide_with_recommendations()` / `decide_from_context_with_recommendations()`
+already computed the full per-recommendation
+`AppliedRecommendationExplanation` list (Phase 4C Step 3's own Part C
+deliverable — recommendation id, applied/skipped, skip reason, score,
+sample size, source pattern, effect) on every live decision cycle, but
+discarded it before returning — both methods' return type is a bare
+`CEODecision`, not a tuple. Only one aggregate line
+(`"[learning] applied N recommendation(s), confidence ±X.XX"`)
+survived, folded into `decision.reasons`. Every individual
+recommendation's detail, and every skip reason, was lost the instant
+the method returned.
+
+**Audit note:** the fresh-clone trace confirmed persistence
+infrastructure already existed and already worked —
+`execution/ceo_gated_signal_provider.py::_journal_ceo_decision()` was
+already the one place a live `CEODecision` gets journaled, into an
+existing `details` dict (`reasons`/`agreement_score`/`direction`), via
+the existing `journal_v2.save_agent_decision()` →
+`get_agent_decisions()` round trip, already surfaced unmodified by the
+existing `GET /api/ceo-decisions`. The gap really was just forwarding
+— no new table, no new journal, no new endpoint, no new EventBus
+event.
+
+### Added
+- `agents/ceo_agent.py`: `CEODecision` gains a
+  `recommendation_explanations` field (`list`, empty-list default —
+  every pre-existing construction site, and `decide()`/
+  `decide_from_context()`, are unaffected). `decide_with_recommendations()`
+  and `decide_from_context_with_recommendations()` now attach the
+  already-computed explanations onto the returned decision via
+  `dataclasses.replace()` (never mutates the original) instead of
+  discarding them.
+- `execution/ceo_gated_signal_provider.py`: `_journal_ceo_decision()`
+  additively carries `recommendation_explanations` (serialized via
+  `AppliedRecommendationExplanation.to_dict()`, already existing —
+  nothing recalculated) into the same `details` dict it already builds.
+  Still wrapped in the same pre-existing try/except — a persistence
+  failure still cannot break a live decision cycle.
+- `api/app.py`: docstring-only update to `/api/ceo-decisions`
+  documenting the new `details.recommendation_explanations` key. No
+  functional change — the endpoint already returned `details`
+  unmodified.
+- 14 new regression tests
+  (`tests/test_recommendation_explanation_persistence.py`), run against
+  the real live chain (`CEOGatedSignalProvider` → real
+  `MultiSymbolCEODispatcher`/`MultiSymbolCEOAdapter`/`CEOAgentSymbolCache`
+  → journal, not a low-level helper in isolation): applied and skipped
+  explanations both persist with their real fields, multiple
+  recommendations survive without collapsing into the aggregate line,
+  `RECOMMENDATION_APPLICATION_ENABLED=false` and no-recommendation
+  paths remain empty-list/unchanged, BLOCKED decision values
+  (`action`/`direction`/`score_breakdown`/`agreement_score`) remain
+  byte-identical even though explanations are attached (attaching data
+  doesn't require object-identity preservation, only value-identity —
+  verified explicitly), journal-write failure isolation, and backward
+  compatibility (pre-Step-6 `CEODecision` construction and journal
+  records without this key remain valid, nothing is backfilled on
+  read).
+
+### Not changed
+No new architecture — no second recommendation engine, journal,
+EventBus, database, scheduler, or API namespace.
+`recommendation_scoring.py`, `recommendation_advisor.py`,
+`recommendation_context.py`, and `recommendation_service.py` are
+untouched; the scoring formula, its weights,
+`RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT`, CEO decision authority,
+`decide()`, `decide_from_context()`, and every existing safety
+invariant are unmodified — verified via the full pre-existing suite
+passing unchanged (2284 → 2298 in `tests/`, exactly +14; 565 → 565 in
+`world/tests/`, zero pre-existing test modified).
+
 ## [Unreleased] — Track C3 Phase 2: Ghost Detection, Timeline Cross-Check & Reconciliation Metrics (Track A)
 
 Fresh-clone gap audit against `main` at `830d10d` (post W13-CI-1) found

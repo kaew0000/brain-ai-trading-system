@@ -909,7 +909,15 @@ async def ceo_decisions(
     writes via save_agent_decision() when CEO_MULTI_SYMBOL_ENABLED=true
     (see that module's Part E). "details" carries reasons/
     agreement_score/direction; "score" is confidence; "decision" is the
-    action (LONG/SHORT/WAIT/BLOCKED).
+    action (LONG/SHORT/WAIT/BLOCKED). V16 Phase 4C Step 6:
+    "details.recommendation_explanations" additionally carries one
+    entry per recommendation the live decision considered (applied or
+    skipped, always with a reason) whenever
+    RECOMMENDATION_APPLICATION_ENABLED=true and recommendations were
+    supplied — empty list otherwise, including every decision from
+    before this phase. This endpoint itself is unmodified other than
+    this docstring; the data was already reachable here once the
+    journal write carried it.
 
     Returns an honest empty list — not an error — when CEO_MULTI_SYMBOL_
     ENABLED=false (nothing was ever journaled) or the scheduler simply
