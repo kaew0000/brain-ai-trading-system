@@ -36,7 +36,7 @@ import pandas as pd
 from binance.um_futures import UMFutures
 from binance.error import ClientError
 
-from config.settings import settings
+from config.settings import settings, EXECUTION_MODE
 from utils.logger import get_logger
 from utils.retry import retry_api_call
 from data.validation import validate_ohlcv, clean_ohlcv
@@ -76,6 +76,40 @@ class BinanceDataProvider:
     """
 
     def __init__(self) -> None:
+        # ── BUG-LIVE-RISK-06: EXECUTION_MODE / BINANCE_TESTNET invariant ──
+        # Read-only audit Critical Finding A: EXECUTION_MODE only selects
+        # which execution engine class is built (execution_factory.py);
+        # settings.BINANCE_TESTNET independently decides which network
+        # THIS client actually talks to. Nothing previously required the
+        # two to agree, so EXECUTION_MODE=testnet + BINANCE_TESTNET=false
+        # could reach Binance MAINNET with real money, and
+        # EXECUTION_MODE=live + BINANCE_TESTNET=true could silently run on
+        # Testnet while the operator believed they were live. Enforced only
+        # for testnet/live — paper mode never uses this provider's
+        # trade_client for a real order (PaperExecutionEngine is fully
+        # separate), so BINANCE_TESTNET is irrelevant to paper and is left
+        # unconstrained, matching pre-existing paper-mode behavior exactly.
+        # Deliberately placed here (not scattered across main.py /
+        # execution_factory.py) because this __init__ is the single point
+        # that actually constructs the network-bound trade_client — same
+        # convention as the mainnet-credentials guard a few lines below.
+        _mode = EXECUTION_MODE.strip().lower()
+        if _mode in ("testnet", "live"):
+            _expected_testnet = _mode == "testnet"
+            _actual_testnet = bool(settings.BINANCE_TESTNET)
+            if _actual_testnet != _expected_testnet:
+                raise RuntimeError(
+                    f"Refusing to start: EXECUTION_MODE={_mode!r} requires "
+                    f"BINANCE_TESTNET={_expected_testnet}, but BINANCE_TESTNET="
+                    f"{_actual_testnet} in the current configuration. "
+                    f"EXECUTION_MODE=testnet must run with BINANCE_TESTNET=true "
+                    f"(so real orders go to Binance Testnet), and "
+                    f"EXECUTION_MODE=live must run with BINANCE_TESTNET=false "
+                    f"(so real orders go to Binance Mainnet). A mismatch here "
+                    f"means orders could go to the wrong network. Fix .env and "
+                    f"restart — no API keys are included in this message."
+                )
+
         # ── Market data: ดึงจาก Mainnet เสมอ ──────────────────────────
         self.market_client = UMFutures(
             key=settings.BINANCE_API_KEY,

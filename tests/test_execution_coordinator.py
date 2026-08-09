@@ -31,6 +31,7 @@ def _make_mock_provider():
                 "filters": [
                     {"filterType": "LOT_SIZE",     "stepSize": "0.001", "minQty": "0.001", "maxQty": "100.0"},
                     {"filterType": "PRICE_FILTER",  "tickSize": "0.10"},
+                    {"filterType": "MIN_NOTIONAL",  "notional": "5.0"},
                 ],
             },
             {
@@ -38,6 +39,7 @@ def _make_mock_provider():
                 "filters": [
                     {"filterType": "LOT_SIZE",     "stepSize": "0.01", "minQty": "0.01", "maxQty": "1000.0"},
                     {"filterType": "PRICE_FILTER",  "tickSize": "0.01"},
+                    {"filterType": "MIN_NOTIONAL",  "notional": "5.0"},
                 ],
             },
         ]
