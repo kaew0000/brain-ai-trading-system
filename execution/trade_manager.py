@@ -132,16 +132,70 @@ class TradeManager:
                 return f
         return {"tickSize": "0.10"}
 
-    def _round_qty(self, qty: float) -> float:
-        """Round down to valid lot stepSize."""
+    def _floor_to_step(self, qty: float) -> tuple[float, float, int]:
+        """Floor qty down to a valid lot stepSize — NO minQty clamping.
+
+        Returns (floored_qty, min_qty, precision) so the caller can decide
+        whether the floored value is actually usable. This is the safety
+        primitive: flooring only ever reduces qty, so a value produced here
+        can never exceed a caller's risk/margin cap on `qty`. Clamping a
+        too-small value UP to min_qty (see _round_qty below) is a policy
+        decision that only calculate_position_size is allowed to make, and
+        only in the "reject the trade" direction — see BUG-LIVE-RISK-04.
+        """
         lot   = self._lot_size()
         step  = float(lot.get("stepSize", "0.001"))
         min_q = float(lot.get("minQty",   "0.001"))
         if step == 0:
             step = 0.001
-        prec  = max(0, int(round(-math.log10(step))))
-        qty   = math.floor(qty / step) * step
-        return max(round(qty, prec), min_q)
+        prec    = max(0, int(round(-math.log10(step))))
+        floored = math.floor(qty / step) * step
+        return round(floored, prec), min_q, prec
+
+    def _round_qty(self, qty: float) -> float:
+        """Round down to valid lot stepSize, clamped up to exchange minQty.
+
+        NOTE (BUG-LIVE-RISK-04): this clamp-up exists ONLY to format a
+        quantity that has ALREADY been accepted by calculate_position_size's
+        own minQty/min-notional gate (e.g. re-deriving the SL/TP order's
+        quantity string from the same, already-approved entry qty) — it
+        protects against a trivial float/step rounding edge case on a
+        number that is already known-safe, not to invent size. This method
+        must NEVER be used as the position-sizing decision itself: sizing
+        a too-small risk-based quantity UP to minQty silently inflates the
+        account's real risk/margin usage past its configured policy, which
+        is exactly what audit Critical Finding B/C flagged for low-capital
+        accounts. calculate_position_size() below uses _floor_to_step()
+        directly and returns 0.0 (skip trade) instead of clamping.
+        """
+        floored, min_q, _ = self._floor_to_step(qty)
+        return max(floored, min_q)
+
+    def _min_notional(self) -> float | None:
+        """MIN_NOTIONAL / NOTIONAL filter's minimum order notional (USDT).
+
+        Binance USDS-M Futures' /fapi/v1/exchangeInfo returns this as
+        filterType="MIN_NOTIONAL" with the threshold in a field literally
+        named "notional" (NOT "minNotional" — that key is the Spot-API
+        filter shape). Newer symbols may instead carry a combined
+        filterType="NOTIONAL" filter using "minNotional". Both are
+        supported defensively. Returns None if neither filter is present
+        or the value can't be parsed as a float — callers must fail closed
+        (skip the trade) rather than guess a value, per audit requirement.
+        """
+        for f in self._symbol_info().get("filters", []):
+            ftype = f.get("filterType")
+            if ftype == "MIN_NOTIONAL":
+                raw = f.get("notional", f.get("minNotional"))
+            elif ftype == "NOTIONAL":
+                raw = f.get("minNotional")
+            else:
+                continue
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return None
+        return None
 
     def _round_price(self, price: float) -> str:
         """Round price to valid tick size and return as string."""
@@ -255,9 +309,55 @@ class TradeManager:
             )
             raw = max_by_margin
 
-        qty = self._round_qty(raw)
+        # ── BUG-LIVE-RISK-04 fix: floor to the exchange step, then SKIP the
+        # trade (return 0.0) rather than clamping up to minQty when the
+        # risk/margin-derived quantity floors to zero or below the exchange
+        # minimum. Clamping up here would silently let the account risk and
+        # margin-usage exceed the policy this same function just computed —
+        # exactly the failure mode the read-only audit's Critical Finding
+        # B/C identified for low-capital ($20-class) accounts. Risk policy
+        # has priority over the exchange's minimum tradable size: if the
+        # account is too small to trade this setup within RISK_PER_TRADE_MAX
+        # / MAX_MARGIN_USAGE, the correct outcome is no trade, not a bigger
+        # trade. execute_trade()'s existing `if qty <= 0: raise ValueError`
+        # already treats 0.0 as "cannot size" — this reuses that convention
+        # rather than adding a new one.
+        qty, min_qty, _ = self._floor_to_step(raw)
+        if qty <= 0 or qty < min_qty:
+            logger.warning(
+                f"PositionSize SKIPPED — risk/margin-capped qty rounds below "
+                f"exchange minQty: raw={raw:.8f} BTC floored={qty:.8f} BTC "
+                f"min_qty={min_qty} BTC. Refusing to size up past the account's "
+                f"risk/margin policy (risk={risk_amount:.2f}U sl_dist={sl_dist:.2f} "
+                f"entry={entry_price:.2f}). Trade skipped for safety."
+            )
+            return 0.0
+
+        # ── BUG-LIVE-RISK-05 fix: proactive MIN_NOTIONAL check. Previously
+        # the system relied entirely on Binance rejecting an under-notional
+        # order at submission time — no local check existed. Fails closed
+        # (skips the trade) if the exchange's MIN_NOTIONAL/NOTIONAL filter
+        # can't be read/parsed, rather than assuming the order is fine.
+        min_notional = self._min_notional()
+        notional     = qty * entry_price
+        if min_notional is None:
+            logger.warning(
+                f"PositionSize SKIPPED — MIN_NOTIONAL filter missing/unparseable "
+                f"for {self.symbol}; refusing to submit an unverifiable order "
+                f"(qty={qty} entry={entry_price:.2f} notional={notional:.4f}U)."
+            )
+            return 0.0
+        if notional < min_notional:
+            logger.warning(
+                f"PositionSize SKIPPED — notional {notional:.4f}U below exchange "
+                f"minimum {min_notional:.4f}U (qty={qty} entry={entry_price:.2f}). "
+                f"Trade skipped rather than sized up."
+            )
+            return 0.0
+
         logger.info(
-            f"PositionSize={qty} BTC | "
+            f"PositionSize={qty} BTC | notional={notional:.2f}U "
+            f"(min_notional={min_notional:.2f}U) | "
             f"risk={risk_amount:.2f}U sl_dist={sl_dist:.2f} entry={entry_price:.2f}"
         )
         return qty

@@ -203,6 +203,7 @@ def _make_manager():
             "symbol": "BTCUSDT",
             "filters": [
                 {"filterType": "LOT_SIZE",     "stepSize": "0.001", "minQty": "0.001", "maxQty": "100.0"},
+                {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
                 {"filterType": "PRICE_FILTER",  "tickSize": "0.10"},
             ],
         }]
