@@ -179,9 +179,14 @@ class TradeManager:
         named "notional" (NOT "minNotional" — that key is the Spot-API
         filter shape). Newer symbols may instead carry a combined
         filterType="NOTIONAL" filter using "minNotional". Both are
-        supported defensively. Returns None if neither filter is present
-        or the value can't be parsed as a float — callers must fail closed
-        (skip the trade) rather than guess a value, per audit requirement.
+        supported defensively. Returns None if neither filter is present,
+        the value can't be parsed as a float, or it parses to something
+        that can't function as a real threshold (NaN, +/-Infinity, zero,
+        or negative — a NaN comparison is always False in Python, which
+        would silently defeat the caller's `notional < min_notional`
+        check, and a non-positive threshold is not a real minimum).
+        Callers must fail closed (skip the trade) rather than guess a
+        value, per audit requirement.
         """
         for f in self._symbol_info().get("filters", []):
             ftype = f.get("filterType")
@@ -192,9 +197,12 @@ class TradeManager:
             else:
                 continue
             try:
-                return float(raw)
+                value = float(raw)
             except (TypeError, ValueError):
                 return None
+            if not math.isfinite(value) or value <= 0:
+                return None
+            return value
         return None
 
     def _round_price(self, price: float) -> str:
