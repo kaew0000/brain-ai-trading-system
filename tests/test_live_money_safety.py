@@ -298,6 +298,73 @@ class TestMinNotionalPreflight:
         assert m._min_notional() == pytest.approx(5.0)
 
 
+class TestMinNotionalNonFiniteGuard:
+    """Follow-up hardening: float("nan") / float("inf") / float("-inf")
+    all parse successfully in Python (no exception), so the original
+    `except (TypeError, ValueError)` guard alone did not catch them. A
+    NaN threshold is the dangerous case — `notional < nan` is always
+    False, so the preflight would have silently PASSED every order
+    instead of rejecting an unverifiable one. Zero/negative thresholds
+    aren't real minimums either. Field semantics (Futures "notional" as
+    primary key, "minNotional" fallback) are unchanged — only which
+    parsed values count as usable is hardened."""
+
+    @pytest.mark.parametrize("bad_value", ["nan", "inf", "-inf", "0", "-1", "not-a-number"])
+    def test_invalid_numeric_notional_rejected(self, bad_value):
+        m, _ = _make_manager(filters=[
+            {"filterType": "LOT_SIZE",     "stepSize": "0.001", "minQty": "0.001", "maxQty": "100.0"},
+            {"filterType": "MIN_NOTIONAL", "notional": bad_value},
+        ])
+        assert m._min_notional() is None
+        qty = m.calculate_position_size(
+            balance=5_000.0, entry_price=50_000.0, stop_loss=45_000.0, risk_pct=0.01,
+        )
+        assert qty == 0.0
+
+    def test_missing_notional_key_on_present_filter_rejected(self):
+        """filterType is present but neither "notional" nor "minNotional"
+        is set on it at all — distinct from the filter being absent."""
+        m, _ = _make_manager(filters=[
+            {"filterType": "LOT_SIZE",     "stepSize": "0.001", "minQty": "0.001", "maxQty": "100.0"},
+            {"filterType": "MIN_NOTIONAL"},
+        ])
+        assert m._min_notional() is None
+        qty = m.calculate_position_size(
+            balance=5_000.0, entry_price=50_000.0, stop_loss=45_000.0, risk_pct=0.01,
+        )
+        assert qty == 0.0
+
+    def test_valid_positive_finite_futures_shape_still_works(self):
+        """The hardening must not reject legitimate values — standard
+        Futures shape with a small, valid, positive threshold."""
+        m, _ = _make_manager(filters=[
+            {"filterType": "LOT_SIZE",     "stepSize": "0.001", "minQty": "0.001", "maxQty": "100.0"},
+            {"filterType": "MIN_NOTIONAL", "notional": "5"},
+        ])
+        assert m._min_notional() == pytest.approx(5.0)
+        qty = m.calculate_position_size(
+            balance=5_000.0, entry_price=50_000.0, stop_loss=45_000.0, risk_pct=0.01,
+        )
+        assert qty == pytest.approx(0.01, abs=1e-6)
+
+    def test_execute_trade_does_not_call_binance_on_nan_notional(self):
+        """End-to-end proof: a NaN threshold must not sneak an order
+        through execute_trade() — same shape as
+        TestExecuteTradeSkipsOnUnsizeableQty above, but for an invalid
+        *value* rather than an unsizeable qty."""
+        m, client = _make_manager(filters=[
+            {"filterType": "LOT_SIZE",     "stepSize": "0.001", "minQty": "0.001", "maxQty": "100.0"},
+            {"filterType": "MIN_NOTIONAL", "notional": "nan"},
+        ])
+        result = m.execute_trade(
+            direction="LONG", entry_price=50_000.0, stop_loss=45_000.0,
+            take_profit=55_000.0, balance=5_000.0, risk_pct=0.01, leverage=5,
+        )
+        assert result["success"] is False
+        assert result["quantity"] == 0.0
+        client.new_order.assert_not_called()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # BLOCKER 2 — EXECUTION_MODE × BINANCE_TESTNET invariant
 # ─────────────────────────────────────────────────────────────────────────────
