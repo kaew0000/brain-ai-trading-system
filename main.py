@@ -658,6 +658,25 @@ def run_trading_cycle(sys: dict) -> None:
         except Exception as exc:
             logger.debug(f"Commander pause check skipped: {exc}")
 
+        # ── W14-0 — Commander lifecycle gate (start bot / stop bot) ─────────────
+        # Independent of the pause flag above (see commander/control_state.py
+        # module docstring for the full pause-vs-stop hierarchy). Unless the
+        # bot has been explicitly started ("start bot"), no new trade decision
+        # is generated at all — this is the primary way STOPPED avoids running
+        # the AI/CEO decision pipeline. read fresh every cycle, never cached.
+        # Guarded defensively, same style as the pause check: a control-state
+        # read failure must never block trading.
+        try:
+            from commander.control_state import get_control_state
+            if get_control_state().lifecycle_state() != "RUNNING":
+                logger.info(
+                    "Trading cycle skipped — bot lifecycle is not RUNNING "
+                    "(use 'start bot' via Commander to begin trading)"
+                )
+                return
+        except Exception as exc:
+            logger.debug(f"Commander lifecycle check skipped: {exc}")
+
         # ── 1. Position check ─────────────────────────────────────────────────
         pos = dp.get_position_info()
         if pos:
@@ -1044,6 +1063,38 @@ def run_trading_cycle(sys: dict) -> None:
             paper_forced = bool(get_control_state().get_paper_mode_forced())
         except Exception as exc:
             logger.debug(f"Commander paper-mode check skipped: {exc}")
+
+        # ── W14-0 — Commander lifecycle gate, defense-in-depth ──────────────────
+        # The primary gate is the early-return near the top of this function
+        # (right after the pause check) — under normal control flow this
+        # execution path is unreachable when lifecycle_state != RUNNING.
+        # This second check exists so the guarantee that "no NEW order is
+        # submitted while stopped" holds at the actual order-submission call
+        # site itself, not only via the early-return, matching the same
+        # backend-enforcement standard already used for paper_forced above.
+        # Read fresh, never cached, never trusts frontend/HTTP-response state.
+        lifecycle_blocks_execution = False
+        try:
+            from commander.control_state import get_control_state
+            lifecycle_blocks_execution = get_control_state().lifecycle_state() != "RUNNING"
+        except Exception as exc:
+            logger.debug(f"Commander lifecycle execution-gate check skipped: {exc}")
+
+        if lifecycle_blocks_execution:
+            logger.warning(
+                "Execution SKIPPED — bot lifecycle is not RUNNING "
+                "(no new orders while stopped)"
+            )
+            if mission_tracker is not None and mission_id is not None:
+                try:
+                    mission_tracker.advance(
+                        mission_id, "CLOSED",
+                        note="Execution skipped — bot lifecycle is not RUNNING",
+                    )
+                    sys["current_mission_id"] = None
+                except Exception as exc:
+                    logger.debug(f"Mission tracker lifecycle-gate close skipped: {exc}")
+            return
 
         if paper_forced:
             logger.warning(

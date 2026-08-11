@@ -887,6 +887,20 @@ class TestDashboardStateStaysLiveWithOpenPosition:
 # ─────────────────────────────────────────────────────────────────────────────
 class TestAgentLayerRunsWhilePositionOpen:
 
+    @pytest.fixture(autouse=True)
+    def _w14_0_start_bot(self):
+        """W14-0: run_trading_cycle() now gates on lifecycle_state (default
+        STOPPED) independently of these tests' existing setup — this file
+        predates the W14-0 lifecycle control plane and never mentions it,
+        so this fixture restores the previously-implicit "trading is
+        enabled" precondition these tests actually rely on, without
+        touching their assertions."""
+        from commander.control_state import get_control_state, reset_control_state
+        reset_control_state()
+        get_control_state().start()
+        yield
+        reset_control_state()
+
     def _build_minimal_sys(self, monkeypatch, open_position: dict):
         """
         Build the minimal `sys` dict run_trading_cycle() needs, with a
