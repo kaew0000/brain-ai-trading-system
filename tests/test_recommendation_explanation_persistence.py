@@ -132,11 +132,19 @@ class TestLiveExplanationPersistence:
 
         gated.get_signal("BTCUSDT")
 
-        assert len(journal.saved) == 1
+        # V16 Phase 4C Step 7C: CEO_AGENT row is saved.saved[0] — this
+        # test's live chain now also persists one row per real
+        # participating sub-agent (H3/H4), appended after it. Was
+        # `== 1` pre-Step-7C (CEO_AGENT only); see
+        # tests/test_ceo_agent_vote_persistence.py's own
+        # test_agent_reports_persist_to_journal_details for the same
+        # pattern.
+        assert len(journal.saved) >= 1
         details = journal.saved[0]["details"]
         assert "recommendation_explanations" in details
         assert isinstance(details["recommendation_explanations"], list)
         assert len(details["recommendation_explanations"]) >= 1
+        assert len(journal.saved) == 1 + len(details["agent_reports"])
 
     def test_persisted_representation_is_plain_json_serializable(self):
         """Proves it's an actually-inspectable representation, not just

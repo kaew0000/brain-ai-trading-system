@@ -78,6 +78,7 @@ convention.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Optional
 
 from agents.multi_symbol_adapter import MultiSymbolCEOAdapter
@@ -227,10 +228,21 @@ class CEOGatedSignalProvider:
             return None
 
         final_signal = map_ceo_decision_to_signal(ceo_decision, underlying_signal)
-        self._journal_ceo_decision(symbol, ceo_decision)
+        # V16 Phase 4C Step 7C: _journal_ceo_decision() now returns the
+        # ONE shared signal_id it created for this CEO decision cycle
+        # (or None — no journal, no decision, or the write failed).
+        # Thread it onto the outgoing ExecutionSignal so
+        # execution_orchestrator.py's _record_trade_opened() reuses it
+        # instead of minting an unrelated one — only when there IS a
+        # final_signal (a vetoed/WAIT/BLOCKED cycle still gets journaled
+        # above for audit purposes, but there's nothing to attach the id
+        # to). ExecutionSignal is frozen -> replace(), not mutation.
+        signal_id = self._journal_ceo_decision(symbol, ceo_decision)
+        if final_signal is not None and signal_id is not None:
+            final_signal = replace(final_signal, signal_id=signal_id)
         return final_signal
 
-    def _journal_ceo_decision(self, symbol: str, ceo_decision) -> None:
+    def _journal_ceo_decision(self, symbol: str, ceo_decision) -> int | None:
         """Part E — best-effort, non-fatal. Stores nothing if there's no
         journal, or no decision was produced this cycle.
 
@@ -260,24 +272,74 @@ class CEOGatedSignalProvider:
         never runs CEOAgent at all) and `ceo_decision.weights_used`
         (the per-agent weighting actually applied this cycle).
 
-        Scope note (read before extending this further): this makes
+        Scope note (read before Step 7C, kept for history): this made
         per-agent VOTES inspectable per DECISION cycle via
         `/api/ceo-decisions`, same as Step 6 did for recommendations.
-        It does NOT yet make journal_v2.get_trade_attribution()'s
+        It did NOT yet make journal_v2.get_trade_attribution()'s
         `agent_participation` populate for these trades — that join is
         `trades.signal_id == agent_decisions.signal_id`
-        (journal_v2.py's own comment, line ~292), and this method has
-        never recorded a `signal_id` (every save_agent_decision() call
-        here, before and after this phase, omits it — defaults to
-        None). Threading a shared signal_id from this signal-layer
-        class through to execution/execution_orchestrator.py's
-        save_trade(rec, signal_id=sig_id) call (a separate write, at
-        trade-open time, in a different layer) is a larger, separate
-        piece of work this phase's own audit found and explicitly
-        did NOT attempt, to stay within a minimal, single-layer,
-        additive patch — see PATCH_NOTES.md."""
+        (journal_v2.py's own comment, line ~292), and this method never
+        recorded a `signal_id` (every save_agent_decision() call here,
+        before this phase, omitted it — defaulted to None).
+
+        V16 Phase 4C Step 7C closes exactly that gap, additively:
+        1. One shared signal_id is created for this whole CEO decision
+           cycle via journal.save_signal() (a lightweight `signals` row
+           — the same table/method execution_orchestrator.py's
+           _record_trade_opened() already writes to for the plain,
+           non-CEO path). Best-effort: if this fails (including journal
+           fakes/doubles that don't implement save_signal at all — see
+           this file's own test suite), we log and continue with
+           signal_id=None, which reduces to the exact pre-Step-7C
+           behavior below (every row gets signal_id=None, nothing new
+           breaks).
+        2. That id is passed into the EXISTING CEO_AGENT
+           save_agent_decision() call (previously always omitted it).
+        3. NEW: every entry in ceo_decision.agent_reports (already
+           computed by CEOAgent.decide() — see Step 7's own comment
+           below; nothing recalculated here) gets its OWN
+           save_agent_decision() row, sharing the SAME signal_id — H3/H4:
+           each sub-agent stays independently inspectable, never
+           collapsed into one JSON blob. `decision`/`score` come from
+           that agent's own AgentReport.to_dict() shape (signal/
+           confidence — see agents/base_agent.py::AgentReport); `weight`
+           comes from ceo_decision.weights_used for that same agent key
+           (CEOAgent.WEIGHTS' keys — smc/futures/regime/risk/journal/
+           confidence_engine — already line up 1:1 with agent_reports'
+           keys, both built from the same `reports` dict in
+           agents/ceo_agent.py's decide()). A journal write failure for
+           one agent is logged and skipped — it must never stop the
+           remaining agents or the decision cycle (same non-fatal
+           convention as every other journal write in this method).
+        4. This method now returns the shared signal_id (or None) so
+           get_signal()/_get_signal_ceo_enabled() can thread it onto the
+           outgoing ExecutionSignal — see that method's own comment, and
+           execution_orchestrator.py's _record_trade_opened(), which
+           reuses it instead of minting a second, unrelated one at
+           trade-open time. That's what makes
+           trade.signal_id == agent_decision.signal_id hold end to end.
+
+        Still additive, still single-layer in the sense that no schema
+        changed and no existing call site's required arguments changed
+        — only new, optional data now flows through columns/kwargs that
+        already existed for exactly this purpose."""
         if self.journal is None or ceo_decision is None:
-            return
+            return None
+
+        signal_id: int | None = None
+        try:
+            signal_id = self.journal.save_signal(
+                {
+                    "timestamp":  ceo_decision.timestamp,
+                    "action":     ceo_decision.action,
+                    "direction":  ceo_decision.direction,
+                    "confidence": ceo_decision.confidence,
+                },
+                symbol=symbol,
+            )
+        except Exception as exc:
+            logger.error(f"CEOGatedSignalProvider: signal journal write failed for {symbol} (non-fatal): {exc}")
+
         try:
             self.journal.save_agent_decision(
                 agent="CEO_AGENT",  # matches agents.ceo_agent.CEOAgent.AGENT_NAME
@@ -300,9 +362,36 @@ class CEOGatedSignalProvider:
                     "agent_reports": ceo_decision.agent_reports,
                     "weights_used": ceo_decision.weights_used,
                 },
+                signal_id=signal_id,
             )
         except Exception as exc:
             logger.error(f"CEOGatedSignalProvider: journal write failed for {symbol} (non-fatal): {exc}")
+
+        # V16 Phase 4C Step 7C — H3/H4: one independently-inspectable
+        # row per participating sub-agent, sharing signal_id with the
+        # CEO_AGENT row above. Empty agent_reports (e.g. CEOAgent
+        # constructed with agents={}) simply iterates zero times —
+        # matches this file's own pre-existing
+        # test_empty_agents_ceoagent_produces_no_error convention.
+        weights_used = ceo_decision.weights_used or {}
+        for agent_name, report in (ceo_decision.agent_reports or {}).items():
+            try:
+                self.journal.save_agent_decision(
+                    agent=agent_name,
+                    decision=report.get("signal", ""),
+                    symbol=symbol,
+                    score=report.get("confidence", 0.0),
+                    weight=weights_used.get(agent_name, 0.0),
+                    details=report,
+                    signal_id=signal_id,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"CEOGatedSignalProvider: per-agent journal write failed for "
+                    f"agent={agent_name} {symbol} (non-fatal): {exc}"
+                )
+
+        return signal_id
 
     def __call__(self, symbol: str) -> Optional[ExecutionSignal]:
         return self.get_signal(symbol)

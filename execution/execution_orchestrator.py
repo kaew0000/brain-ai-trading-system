@@ -152,6 +152,15 @@ class ExecutionSignal:
     entry_price:  float
     stop_loss:    float
     take_profit:  float
+    # V16 Phase 4C Step 7C: optional shared signal_id carried from a
+    # signal-layer provider (e.g. execution/ceo_gated_signal_provider.py)
+    # that already journaled a CEO decision cycle's signal row. Default
+    # None preserves every pre-existing positional/keyword construction
+    # site unchanged (execution/portfolio_signal_provider.py,
+    # execution/strategy_registry.py, every test file's ExecutionSignal(...)
+    # literal) — see _record_trade_opened() below for how this is
+    # consumed at trade-open time.
+    signal_id:   int | None = None
 
 
 SignalProvider = Callable[[str], ExecutionSignal | None]
@@ -483,6 +492,20 @@ class ExecutionOrchestrator:
         get_trade_attribution() honestly returns an empty
         agent_participation list for these trades rather than this
         method fabricating one.
+
+        V16 Phase 4C Step 7C: when `signal` already carries a signal_id
+        (e.g. execution/ceo_gated_signal_provider.py already journaled a
+        CEO decision cycle — CEO_AGENT row + every participating
+        sub-agent row — and threaded that same id onto the
+        ExecutionSignal it returned), this trade is saved under THAT id
+        instead of minting a second, unrelated one. This is what makes
+        `trades.signal_id == agent_decisions.signal_id` hold end to end
+        (journal_v2.get_trade_attribution()'s join). When `signal`
+        carries no id (every pre-Step-7C caller — the plain
+        portfolio_signal_provider.py path above, strategy_registry.py,
+        every existing test's ExecutionSignal(...) literal), behavior is
+        byte-identical to before: a fresh signal row is minted here,
+        exactly as it always was.
         """
         if self.journal is None:
             return None
@@ -494,18 +517,23 @@ class ExecutionOrchestrator:
             direction_str = "LONG" if signal.direction == 1 else "SHORT"
             now_iso = datetime.now(timezone.utc).isoformat()
 
-            sig_id = self.journal.save_signal(
-                {
-                    "timestamp":   now_iso,
-                    "action":      direction_str,
-                    "direction":   direction_str,
-                    "confidence":  0.0,
-                    "entry_price": signal.entry_price,
-                    "stop_loss":   signal.stop_loss,
-                    "take_profit": signal.take_profit,
-                },
-                symbol=alloc.symbol,
-            )
+            if signal.signal_id is not None:
+                # Reuse the CEO-cycle (or other upstream) signal_id —
+                # never mint a second, unrelated one for the same trade.
+                sig_id = signal.signal_id
+            else:
+                sig_id = self.journal.save_signal(
+                    {
+                        "timestamp":   now_iso,
+                        "action":      direction_str,
+                        "direction":   direction_str,
+                        "confidence":  0.0,
+                        "entry_price": signal.entry_price,
+                        "stop_loss":   signal.stop_loss,
+                        "take_profit": signal.take_profit,
+                    },
+                    symbol=alloc.symbol,
+                )
 
             entry_order = result.get("entry_order") or {}
             order_id = str(entry_order.get("orderId", "")) if isinstance(entry_order, dict) else ""
