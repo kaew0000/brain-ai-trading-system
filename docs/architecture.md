@@ -3360,3 +3360,126 @@ for `ReconciliationEngine`, none existed before this phase),
 pre-existing unchanged). Full suite: `pytest -q` → 2049 passed, 0
 failed. `ruff check .` clean. Verified in a second, independent fresh
 clone before bundling.
+
+## 35. CEO → Agent → Trade Attribution Signal-ID Bridge — V16 Phase 4C Step 7C (2026-08-10)
+
+### Documentation gap, noted honestly
+
+Phase 4C Steps 3–7 (Recommendation Application Layer, Live Scheduler
+Wiring, Dataset Context Wiring, Live Recommendation Explanation
+Persistence, CEO-gated per-agent vote persistence — PRs #39/#40/#41/
+#46/#48, all real and merged, confirmed via `git log --oneline` /
+`git merge-base --is-ancestor` against `origin/main` before this phase
+began) were never given entries in this file. That gap predates this
+phase and is out of this phase's scope to backfill — flagged here so
+it isn't mistaken for an oversight of this entry rather than a
+pre-existing one. `PATCH_NOTES.md`/`MIGRATION.md` show the same drift
+(last full rewrite was Step 3; Steps 4–7 didn't update them either).
+
+### Why this phase exists
+
+§27's own per-agent journal write and Step 7's (PR #48)
+`_journal_ceo_decision()` both wrote `agent_decisions` rows without
+ever setting `signal_id` — every row defaulted to `NULL`. Step 7's own
+docstring already named the gap this closes: `journal_v2.py`'s
+`get_trade_attribution()` joins `agent_decisions` to a trade via
+`trades.signal_id == agent_decisions.signal_id`; with `signal_id`
+never populated on either side for the CEO-gated path, that join
+always returned an (honestly) empty `agent_participation` list. No
+schema change needed — both columns already existed
+(`journal/journal_v2.py::save_agent_decision()` already accepted
+`signal_id: int | None = None`; `database/schema_v13.sql`'s `trades`
+and `agent_decisions` tables already had the column) — Step 7C's job
+was purely to make callers actually thread one shared value through.
+
+### Prerequisite verification (before any code was written)
+
+A task brief for this phase initially claimed the Step 7C
+implementation already existed from a prior session — a specific
+`ExecutionSignal.signal_id` field, a `_record_trade_opened()` reuse
+path, a 16-test regression file, all "16/16 passing." Independent
+verification against a fresh `origin/main` clone found **none of it**:
+`ExecutionSignal` had no such field, the trade-open path unconditionally
+minted a fresh signal every time, the named test file didn't exist
+anywhere (no branch, local or remote, referenced it either). Decisively:
+Step 7's own docstring (real, merged, on `main`) already documented
+this exact scope as explicitly deferred — "a larger, separate piece of
+work this phase's own audit found and explicitly did NOT attempt." The
+brief's claim was fabricated; the gap it described was real. Reported
+before any implementation began; confirmed to proceed with an
+actual, from-scratch implementation.
+
+### What changed
+
+**`execution/execution_orchestrator.py`** — `ExecutionSignal` (frozen
+dataclass) gains `signal_id: int | None = None`. `_record_trade_opened()`
+reuses `signal.signal_id` when the incoming signal already carries one
+(the CEO-gated path, after this phase); otherwise mints a fresh one via
+`journal.save_signal()`, byte-identical to every pre-existing caller
+(`execution/portfolio_signal_provider.py`, `execution/strategy_registry.py`,
+every prior test's `ExecutionSignal(...)` construction — all keyword-
+or 4-positional-argument, none collide with the new trailing default).
+
+**`execution/ceo_gated_signal_provider.py`** — `_journal_ceo_decision()`:
+1. Creates exactly one `signal_id` per CEO decision cycle via
+   `journal.save_signal()` (best-effort — a missing/failing `save_signal`,
+   including test doubles that don't implement it, degrades to
+   `signal_id=None`, reducing to pre-Step-7C behavior rather than
+   raising).
+2. Passes it into the existing `CEO_AGENT` `save_agent_decision()` call.
+3. **New**: writes one additional `save_agent_decision()` row per real
+   entry in `ceo_decision.agent_reports` (already computed by
+   `CEOAgent.decide()` — nothing recalculated here), each sharing the
+   same `signal_id`, each independently queryable (`agent`/`decision`/
+   `score`/`weight`/`details` all specific to that one agent, never
+   collapsed into the CEO row's blob). One agent's write failure is
+   logged and skipped without blocking the rest.
+4. Returns the shared `signal_id`. `_get_signal_ceo_enabled()` threads
+   it onto the outgoing `ExecutionSignal` via `dataclasses.replace()`
+   (frozen dataclass) — only when a trade was actually confirmed; a
+   vetoed/WAIT/BLOCKED cycle still gets the full journal write (audit
+   trail intact) but has no `ExecutionSignal` to attach the id to.
+
+### Existing tests updated (2 assertions, not weakened)
+
+`tests/test_ceo_agent_vote_persistence.py::test_agent_reports_persist_to_journal_details`
+and `tests/test_recommendation_explanation_persistence.py::test_live_decision_persists_explanations_to_journal`
+both asserted `len(journal.saved) == 1` (the CEO_AGENT row only). Both
+now correctly assert `1 + len(agent_reports)`, since per-agent rows are
+new, additive writes their own real fixtures (real `CEOAgentSymbolCache`
+→ real 6-agent layer) already exercised but previously discarded.
+
+### Testing
+
+New: `tests/test_ceo_multi_symbol_agent_attribution.py`, 17 tests
+covering H1–H9 (one shared signal_id per cycle; CEO row and every
+sub-agent row carrying it; per-agent rows staying independently
+queryable; `ExecutionSignal` carrying the id; trade-open reusing —
+never duplicating — it; the raw `trades.signal_id == agent_decisions.signal_id`
+join; the real `get_trade_attribution()` reader surfacing it;
+multi-symbol isolation; backward compatibility; failure isolation).
+H1–H4 run the real live `MultiSymbolCEODispatcher` chain (same fixture
+`tests/test_ceo_agent_vote_persistence.py` already uses); H5–H9 hold
+the CEO-decision layer fixed via a duck-typed `ControlledAdapter` (same
+idiom `tests/test_ceo_gated_signal_provider.py::FakeAdapter` already
+established) because this suite's own audit found the live
+`ConfidenceEngine` pipeline reliably returns WAIT against the shared
+synthetic OHLCV fixture regardless of trend direction — real
+`TradeJournalV2` (tmp_path-backed SQLite) and real
+`ExecutionOrchestrator.execute()` remain in the loop throughout.
+
+Full `pytest tests/ -q` → 2365 passed (2348 baseline + 17 new), 0
+failed. `pytest world/tests/ -q -m ""` → 565 passed, unchanged.
+`ruff check .` clean. `vulture . --min-confidence 80` clean.
+`python -c "import main"` clean. Verified against a fresh `origin/main`
+baseline before this phase's changes, and re-verified after.
+
+### Known follow-up work (explicitly out of scope for this phase)
+
+- Steps 3–7's own missing `docs/architecture.md` entries (see
+  "Documentation gap" above) — a separate cleanup pass.
+- `CHANGELOG.md`/`docs/CHANGELOG.md` staleness — pre-existing,
+  unrelated to this phase.
+- The dashboard `/portfolio` mock-data issue (`MockPortfolioProvider`
+  wired in place of the real `/api/portfolio/*` endpoints — see this
+  file's own investigation notes elsewhere) is unrelated and untouched.

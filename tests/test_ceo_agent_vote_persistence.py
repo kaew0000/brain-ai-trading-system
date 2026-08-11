@@ -99,11 +99,19 @@ class TestLiveVotePersistence:
 
         gated.get_signal("BTCUSDT")
 
-        assert len(journal.saved) == 1
+        # V16 Phase 4C Step 7C: CEO_AGENT row is always saved.saved[0] —
+        # per-agent rows are appended after it (see
+        # _journal_ceo_decision()), one per real sub-agent that voted.
+        # Pre-Step-7C this asserted `== 1` (CEO_AGENT only, agent votes
+        # were computed but discarded); now that they're persisted as
+        # their own independently-inspectable rows (H3/H4), the count is
+        # 1 + however many agents actually voted this cycle.
+        assert len(journal.saved) >= 1
         details = journal.saved[0]["details"]
         assert "agent_reports" in details
         assert isinstance(details["agent_reports"], dict)
         assert len(details["agent_reports"]) > 0
+        assert len(journal.saved) == 1 + len(details["agent_reports"])
 
     def test_weights_used_persist_to_journal_details(self):
         journal = FakeJournal()

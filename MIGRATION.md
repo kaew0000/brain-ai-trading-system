@@ -1,72 +1,60 @@
-# MIGRATION — V16 Phase 4C Step 3: Recommendation Application Layer (Track A)
+# MIGRATION — V16 Phase 4C Step 7C: CEO → Agent → Trade Attribution Signal-ID Bridge (Track A)
 
 ## Do you need to do anything?
 
-**No.** Everything in this phase is additive and off by default. If you
-do nothing, the system behaves exactly as it did before this phase:
+**No.** Everything in this phase is additive and reuses existing,
+already-optional columns. If you do nothing, the system behaves
+exactly as it did before this phase, with one improvement:
 
-- `RECOMMENDATION_APPLICATION_ENABLED` defaults to `False` —
-  `CEOAgent.decide()` is untouched, and the new
-  `decide_with_recommendations()` method is a complete no-op even if
-  something calls it (returns `decide()`'s result unchanged).
-- Nothing pre-existing calls `decide_with_recommendations()` — every
-  existing caller of `decide()` / `decide_from_context()` is
+- `ExecutionSignal.signal_id` defaults to `None` — every existing
+  caller that constructs `ExecutionSignal(...)` without it is
   unaffected.
-- `GET /api/recommendations` and `GET /api/recommendations/metrics` are
-  new endpoints, not replacements — nothing existing changes shape.
-- `Recommendation`'s six new fields are all defaulted — any code
-  holding a `Recommendation` and reading only `.text`/`.category`/
-  `.confidence`/`.based_on` (i.e. everything that existed before this
-  phase) works exactly as before.
+- `ExecutionOrchestrator._record_trade_opened()` only changes behavior
+  when the incoming signal already carries a `signal_id` (i.e. it came
+  through the CEO-gated path, after this phase). Every other caller —
+  the plain `PortfolioSignalProvider` path, `execution/strategy_registry.py`
+  — mints a fresh signal row exactly as before.
+- `CEOGatedSignalProvider._journal_ceo_decision()`'s new per-agent
+  journal rows are pure additions — nothing that previously read
+  `journal.get_agent_decisions()` filtered by `agent="CEO_AGENT"` (the
+  only row that previously existed) breaks; it now also sees N more
+  rows it can choose to read or ignore.
+- `journal_v2.get_trade_attribution()` is unchanged code — it already
+  had this join built in (Phase 4B Step 2, §29). This phase is what
+  starts actually populating both sides of that join for CEO-gated
+  trades; the method itself required no change.
 
-## If you want to turn this on
+## What this enables
 
-1. Set `RECOMMENDATION_APPLICATION_ENABLED=true` in `.env`.
-2. Wire a source of `Recommendation` objects into the live decision
-   loop — **this phase does not do this wiring**. You'll need to:
-   - Load (or regenerate) a `LearningSnapshot`'s `.recommendations`
-     (e.g. via `learning/learning_report.py`'s existing
-     `LearningReportGenerator`, or by reading a saved
-     `learning_report.json`/`recommendation_report.json` and
-     reconstructing `Recommendation(**row)` per entry).
-   - Call `ceo.decide_with_recommendations(market_context,
-     confidence_result, recommendations=your_list,
-     dataset_row_count=your_dataset.row_count)` instead of
-     `ceo.decide(...)` at your call site.
-   - Optionally populate `_state["learning_recommendations"]` in
-     `api/app.py`'s startup/refresh path so
-     `GET /api/recommendations` reflects live data instead of an empty
-     list.
-3. Tune the new settings if the defaults don't fit your risk
-   tolerance:
-   - `RECOMMENDATION_TTL_HOURS` (default 24) — how long a
-     recommendation stays eligible before `validator_status` becomes
-     `"expired"`.
-   - `RECOMMENDATION_MIN_SAMPLE_SIZE` (default 5) — floor before a
-     recommendation is trusted at all.
-   - `RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT` (default 5.0
-     percentage points) — hard ceiling on how much any combination of
-     recommendations can move `CEODecision.confidence`.
-   - `RECOMMENDATION_MAX_APPLIED_PER_DECISION` (default 5) — caps how
-     many recommendations contribute to one decision's adjustment.
-   - The six `RECOMMENDATION_SCORE_WEIGHT_*` settings — must continue
-     to sum to 1.0 if you change them (enforced by this phase's own
-     `test_recommendation_scoring.py::TestWeightsConfig`, not by a
-     runtime check — a bad edit won't crash, but scores will fall
-     outside [0,1]).
+Once a CEO-gated trade is opened, `GET` its trade attribution (via
+whatever endpoint already calls `journal_v2.get_trade_attribution(trade_id)`)
+now returns a real, non-empty `agent_participation` list: one entry per
+agent that voted that cycle (including `CEO_AGENT` itself, since it is
+also a row sharing that cycle's `signal_id`), each with
+`agent`/`vote`/`weight`/`confidence`/`contribution`. Before this phase,
+that list was always empty for every CEO-gated trade, not because no
+agents voted, but because neither side of the join was ever written.
 
 ## What this can never do, even fully enabled
 
-- Change `CEODecision.action` or `.direction` — a `BLOCKED` decision is
-  always returned byte-identical; a LONG/SHORT/WAIT decision's action
-  never flips because of a recommendation.
-- Bypass Risk Manager or the Circuit Breaker — both already run before
-  `CEOAgent.decide()` returns; this layer only ever sees the result.
-- Open or close a trade — this layer has no path to
-  `execution/`/`portfolio/` at all.
+- Does not change what the CEO decides, which agents exist, or how
+  they're weighted — this is attribution/observability plumbing only.
+- Does not backfill `signal_id` on trades opened before this phase —
+  those rows keep whatever `signal_id` (real or `NULL`) they already
+  had; `get_trade_attribution()` on them behaves exactly as before
+  (empty `agent_participation` if it was empty before).
+- Does not touch the plain (non-CEO) `portfolio_signal_provider.py`
+  path's attribution — that path still has no agent layer to attribute
+  to, unchanged (documented pre-existing scope boundary, §29).
 
 ## Rollback
 
-Set `RECOMMENDATION_APPLICATION_ENABLED=false` (or leave it unset — the
-default). No data migration, no schema rollback needed — the new
-`Recommendation` fields are additive and simply go unused again.
+Revert the two production files
+(`execution/execution_orchestrator.py`,
+`execution/ceo_gated_signal_provider.py`). No schema migration, no
+data migration, no config flag to unset — every new column this phase
+writes to already existed and defaulted to `NULL` before this phase;
+reverting the code simply stops populating it going forward. Already-
+written rows with a populated `signal_id` are harmless if left in
+place (an old trade with a real join simply keeps working; nothing
+reads `signal_id` as evidence that this phase's code is active).
