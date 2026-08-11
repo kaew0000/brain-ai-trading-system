@@ -1400,11 +1400,13 @@ async def agent_memory(
 @app.get("/api/command/state")
 async def command_state():
     """
-    v14 Phase 2.5 — Current Commander control flags.
+    v14 Phase 2.5 + W14-0 — Current Commander control flags.
 
-    Returns the live {paused, paper_mode_forced, updated_at} snapshot —
-    useful for the dashboard to reflect pause/safety-override state
-    without needing to issue a command.
+    Returns the live {paused, paper_mode_forced, lifecycle_state,
+    updated_at} snapshot — useful for the dashboard to reflect
+    pause/safety-override/lifecycle state without needing to issue a
+    command. lifecycle_state is one of STOPPED/STARTING/RUNNING/
+    STOPPING/FAILED (see commander/control_state.py).
     """
     return _ok(get_control_state().snapshot())
 
@@ -1418,7 +1420,13 @@ async def command(body: dict):
 
     Supported commands (exact phrases, case-insensitive, extra words OK):
       pause trader / resume trader / paper mode on / paper mode off /
-      show positions / show pnl / show risk
+      start bot / stop bot / show positions / show pnl / show risk
+
+    "start bot" / "stop bot" (W14-0) control the real bot lifecycle
+    (STOPPED/STARTING/RUNNING/STOPPING/FAILED) — independent of
+    pause/resume. See commander/control_state.py for the full
+    pause-vs-stop hierarchy. Requires OPERATOR role, same as every
+    other mutating command on this endpoint.
 
     Returns a CommandResult: { command, matched, success, message, data, timestamp }.
     Unrecognised commands return success=false with a helpful message

@@ -87,6 +87,10 @@ class CommanderService:
                 return self._cmd_paper_mode(raw, True)
             if {"paper", "mode", "off"} <= words:
                 return self._cmd_paper_mode(raw, False)
+            if {"start", "bot"} <= words:
+                return self._cmd_start_bot(raw)
+            if {"stop", "bot"} <= words:
+                return self._cmd_stop_bot(raw)
             if "position" in text or "positions" in words:
                 return self._cmd_show_positions(raw, context)
             if "pnl" in words:
@@ -99,7 +103,7 @@ class CommanderService:
                 message=(
                     f"Unrecognized command: '{raw}'. Supported commands: "
                     "pause trader, resume trader, paper mode on, paper mode off, "
-                    "show positions, show pnl, show risk."
+                    "start bot, stop bot, show positions, show pnl, show risk."
                 ),
             )
         except Exception as exc:
@@ -143,6 +147,56 @@ class CommanderService:
             command=raw, matched="paper_mode_on" if enable else "paper_mode_off",
             success=True, message=message,
             data={"paper_mode_forced": enable},
+        )
+
+    def _cmd_start_bot(self, raw: str) -> CommandResult:
+        """W14-0 — real lifecycle START. Independent of `paused` (see
+        control_state.py module docstring for the pause-vs-stop hierarchy).
+        Always reports the ACTUAL resulting lifecycle_state, never an
+        assumed one.
+        """
+        result = get_control_state().start()
+        if not result.accepted:
+            return CommandResult(
+                command=raw, matched="start_bot", success=False,
+                message=(
+                    f"Cannot start — bot is currently {result.state}. "
+                    "Wait for it to reach STOPPED, then retry."
+                ),
+                data={"lifecycle_state": result.state},
+            )
+        if not result.changed:
+            message = f"Bot already {result.state}. No action taken."
+        else:
+            message = f"Bot starting. Lifecycle state is now {result.state}."
+        return CommandResult(
+            command=raw, matched="start_bot", success=True, message=message,
+            data={"lifecycle_state": result.state},
+        )
+
+    def _cmd_stop_bot(self, raw: str) -> CommandResult:
+        """W14-0 — real lifecycle STOP. Blocks new trade execution at the
+        backend enforcement point in main.py; does NOT close existing
+        positions/orders and does NOT touch `paused` (see control_state.py
+        module docstring).
+        """
+        result = get_control_state().stop()
+        if not result.accepted:  # pragma: no cover - stop() currently always accepts
+            return CommandResult(
+                command=raw, matched="stop_bot", success=False,
+                message=f"Cannot stop — bot is currently {result.state}.",
+                data={"lifecycle_state": result.state},
+            )
+        if not result.changed:
+            message = f"Bot already {result.state}. No action taken."
+        else:
+            message = (
+                f"Bot stopping. Lifecycle state is now {result.state}. "
+                "Existing positions/orders are untouched."
+            )
+        return CommandResult(
+            command=raw, matched="stop_bot", success=True, message=message,
+            data={"lifecycle_state": result.state},
         )
 
     # ── Read-only commands ────────────────────────────────────────────────────

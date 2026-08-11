@@ -83,9 +83,12 @@ class TestControlState:
         assert s.get_paper_mode_forced() is False
 
     def test_snapshot_has_three_keys(self):
+        """W14-0: snapshot schema extended with lifecycle_state (existing
+        fields paused/paper_mode_forced/updated_at unchanged/unremoved,
+        per the W14-0 spec's explicit backward-compatibility requirement)."""
         from commander.control_state import get_control_state
         snap = get_control_state().snapshot()
-        assert set(snap.keys()) == {"paused", "paper_mode_forced", "updated_at"}
+        assert set(snap.keys()) == {"paused", "paper_mode_forced", "lifecycle_state", "updated_at"}
 
     def test_reset_clears_everything(self):
         from commander.control_state import get_control_state
@@ -114,6 +117,209 @@ class TestControlState:
         for t in threads: t.start()
         for t in threads: t.join()
         # No assertion on final state (race-inherent) — just must not crash
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# W14-0 — Lifecycle state machine (TradingControlState)
+# ─────────────────────────────────────────────────────────────────────────────
+class TestLifecycleStateMachine:
+
+    def test_default_lifecycle_is_stopped(self):
+        from commander.control_state import get_control_state
+        assert get_control_state().lifecycle_state() == "STOPPED"
+
+    def test_reset_restores_stopped(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting()
+        s.mark_running()
+        s.reset()
+        assert s.lifecycle_state() == "STOPPED"
+
+    # ── low-level mark_*() primitives — legal transitions ──────────────────
+    def test_stopped_to_starting(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        assert s.mark_starting() is True
+        assert s.lifecycle_state() == "STARTING"
+
+    def test_starting_to_running(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting()
+        assert s.mark_running() is True
+        assert s.lifecycle_state() == "RUNNING"
+
+    def test_starting_to_failed(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting()
+        assert s.mark_failed() is True
+        assert s.lifecycle_state() == "FAILED"
+
+    def test_running_to_stopping(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_running()
+        assert s.mark_stopping() is True
+        assert s.lifecycle_state() == "STOPPING"
+
+    def test_stopping_to_stopped(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_running(); s.mark_stopping()
+        assert s.mark_stopped() is True
+        assert s.lifecycle_state() == "STOPPED"
+
+    def test_stopping_to_failed(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_running(); s.mark_stopping()
+        assert s.mark_failed() is True
+        assert s.lifecycle_state() == "FAILED"
+
+    def test_failed_to_starting(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_failed()
+        assert s.mark_starting() is True
+        assert s.lifecycle_state() == "STARTING"
+
+    def test_starting_to_stopping(self):
+        """Aborting a startup — STARTING -> STOPPING is legal."""
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting()
+        assert s.mark_stopping() is True
+        assert s.lifecycle_state() == "STOPPING"
+
+    # ── illegal transitions must be rejected, never raise ──────────────────
+    def test_illegal_stopped_to_running_rejected(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        assert s.mark_running() is False
+        assert s.lifecycle_state() == "STOPPED"
+
+    def test_illegal_running_to_starting_rejected(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_running()
+        assert s.mark_starting() is False
+        assert s.lifecycle_state() == "RUNNING"
+
+    def test_illegal_stopped_to_stopping_rejected(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        assert s.mark_stopping() is False
+        assert s.lifecycle_state() == "STOPPED"
+
+    # ── high-level start()/stop() — idempotency + conflict handling ────────
+    def test_start_from_stopped_reaches_running(self):
+        from commander.control_state import get_control_state
+        result = get_control_state().start()
+        assert result.state == "RUNNING"
+        assert result.accepted is True
+        assert result.changed is True
+
+    def test_start_idempotent_while_running(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.start()
+        result = s.start()
+        assert result.state == "RUNNING"
+        assert result.accepted is True
+        assert result.changed is False
+
+    def test_stop_from_running_reaches_stopped(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.start()
+        result = s.stop()
+        assert result.state == "STOPPED"
+        assert result.accepted is True
+        assert result.changed is True
+
+    def test_stop_idempotent_while_stopped(self):
+        from commander.control_state import get_control_state
+        result = get_control_state().stop()
+        assert result.state == "STOPPED"
+        assert result.accepted is True
+        assert result.changed is False
+
+    def test_start_rejected_while_stopping(self):
+        """START must not skip the state machine while STOPPING."""
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_running(); s.mark_stopping()
+        result = s.start()
+        assert result.accepted is False
+        assert result.state == "STOPPING"
+
+    def test_start_from_failed_reaches_running(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_failed()
+        result = s.start()
+        assert result.state == "RUNNING"
+        assert result.accepted is True
+
+    def test_stop_while_failed_is_idempotent_noop(self):
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.mark_starting(); s.mark_failed()
+        result = s.stop()
+        assert result.state == "FAILED"
+        assert result.accepted is True
+        assert result.changed is False
+
+    def test_concurrent_start_idempotent(self):
+        from commander.control_state import get_control_state
+        import threading
+        s = get_control_state()
+        results = []
+
+        def starter():
+            results.append(s.start())
+
+        threads = [threading.Thread(target=starter) for _ in range(8)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        assert s.lifecycle_state() == "RUNNING"
+        assert all(r.accepted for r in results)
+
+    def test_concurrent_stop_idempotent(self):
+        from commander.control_state import get_control_state
+        import threading
+        s = get_control_state()
+        s.start()
+        results = []
+
+        def stopper():
+            results.append(s.stop())
+
+        threads = [threading.Thread(target=stopper) for _ in range(8)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        assert s.lifecycle_state() == "STOPPED"
+        assert all(r.accepted for r in results)
+
+    # ── restart safety ──────────────────────────────────────────────────────
+    def test_new_instance_always_boots_stopped(self):
+        """A brand-new TradingControlState always starts STOPPED, regardless
+        of any prior singleton's state — simulates process restart, since
+        nothing persists lifecycle_state to disk."""
+        from commander.control_state import TradingControlState, get_control_state
+        get_control_state().start()
+        assert get_control_state().lifecycle_state() == "RUNNING"
+        fresh = TradingControlState()
+        assert fresh.lifecycle_state() == "STOPPED"
+
+    def test_reset_control_state_boots_stopped_even_if_was_running(self):
+        from commander.control_state import get_control_state, reset_control_state
+        get_control_state().start()
+        assert get_control_state().lifecycle_state() == "RUNNING"
+        fresh = reset_control_state()
+        assert fresh.lifecycle_state() == "STOPPED"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +404,27 @@ class TestCommandParsing:
         from commander.commander_service import CommanderService
         result = CommanderService().execute("remind me at noon")
         assert result.success is False
+
+    def test_start_bot_matches(self):
+        from commander.commander_service import CommanderService
+        result = CommanderService().execute("start bot")
+        assert result.matched == "start_bot"
+        assert result.success is True
+
+    def test_stop_bot_matches(self):
+        from commander.commander_service import CommanderService
+        result = CommanderService().execute("stop bot")
+        assert result.matched == "stop_bot"
+        assert result.success is True
+
+    def test_start_bot_no_collision_with_pause_resume(self):
+        """Token sets {'start','bot'} / {'stop','bot'} are disjoint from
+        {'pause','trader'} / {'resume','trader'} — regression guard."""
+        from commander.commander_service import CommanderService
+        result = CommanderService().execute("pause trader")
+        assert result.matched == "pause_trader"
+        result2 = CommanderService().execute("start bot")
+        assert result2.matched == "start_bot"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -403,6 +630,12 @@ class TestMainPyWiring:
 
     def test_not_paused_runs_normally(self):
         from main import run_trading_cycle
+        from commander.control_state import get_control_state
+        # W14-0: lifecycle_state now defaults to STOPPED, which independently
+        # blocks execution — must explicitly "start bot" for this test to
+        # exercise the "not paused, allowed to trade" path it's named for.
+        get_control_state().start()
+
         sys_dict = self._make_minimal_sys_dict()
         run_trading_cycle(sys_dict)
         sys_dict["trade_manager"].execute_trade.assert_called_once()
@@ -410,6 +643,11 @@ class TestMainPyWiring:
     def test_paper_mode_forced_skips_real_execution(self):
         from main import run_trading_cycle
         from commander.control_state import get_control_state
+        # W14-0: start the bot first so this test isolates the paper_mode
+        # gate specifically — without this, the (default-STOPPED) lifecycle
+        # gate would also skip execution and mask a regression in the
+        # paper_mode gate itself.
+        get_control_state().start()
         get_control_state().set_paper_mode_forced(True)
 
         sys_dict = self._make_minimal_sys_dict()
@@ -420,6 +658,7 @@ class TestMainPyWiring:
     def test_paper_mode_forced_closes_mission_with_clear_note(self):
         from main import run_trading_cycle
         from commander.control_state import get_control_state
+        get_control_state().start()  # W14-0: isolate from the lifecycle gate
         get_control_state().set_paper_mode_forced(True)
 
         sys_dict = self._make_minimal_sys_dict()
@@ -434,12 +673,76 @@ class TestMainPyWiring:
     def test_paper_mode_off_allows_real_execution(self):
         from main import run_trading_cycle
         from commander.control_state import get_control_state
+        get_control_state().start()  # W14-0: lifecycle_state defaults STOPPED
         get_control_state().set_paper_mode_forced(False)
 
         sys_dict = self._make_minimal_sys_dict()
         run_trading_cycle(sys_dict)
 
         sys_dict["trade_manager"].execute_trade.assert_called_once()
+
+    # ── W14-0 — lifecycle execution gate ────────────────────────────────────
+    def test_stopped_by_default_skips_execution(self):
+        """The core W14-0 guarantee: with no commands issued at all
+        (fresh control state, default STOPPED), trade_manager must never
+        be called."""
+        from main import run_trading_cycle
+        sys_dict = self._make_minimal_sys_dict()
+        run_trading_cycle(sys_dict)
+        sys_dict["trade_manager"].execute_trade.assert_not_called()
+
+    def test_stopped_skips_before_position_check(self):
+        """STOPPED must skip the AI/CEO decision pipeline entirely
+        (Decision 1) — not merely block the final order call."""
+        from main import run_trading_cycle
+        sys_dict = self._make_minimal_sys_dict()
+        run_trading_cycle(sys_dict)
+        sys_dict["data_provider"].get_position_info.assert_not_called()
+
+    def test_running_allows_execution(self):
+        from main import run_trading_cycle
+        from commander.control_state import get_control_state
+        get_control_state().start()
+        sys_dict = self._make_minimal_sys_dict()
+        run_trading_cycle(sys_dict)
+        sys_dict["trade_manager"].execute_trade.assert_called_once()
+
+    def test_stop_after_start_blocks_next_cycle(self):
+        from main import run_trading_cycle
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.start()
+        s.stop()
+        sys_dict = self._make_minimal_sys_dict()
+        run_trading_cycle(sys_dict)
+        sys_dict["trade_manager"].execute_trade.assert_not_called()
+
+    def test_stop_does_not_clear_paused(self):
+        """PAUSE vs STOP must stay independent — stopping must not touch
+        the existing `paused` flag."""
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.pause()
+        s.start()
+        s.stop()
+        assert s.is_paused() is True
+
+    def test_start_does_not_auto_resume_paused(self):
+        """If the bot was paused before STOP, starting again must come
+        back RUNNING + still paused — no silent resumption of trading."""
+        from main import run_trading_cycle
+        from commander.control_state import get_control_state
+        s = get_control_state()
+        s.start()
+        s.pause()
+        s.stop()
+        s.start()
+        assert s.lifecycle_state() == "RUNNING"
+        assert s.is_paused() is True
+
+        sys_dict = self._make_minimal_sys_dict()
+        run_trading_cycle(sys_dict)
+        sys_dict["trade_manager"].execute_trade.assert_not_called()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -493,6 +796,35 @@ class TestCommandAPI:
         client.post("/api/command", json={"command": "pause trader"})
         body = client.get("/api/command/state").json()
         assert body["data"]["paused"] is True
+
+    # ── W14-0 ────────────────────────────────────────────────────────────
+    def test_get_command_state_includes_lifecycle_state(self, client):
+        body = client.get("/api/command/state").json()
+        assert body["data"]["lifecycle_state"] == "STOPPED"
+
+    def test_post_start_bot_returns_running(self, client):
+        body = client.post("/api/command", json={"command": "start bot"}).json()
+        assert body["data"]["success"] is True
+        assert body["data"]["matched"] == "start_bot"
+        assert body["data"]["data"]["lifecycle_state"] == "RUNNING"
+
+    def test_post_stop_bot_returns_stopped(self, client):
+        client.post("/api/command", json={"command": "start bot"})
+        body = client.post("/api/command", json={"command": "stop bot"}).json()
+        assert body["data"]["success"] is True
+        assert body["data"]["matched"] == "stop_bot"
+        assert body["data"]["data"]["lifecycle_state"] == "STOPPED"
+
+    def test_get_command_state_reflects_start_bot(self, client):
+        client.post("/api/command", json={"command": "start bot"})
+        body = client.get("/api/command/state").json()
+        assert body["data"]["lifecycle_state"] == "RUNNING"
+
+    def test_post_start_bot_idempotent(self, client):
+        client.post("/api/command", json={"command": "start bot"})
+        body = client.post("/api/command", json={"command": "start bot"}).json()
+        assert body["data"]["success"] is True
+        assert body["data"]["data"]["lifecycle_state"] == "RUNNING"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

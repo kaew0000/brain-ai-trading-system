@@ -28,15 +28,24 @@ def reset_all():
     from research.dataset_builder import reset_dataset_builder
     from missions.mission_tracker import reset_mission_tracker
     from events.event_bus import reset_event_bus
+    from commander.control_state import get_control_state, reset_control_state
     reset_heartbeat(); reset_watchdog(); reset_reconciliation_engine()
     reset_recovery_engine(); reset_meta_label_filter(); reset_ml_advisor()
     reset_dataset_builder(); reset_mission_tracker()
     reset_event_bus(journal=None, persist=False)
+    # W14-0: run_trading_cycle() now gates on lifecycle_state (default
+    # STOPPED) independently of everything reset above — this file
+    # predates the W14-0 lifecycle control plane, so restore the
+    # previously-implicit "trading is enabled" precondition its
+    # run_trading_cycle()-driven tests actually rely on.
+    reset_control_state()
+    get_control_state().start()
     yield
     reset_heartbeat(); reset_watchdog(); reset_reconciliation_engine()
     reset_recovery_engine(); reset_meta_label_filter(); reset_ml_advisor()
     reset_dataset_builder(); reset_mission_tracker()
     reset_event_bus(journal=None, persist=False)
+    reset_control_state()
 
 
 @pytest.fixture
