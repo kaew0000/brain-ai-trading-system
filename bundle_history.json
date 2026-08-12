@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-08T03:28:30Z",
+  "updated_at": "2026-08-12T11:26:16Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -307,6 +307,42 @@
       "imported_at": "2026-08-08T03:28:30Z",
       "pushed": true,
       "reason": null
+    },
+    {
+      "sha": "562acade36a18adbc2b4e2bc57571d98cfa6c058",
+      "branch": "fix/min-notional-nan-inf-guard",
+      "bundle_filename": "brain-ai-trading-system-562acad.bundle",
+      "status": "applied",
+      "imported_at": "2026-08-10T06:33:17Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "6168b42066d9930f5e49f7a9029c151314ccf07b",
+      "branch": "feature/phase4c-step7c-signal-id-bridge",
+      "bundle_filename": "phase4c-step7c-signal-id-bridge.bundle",
+      "status": "applied",
+      "imported_at": "2026-08-11T00:09:44Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "40c52712b4d234daa6d3b696177960f4aa0b580c",
+      "branch": "feat/w14-0-live-start-stop-control-plane",
+      "bundle_filename": "w14-0-live-start-stop-control-plane.bundle",
+      "status": "applied",
+      "imported_at": "2026-08-11T00:38:42Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "42f2a6ba48acb067360424ecaadd3099d262a566",
+      "branch": "feature/phase4c-step8-persistent-trading-knowledge",
+      "bundle_filename": "phase4c-step8-persistent-trading-knowledge.bundle",
+      "status": "failed",
+      "imported_at": "2026-08-12T11:26:16Z",
+      "pushed": false,
+      "reason": "fetch failed: From /data/data/com.termux/files/home/brain-ai-trading-system/update/incoming/phase4c-step8-persistent-trading-knowledge.bundle\n ! [rejected] feature/phase4c-step8-persistent-trading-knowledge -> feature/phase4c-step8-persistent-trading-knowledge  (non-fast-forward)"
     }
   ]
 }
