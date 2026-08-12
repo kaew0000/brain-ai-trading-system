@@ -1,111 +1,104 @@
-# PATCH NOTES — V16 Phase 4C Step 7C: CEO → Agent → Trade Attribution Signal-ID Bridge (Track A)
+# PATCH NOTES — V16 Phase 4C Step 8: Persistent Trading Knowledge Layer (Track A)
 
-Branch: `feature/phase4c-step7c-signal-id-bridge`
-Base: `main` @ `df50be9` (2348 + 565 passing, ruff clean — verified via
-fresh clone, not session context)
-Track: A (backend/engine) only — no Track B (`world/`, `dashboard_src/`) files touched.
+Branch: `feature/phase4c-step8-persistent-trading-knowledge`
+Base: `main` @ `4f6df7c` (verified current — origin/main had moved since
+Step 7C via PR #51 + an unrelated PR #52 "W14 live start-stop control
+plane"; both confirmed real and re-based against before this phase began)
+
+## Scope note
+
+No prior documentation defines a "Phase 4C Step 8" — checked
+`docs/architecture.md`, `CLAUDE.md`, `docs/ROADMAP.md`, and the Google
+Sheets project tracker before starting; all are frozen at or before
+Phase 4C Step 1. This phase's scope was supplied directly by the
+project owner as an explicit, detailed brief, not discovered in
+existing docs or guessed.
 
 ## Summary
 
-Threads one shared `signal_id`, created once per CEO decision cycle,
-through the full attribution chain: CEO_AGENT journal row → every
-participating sub-agent's own journal row → the outgoing
-`ExecutionSignal` → the trade row persisted at open time. This is what
-makes `journal_v2.get_trade_attribution()`'s existing
-`trades.signal_id == agent_decisions.signal_id` join actually populate
-`agent_participation` for CEO-gated trades — before this phase it
-always returned an (honestly) empty list, since neither side of that
-join was ever written for this path.
+A git-versioned, persistent Markdown knowledge layer that accumulates
+institutional memory from the trading system's own real data
+(`journal_v2`, including Phase 4C Step 7C's signal_id attribution
+bridge), following Andrej Karpathy's "LLM Wiki" architecture pattern
+(adapted, not copied): immutable raw sources → a maintained,
+cross-linked wiki → an append-only chronological log. Informational /
+analytical only — cannot place trades, modify orders, or touch
+risk/execution/lifecycle state (verified structurally, see Safety
+section below).
 
-## Prerequisite verification
+## What changed (all new, nothing existing modified)
 
-A task brief for this phase initially claimed the implementation
-already existed from a prior session (specific field names, a 16-test
-file, "16/16 passing"). Independent verification against a fresh
-`origin/main` clone found none of it — no such field on `ExecutionSignal`,
-no such test file on any branch (local or remote), and Step 7's own
-docstring (PR #48, real, merged) already documented this exact scope
-as explicitly deferred future work. The brief's claim was fabricated;
-the underlying gap it described was real and is what this phase closes.
+- `knowledge_engine/` — new package, 9 modules: `provenance.py`,
+  `pages.py`, `raw_store.py`, `chronolog.py`, `contradiction.py`,
+  `trade_knowledge.py`, `agent_knowledge.py`, `index_builder.py`,
+  `source_pages.py`.
+- `raw/` — new, empty (`.gitkeep` only) immutable-source staging tree:
+  `research/`, `trade_reviews/`, `market_notes/`, `incidents/`,
+  `architecture/`, `operator_notes/`, `external/`.
+- `knowledge/` — new, empty (`.gitkeep` only) wiki tree: `trades/`,
+  `agents/`, `sources/`. `index.md`/`log.md` are generated on first
+  use, not pre-created.
+- `tests/test_knowledge_*.py` — 10 new files, 77 tests.
+- `docs/architecture.md` — new §36.
 
-## What changed
+No existing file was modified. `journal/journal_v2.py` was not
+touched — this package only calls its existing `get_*` readers.
 
-### `execution/execution_orchestrator.py`
-- `ExecutionSignal` (frozen dataclass) gains `signal_id: int | None = None`
-  — trailing, defaulted, backward compatible with every existing
-  positional/keyword construction site.
-- `_record_trade_opened()`: if the incoming signal already carries a
-  `signal_id`, reuse it — never mint a second, unrelated one for the
-  same trade. If not (every pre-Step-7C caller), behavior is
-  byte-identical to before: mint a fresh signal row here.
+## Why `knowledge/` and `raw/` ship empty
 
-### `execution/ceo_gated_signal_provider.py`
-- `_journal_ceo_decision()` now:
-  1. Creates exactly one `signal_id` per CEO decision cycle via
-     `journal.save_signal()` (best-effort — degrades to `signal_id=None`
-     on any failure, never raises).
-  2. Passes it into the existing `CEO_AGENT` journal row.
-  3. **New**: writes one additional, independently-inspectable
-     `save_agent_decision()` row per real entry in
-     `ceo_decision.agent_reports`, sharing the same `signal_id`. A
-     single agent's write failure is logged and skipped, never blocking
-     the rest.
-  4. Returns the shared `signal_id`.
-- `_get_signal_ceo_enabled()` threads that id onto the outgoing
-  `ExecutionSignal` (via `dataclasses.replace()` — the dataclass is
-  frozen) only when a trade was actually confirmed. A vetoed/WAIT/
-  BLOCKED cycle still gets the full journal write (audit trail intact)
-  but has nothing to attach the id to.
+This phase ships the mechanism, proven against real `journal_v2`
+objects in tests (real SQLite, real Step 7C signal_id joins — not
+mocks). It does not seed the repository's actual `knowledge/`/`raw/`
+directories with content, because the only trade/agent data available
+in this environment is synthetic test fixtures — writing that into
+the committed knowledge tree would be exactly the fabricated
+production data the brief's Hard Rules and spec §14 prohibit. Real
+ingestion against the real production journal is the operator's own
+next action (see MIGRATION.md).
 
-## Files changed
+## Safety audit
 
-- `execution/execution_orchestrator.py` (modified)
-- `execution/ceo_gated_signal_provider.py` (modified)
-- `tests/test_ceo_multi_symbol_agent_attribution.py` (new — 17 tests)
-- `tests/test_ceo_agent_vote_persistence.py` (1 assertion updated)
-- `tests/test_recommendation_explanation_persistence.py` (1 assertion updated)
-- `docs/architecture.md` (new §35 entry)
-- `PATCH_NOTES.md`, `MIGRATION.md` (this phase's content)
+`tests/test_knowledge_safety.py` — AST-based (not grep) static proof
+that `knowledge_engine/`:
+- imports nothing from `execution/`, `risk/`, `decision/`, `agents/`,
+  `portfolio/`, `commander/`, `world/`, `dashboard*/`, or any
+  Binance/exchange client;
+- every local repository import is from `journal` or `knowledge_engine` itself;
+- never calls any `journal_v2` method whose name starts with
+  `save_`/`update_`/`delete_` — walks the AST for attribute access,
+  not a text match;
+- imports no networking library (`requests`/`httpx`/`websocket*`).
+
+## Secret audit
+
+`raw_store.ingest_raw_source()` refuses to stage content matching a
+conservative secret-shaped pattern set (private key blocks, AWS-style
+key ids, `BINANCE_API_KEY`/`BINANCE_API_SECRET` assignments, generic
+`api_key=`/`password=`/`token=` assignments) — raises
+`SecretDetectedError`, content is never written to disk in that case
+(`tests/test_knowledge_raw_store.py::TestSecretDetection`). Manually
+re-checked: no `.env`, credential, or token content exists anywhere in
+this phase's diff.
 
 ## Test results
 
-- Targeted: `tests/test_ceo_multi_symbol_agent_attribution.py` → 17 passed
-- `tests/test_recommendation_explanation_persistence.py` → 14 passed
-- Full `pytest tests/ -q` → 2365 passed, 0 failed (2348 baseline + 17 new)
-- `pytest world/tests/ -q -m ""` → 565 passed, unchanged
+- `pytest tests/test_knowledge_*.py -q` → 77 passed
+- Full `pytest tests/ -q` → see FINAL REPORT
+- `pytest world/tests/ -q -m ""` → see FINAL REPORT (untouched, unrelated)
 - `ruff check .` → clean
-- `vulture . --exclude dashboard_src,dashboard,tests --min-confidence 80` → clean
+- `vulture . --min-confidence 80` → clean
 - `python -c "import main"` → clean
 - `git diff --check` → clean
 
-## Existing assertions changed (2, both explained)
-
-`test_agent_reports_persist_to_journal_details` and
-`test_live_decision_persists_explanations_to_journal` both asserted
-`len(journal.saved) == 1` (CEO_AGENT row only). Both now assert
-`1 + len(agent_reports)` — the real fixtures these tests already used
-(a live 6-agent layer) always computed multiple agent votes; this
-phase is what makes those votes get their own persisted rows instead
-of being discarded after the CEO row's `details.agent_reports` blob
-was written. No assertion was weakened — both still check every prior
-invariant unchanged, plus the new row count.
-
-## Performance impact
-
-One additional lightweight `save_signal()` write and N additional
-`save_agent_decision()` writes per CEO decision cycle (N = number of
-real agents in that cycle's layer — 6 in production
-(`agents/ceo_symbol_cache.py`'s `build_agent_layer()`)). No new query
-plans, no schema change, no N+1 pattern introduced — each write is a
-single-row `INSERT`, same shape every other `save_agent_decision()`
-call in this codebase already makes.
-
 ## Known follow-up work (explicitly out of scope for this phase)
 
-- Phase 4C Steps 3–7's own missing `docs/architecture.md` entries
-  (pre-existing documentation drift, not introduced by this phase) —
-  flagged in §35, not backfilled here.
-- `CHANGELOG.md` / `docs/CHANGELOG.md` staleness — pre-existing,
-  unrelated.
-- The dashboard `/portfolio` mock-data issue — separate, unrelated,
-  untouched (explicitly out of scope per this phase's own brief).
+- Strategy and Regime entity pages (spec §5 lists them; no real
+  synthesis logic exists for them yet — not fabricated with
+  placeholders).
+- Query/retrieval tooling beyond "read index → follow links" (spec
+  §11 — no embeddings/vector DB; explicitly not needed yet).
+- Wiring this package into `main.py`'s scheduler or any live process —
+  there is no existing LLM/AI runtime interface anywhere in this
+  codebase to wire it to (checked; none exists).
+- Actually running a first real ingestion against the production
+  journal — operator's own next action.

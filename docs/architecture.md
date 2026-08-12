@@ -3483,3 +3483,195 @@ baseline before this phase's changes, and re-verified after.
 - The dashboard `/portfolio` mock-data issue (`MockPortfolioProvider`
   wired in place of the real `/api/portfolio/*` endpoints — see this
   file's own investigation notes elsewhere) is unrelated and untouched.
+
+## 36. Persistent Trading Knowledge Layer — V16 Phase 4C Step 8 (2026-08-11)
+
+### Scope note on "Step 8"
+
+No prior documentation (this file, `CLAUDE.md`, `docs/ROADMAP.md`, or
+the Google Sheets project tracker — all checked before this phase
+began, all found frozen at or before Phase 4C Step 1) defines a
+"Phase 4C Step 8." This phase's scope was supplied directly, in full,
+by the project owner rather than discovered in existing docs — an
+explicit, detailed brief, not an assumption. `docs/architecture.md`
+§34's Track A definition ("Continues all existing phases here — e.g.
+Phase 4B, Phase 4C, Phase 5, Phase 6") and `docs/architecture/SEPARATION_POLICY.md`
+(Ensemble Learning and Journal are explicitly Track A) both confirm
+this is the correct track and numbering for it regardless.
+
+### Purpose
+
+A git-versioned, persistent Markdown knowledge base that accumulates
+institutional memory from the trading system's own real data, so
+future reasoning (human or AI) doesn't have to rediscover the same
+facts from raw journal rows every time. Architectural reference:
+Andrej Karpathy's "LLM Wiki" pattern (immutable raw sources → a
+maintained, cross-linked wiki → an append-only log), adapted rather
+than copied — this is a Track A backend layer, not a live feature the
+bot's runtime loop calls. No LLM/AI API interface exists anywhere else
+in this codebase either (checked); this package is meant to be
+maintained in sessions like this one, not called from `main.py`'s
+scheduler.
+
+### Architecture
+
+```
+raw/                    knowledge_engine/            knowledge/
+(Layer A — immutable)   (the code — this phase)       (Layer B — the wiki)
+├── research/           ├── provenance.py             ├── index.md   (regenerated,
+├── trade_reviews/      ├── pages.py                  │    never hand-edited)
+├── market_notes/       ├── raw_store.py               ├── log.md     (append-only)
+├── incidents/          ├── chronolog.py               ├── trades/
+├── architecture/       ├── contradiction.py           ├── agents/
+├── operator_notes/     ├── trade_knowledge.py         └── sources/
+└── external/           ├── agent_knowledge.py
+                        ├── index_builder.py
+                        └── source_pages.py
+```
+
+`raw/` and `knowledge/` are the two DATA trees the spec's own proposed
+layout names directly; `knowledge_engine/` is the CODE, split out as
+its own package rather than nested inside `knowledge/`, mirroring this
+repo's existing convention of a dedicated package per subsystem
+(`learning/`, `journal/`) whose output is written to a directory
+that's a parameter, not hardcoded inside the package.
+
+### Schema
+
+Every page (`knowledge_engine/pages.py::WikiPage`) is Markdown with a
+minimal `key: value` frontmatter block — deliberately NOT full YAML;
+`requirements.txt` has no yaml/PyYAML dependency today and every value
+this phase writes is a flat string/number, so a ~15-line hand-rolled
+parser avoids adding a dependency for a feature that doesn't need one
+yet. Every page carries a `Provenance` record
+(`knowledge_engine/provenance.py`): `source_type`, `source_id`,
+`source_ref`, a `Confidence` label (`FACT` / `DERIVED_OBSERVATION` /
+`HYPOTHESIS` / `UNKNOWN`), `created_at`, `updated_at`.
+
+Two entity types are implemented this phase (spec §5's minimum useful
+schema — Strategy/Regime entities are explicitly deferred, not
+fabricated with placeholder pages):
+
+- **Trade** (`trade_knowledge.py`) — `ingest_closed_trade(journal, trade_id)`.
+  Reads `journal_v2.get_trade_attribution()` (reusing Phase 4C Step 7C's
+  signal_id bridge for `agent_participation` — this module computes no
+  attribution itself). Only CLOSED trades (WIN/LOSS) get a page; an
+  OPEN trade is still changing and writing "knowledge" about it would
+  misrepresent an unsettled position as fact. Confidence: `FACT` — every
+  field is a direct value from the trade row, nothing computed.
+- **Agent** (`agent_knowledge.py`) — `ingest_agent_performance(journal)`.
+  Reads `journal_v2.get_agent_performance()` (Phase 4B Step 1, §27) —
+  which joins on `signal_id` and therefore only returns non-empty rows
+  for the CEO-gated path *because* Step 7C exists; before Step 7C this
+  method's join was structurally always empty for that path. Below
+  `MIN_SAMPLE_SIZE = 5` attributed trades, the win rate is not reported
+  as a number at all — the page says `INSUFFICIENT_EVIDENCE`
+  (`Confidence.UNKNOWN`) instead, per spec §14's "never present an
+  inferred claim as fact."
+
+### Ingestion
+
+Smallest practical interface (spec §10 — "do NOT build a giant
+generalized ingestion framework"): three entry points, no plugin
+system, no generic `ingest(source: Any)` dispatcher.
+`raw_store.ingest_raw_source(text, category, name)` stages free-text
+raw material; `trade_knowledge.ingest_closed_trade()` and
+`agent_knowledge.ingest_agent_performance()` pull structured data
+straight from `journal_v2`. All three are plain functions, callable
+from a script or a future scheduled job — none is wired into `main.py`
+by this phase (spec's safety boundary: informational/analytical only,
+and nothing elsewhere in this codebase calls an LLM API either, so
+there is no live consumer to wire yet).
+
+### Provenance & contradiction handling
+
+`raw_store.py` never overwrites: re-ingesting byte-identical content
+under the same name is a no-op (returns the existing record);
+re-ingesting *different* content under the same name writes a new,
+content-hash-suffixed file, leaving the original untouched — the same
+"never overwrite, timestamp instead" convention
+`learning/learning_snapshot.py` already established in this codebase,
+extended with a content hash so true no-ops are detected, not just
+time-distinguished.
+
+`contradiction.py` implements spec §9's support/contradict/refine
+idea: `agent_knowledge.py` compares a freshly computed win rate
+against the page's own previously-written value (read back from that
+page's frontmatter); a swing past a documented, fixed threshold
+(`DEFAULT_THRESHOLD = 0.15`) is recorded as a `## Revision History`
+entry — previous claim, new evidence, current synthesis, source refs —
+prepended above every prior entry, never replacing them. A small
+routine change (e.g. one more win nudging an already-large sample)
+stays silent, matching "refinement" rather than "contradiction."
+
+`raw_store.py` also refuses (spec §3: "Do NOT automatically copy
+secrets... into raw/") to stage content matching a conservative
+secret-shaped pattern set (private key blocks, AWS-style key ids,
+`BINANCE_API_KEY`/`BINANCE_API_SECRET` assignments, generic
+`api_key=`/`password=`/`token=` assignments) — raises
+`SecretDetectedError` rather than silently skipping, so a real
+ingestion attempt is never silently lost without the caller knowing
+why.
+
+### Index
+
+`index_builder.rebuild_index()` fully regenerates `knowledge/index.md`
+from every page's own frontmatter on every call (spec §6: "Do NOT
+allow the index to become a manually maintained stale file") — grouped
+by category (the page's parent directory name), one table row per
+page with confidence/source-count/last-updated columns. Deterministic:
+two rebuilds of the same page set produce byte-identical output
+(`tests/test_knowledge_index.py::test_deterministic_across_repeated_calls`).
+
+### Safety boundary — verified structurally, not by convention
+
+`knowledge_engine/`'s only side effect is writing Markdown files under
+`raw/` and `knowledge/`. `tests/test_knowledge_safety.py` proves this
+via `ast`-based static inspection (not grep) of every module in the
+package: zero imports from `execution/`, `risk/`, `decision/`,
+`agents/`, `portfolio/`, `commander/`, `world/`, `dashboard*/`, or any
+Binance/exchange client; every local repository import is from
+`journal` (read-only) or `knowledge_engine` itself; zero calls to any
+`journal_v2` method whose name starts with `save_`/`update_`/`delete_`
+(checked by walking the AST for attribute-access nodes, not text
+matching) — this package only ever calls `journal_v2`'s `get_*`
+readers.
+
+### Deliberately not built this phase (spec explicitly permits deferring)
+
+- Strategy and Regime entity pages (spec §5 lists them; no fabricated
+  placeholder pages were written for entities this phase has no real
+  synthesis logic for yet).
+- Query/retrieval tooling beyond "read index → follow links" (spec
+  §11 explicitly says this is not required yet — no embeddings/vector
+  infrastructure was added, matching "do NOT introduce... unless the
+  audit demonstrates a real need").
+- Populating `knowledge/`/`raw/` with real production content. This
+  phase ships the mechanism, verified against real `journal_v2`
+  objects in tests (real SQLite, real Step 7C signal_id joins — not
+  mocks) — but the actual repository's `knowledge/` and `raw/`
+  directories ship empty (`.gitkeep` only). Seeding them from this
+  environment's synthetic test fixtures would be exactly the
+  fabricated/mock production data spec §14 and the Hard Rules
+  prohibit; real ingestion against the real production journal is the
+  operator's own next action, not something this phase invents on
+  their behalf.
+- Wiring any of this into `main.py`'s scheduler or any live process —
+  spec's safety boundary plus the absence of any existing LLM/AI
+  runtime interface in this codebase (checked; there is none) means
+  there is no live consumer to wire to yet.
+
+### Testing
+
+10 new test files, 77 tests, `tests/test_knowledge_*.py`: provenance
+validation, frontmatter round-trip, raw ingestion (valid/invalid/
+duplicate/secret-detection), append-only log behavior, contradiction
+detection and revision-history recording, closed-trade extraction
+(including the Step 7C integration proof and the "no fabricated
+attribution" proof for pre-Step-7C-shaped trades), agent performance
+extraction (sample-size floor, contradiction handling), deterministic
+index regeneration, source-page provenance linking, and the AST-based
+safety audit. `trade_knowledge`/`agent_knowledge` tests use a real
+`TradeJournalV2` (tmp_path-backed SQLite, same established pattern
+§35's own tests use) — not a mocked journal — so the Step 7C
+integration claims above are proven against real code paths.
