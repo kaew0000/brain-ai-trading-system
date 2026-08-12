@@ -1,60 +1,65 @@
-# MIGRATION — V16 Phase 4C Step 7C: CEO → Agent → Trade Attribution Signal-ID Bridge (Track A)
+# MIGRATION — V16 Phase 4C Step 8: Persistent Trading Knowledge Layer (Track A)
 
 ## Do you need to do anything?
 
-**No.** Everything in this phase is additive and reuses existing,
-already-optional columns. If you do nothing, the system behaves
-exactly as it did before this phase, with one improvement:
+**No, not to keep the system running exactly as before.** This phase
+adds a new, standalone package (`knowledge_engine/`) and two new,
+currently-empty data directories (`raw/`, `knowledge/`). Nothing
+existing was modified — no schema change, no config flag, no import
+added to any file outside this phase's own new files. `main.py`, the
+scheduler, the dashboard, and every trading/risk/execution path are
+byte-for-byte unchanged.
 
-- `ExecutionSignal.signal_id` defaults to `None` — every existing
-  caller that constructs `ExecutionSignal(...)` without it is
-  unaffected.
-- `ExecutionOrchestrator._record_trade_opened()` only changes behavior
-  when the incoming signal already carries a `signal_id` (i.e. it came
-  through the CEO-gated path, after this phase). Every other caller —
-  the plain `PortfolioSignalProvider` path, `execution/strategy_registry.py`
-  — mints a fresh signal row exactly as before.
-- `CEOGatedSignalProvider._journal_ceo_decision()`'s new per-agent
-  journal rows are pure additions — nothing that previously read
-  `journal.get_agent_decisions()` filtered by `agent="CEO_AGENT"` (the
-  only row that previously existed) breaks; it now also sees N more
-  rows it can choose to read or ignore.
-- `journal_v2.get_trade_attribution()` is unchanged code — it already
-  had this join built in (Phase 4B Step 2, §29). This phase is what
-  starts actually populating both sides of that join for CEO-gated
-  trades; the method itself required no change.
+## If you want to actually use it
 
-## What this enables
+The knowledge layer isn't wired into any scheduled job — you invoke it
+yourself, e.g. from a Python shell or a small script, pointed at your
+real journal:
 
-Once a CEO-gated trade is opened, `GET` its trade attribution (via
-whatever endpoint already calls `journal_v2.get_trade_attribution(trade_id)`)
-now returns a real, non-empty `agent_participation` list: one entry per
-agent that voted that cycle (including `CEO_AGENT` itself, since it is
-also a row sharing that cycle's `signal_id`), each with
-`agent`/`vote`/`weight`/`confidence`/`contribution`. Before this phase,
-that list was always empty for every CEO-gated trade, not because no
-agents voted, but because neither side of the join was ever written.
+```python
+from journal.journal_v2 import TradeJournalV2
+from knowledge_engine.trade_knowledge import ingest_closed_trade
+from knowledge_engine.agent_knowledge import ingest_agent_performance
+from knowledge_engine.index_builder import rebuild_index
+from knowledge_engine.chronolog import append_log_entry
 
-## What this can never do, even fully enabled
+journal = TradeJournalV2()  # uses your real configured DB path
 
-- Does not change what the CEO decides, which agents exist, or how
-  they're weighted — this is attribution/observability plumbing only.
-- Does not backfill `signal_id` on trades opened before this phase —
-  those rows keep whatever `signal_id` (real or `NULL`) they already
-  had; `get_trade_attribution()` on them behaves exactly as before
-  (empty `agent_participation` if it was empty before).
-- Does not touch the plain (non-CEO) `portfolio_signal_provider.py`
-  path's attribution — that path still has no agent layer to attribute
-  to, unchanged (documented pre-existing scope boundary, §29).
+# One closed trade:
+page = ingest_closed_trade(journal, trade_id=123)
+if page:
+    append_log_entry("ingest", f"trade-{page.entity_id}")
+
+# All agents with attributed trades so far:
+for page in ingest_agent_performance(journal):
+    append_log_entry("update", f"agent-{page.entity_id}")
+
+rebuild_index()  # regenerate knowledge/index.md from every page's frontmatter
+```
+
+Everything writes under `knowledge/` and `raw/` at the repository
+root by default (both `Path` parameters, overridable per-call).
+
+## What this can never do, even fully wired up
+
+- Cannot place a trade, modify an order, change SL/TP, alter risk
+  limits, override the CEO gate, or change execution mode —
+  structurally impossible, not just policy: `knowledge_engine/` has no
+  import path to any module that could do those things, and calls no
+  `journal_v2` write method (verified by
+  `tests/test_knowledge_safety.py`'s AST audit).
+- Cannot fabricate a win rate from too little evidence — below 5
+  attributed trades, an agent's page says `INSUFFICIENT_EVIDENCE`,
+  never a number.
+- Cannot silently lose a prior claim when new evidence disagrees —
+  large swings are recorded as a `## Revision History` entry, not
+  overwritten.
+- Cannot stage a secret into the git-versioned `raw/` tree — content
+  matching a secret-shaped pattern is refused, not silently dropped.
 
 ## Rollback
 
-Revert the two production files
-(`execution/execution_orchestrator.py`,
-`execution/ceo_gated_signal_provider.py`). No schema migration, no
-data migration, no config flag to unset — every new column this phase
-writes to already existed and defaulted to `NULL` before this phase;
-reverting the code simply stops populating it going forward. Already-
-written rows with a populated `signal_id` are harmless if left in
-place (an old trade with a real join simply keeps working; nothing
-reads `signal_id` as evidence that this phase's code is active).
+Delete `knowledge_engine/`, `raw/`, `knowledge/`, and
+`tests/test_knowledge_*.py`. Nothing else references them — no import
+anywhere outside this phase's own files, no config flag to unset, no
+schema to reverse.
