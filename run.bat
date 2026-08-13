@@ -3,17 +3,19 @@ chcp 65001 > nul
 setlocal
 
 echo ============================================================
-echo   Brain Bot BTCUSDT Futures - LIVE TRADING
+echo   Brain Bot BTCUSDT Futures - Dev/Test Launcher
 echo ============================================================
 echo.
-echo   [!] WARNING: LIVE MODE - REAL MONEY AT RISK
-echo   [!] Make sure .env is configured correctly.
-echo   [!] Ensure BINANCE_TESTNET=false in .env
+echo   [i] Runs with whatever EXECUTION_MODE/BINANCE_TESTNET is
+echo       currently set in .env (paper/testnet by default).
+echo   [!] For LIVE trading with real funds, use run_live.bat instead
+echo       -- it sets LIVE mode explicitly rather than trusting .env,
+echo       and requires a separate typed confirmation.
 echo.
 echo   Press Ctrl+C at any time to stop safely.
 echo ============================================================
 
-choice /c YN /m "Continue with LIVE trading?"
+choice /c YN /m "Continue?"
 if %ERRORLEVEL% EQU 2 (
     echo Cancelled.
     exit /b 0

@@ -278,6 +278,26 @@ def get_manager(
         return mgr
 
 
+def get_manager_if_registered(
+    mode: str,
+    exchange: str = DEFAULT_EXCHANGE,
+    account_id: str = DEFAULT_ACCOUNT_ID,
+) -> ExchangeStateManager | None:
+    """Read-only registry lookup for consumers (e.g. api/account_api.py,
+    Track W14-1) that must never construct a manager themselves — doing
+    so would require a real data_provider, and a caller without one
+    would otherwise be forced to either fabricate a placeholder or
+    build a second BinanceDataProvider, both of which this project's
+    "no duplicate Binance client" rule forbids. Returns None rather than
+    constructing anything if nothing has registered this (mode,
+    exchange, account_id) yet via get_manager() — callers should treat
+    that as "no data source available" (e.g. surface NO_DATA_YET),
+    not as an error."""
+    key = (mode, exchange, account_id)
+    with _registry_lock:
+        return _registry.get(key)
+
+
 def reset_registry() -> None:
     """Test-only: clear the singleton registry between test cases."""
     with _registry_lock:

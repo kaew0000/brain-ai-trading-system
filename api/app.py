@@ -109,6 +109,10 @@ from api.world_ws import check_and_broadcast as _world_ws_check
 # Phase W12 — Live Operations Workspace & Command Console. Same pattern.
 from api.workspace_api import router as _workspace_router
 
+# V16 Track W14-1 Item 2 — Real Account Telemetry (Dashboard V16). Same
+# additive-router pattern as every /api/* module above.
+from api.account_api import router as _account_router
+
 logger = get_logger("api.app")
 
 # ── Startup time ──────────────────────────────────────────────────────────────
@@ -327,7 +331,23 @@ async def _broadcast_loop() -> None:
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 
 # ── Dashboard static files ─────────────────────────────────────────────────
+# _DASHBOARD_DIR ("dashboard/") holds ONLY the legacy V13 CDN-React demo
+# (index.html — self-simulated Math.random() equity/positions, never a
+# real data source) plus an unrelated WorldHQ_Demo.html. It is NOT where
+# `npm run build` in dashboard_src/ writes output — that goes to
+# dashboard_src/dist/ (Vite's default outDir, unchanged in dashboard_src/
+# vite.config.ts). Track W14-1 Item 9: this was the actual, previously
+# undiscovered root cause of the legacy demo always being served in
+# production — the code below used to look for a V16 build at
+# dashboard/dist/, a directory nothing ever writes to, so it silently
+# fell back to the legacy demo on every single request, build or no
+# build. _DASHBOARD_SRC_DIST is the real, authoritative V16 build
+# location; _DASHBOARD_DIR is kept only for the legacy fallback file and
+# WorldHQ_Demo.html.
 _DASHBOARD_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "dashboard")
+_DASHBOARD_SRC_DIST = _os.path.join(
+    _os.path.dirname(_os.path.dirname(__file__)), "dashboard_src", "dist"
+)
 
 async def _supervised_broadcast() -> None:
     """V15: Self-restarting wrapper for the broadcast loop.
@@ -380,9 +400,9 @@ async def lifespan(app: FastAPI):
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Brain Bot BTCUSDT Dashboard API",
-    version="4C",
-    description="Real-time dashboard for Brain Bot v13 Phase 4C",
+    title="Brain Bot V16 Dashboard API",
+    version="16.0.0",
+    description="Real-time dashboard for Brain Bot V16 (Track W14-1)",
     lifespan=lifespan,
 )
 
@@ -417,6 +437,11 @@ app.include_router(_world_ws_router)
 # Phase W12 — Live Operations Workspace & Command Console. Same
 # /api/* auth coverage as everything above.
 app.include_router(_workspace_router)
+
+# V16 Track W14-1 Item 2 — Real Account Telemetry. /api/account/* is
+# covered by the same prefix-generic _auth_middleware — no auth changes
+# needed here either.
+app.include_router(_account_router)
 
 
 # ── P1-A: Dashboard authentication ─────────────────────────────────────────
@@ -544,14 +569,26 @@ def _uptime_s() -> int:
 # REST Endpoints
 # ═════════════════════════════════════════════════════════════════════════════
 
-# v14 Phase 4 — serve Vite-built React SPA from dashboard/dist/
-# Falls back to dashboard/index.html (legacy CDN version) if dist not present
-_DASHBOARD_DIST = _os.path.join(_DASHBOARD_DIR, "dist")
+# v14 Phase 4 — serve Vite-built React SPA from dashboard_src/dist/
+# (Track W14-1 Item 9 fixed the path — see _DASHBOARD_SRC_DIST above).
+# Falls back to dashboard/index.html (legacy CDN demo, self-simulated
+# fake data) ONLY if the real build is missing, and now logs loudly
+# every time that happens — a live-money dashboard silently showing a
+# fake-data demo instead of a missing-build error is exactly the
+# failure mode this phase exists to close.
+_DASHBOARD_DIST = _DASHBOARD_SRC_DIST
 
 # Mount Vite built static assets (JS/CSS chunks) from dist/assets/
 _DASHBOARD_ASSETS = _os.path.join(_DASHBOARD_DIST, "assets")
 if _os.path.exists(_DASHBOARD_ASSETS):
     app.mount("/assets", StaticFiles(directory=_DASHBOARD_ASSETS), name="dashboard-assets")
+else:
+    logger.warning(
+        "V16 dashboard build not found at %s — run `npm run build` in "
+        "dashboard_src/. Until then, any dashboard request falls back to "
+        "the legacy V13 demo (fake/simulated data) — see serve_dashboard().",
+        _DASHBOARD_ASSETS,
+    )
 
 @app.get("/", include_in_schema=False)
 @app.get("/dashboard", include_in_schema=False)
@@ -567,17 +604,35 @@ if _os.path.exists(_DASHBOARD_ASSETS):
 @app.get("/world", include_in_schema=False)  # V15: World HQ 2D game page
 async def serve_dashboard():
     """
-    Serve the Brain Bot V15 React Command Office + World HQ dashboard.
-    Tries dist/ (Vite production build) first, falls back to legacy index.html.
-    All SPA routes return the same index.html so React Router handles them client-side.
+    Serve the Brain Bot V16 React Command Office + World HQ dashboard
+    from dashboard_src/dist/ (the real, authoritative build — Track
+    W14-1 Item 9). All SPA routes return the same index.html so React
+    Router handles them client-side.
+
+    Falls back to the legacy dashboard/index.html demo ONLY if the real
+    build is missing — and logs a CRITICAL each time, because that demo
+    renders fully self-simulated fake account/equity/position data
+    (Math.random()-driven), which must never be mistaken for live
+    account state on a system this audit's own scope is about making
+    safe for real money.
     """
     dist_index = _os.path.join(_DASHBOARD_DIST, "index.html")
     if _os.path.exists(dist_index):
         return FileResponse(dist_index, media_type="text/html")
     legacy = _os.path.join(_DASHBOARD_DIR, "index.html")
     if _os.path.exists(legacy):
+        logger.critical(
+            "Serving the LEGACY V13 demo dashboard (fake/simulated data) "
+            "because no V16 build exists at %s. Run `npm run build` in "
+            "dashboard_src/ and restart. This is NOT a real data view.",
+            dist_index,
+        )
         return FileResponse(legacy, media_type="text/html")
-    return HTMLResponse("<h1 style=\'font-family:monospace;color:#00ff88;background:#070714;padding:40px\'>Brain Bot V14 API is running. Dashboard not found at: " + dist_index + "</h1>")
+    return HTMLResponse(
+        "<h1 style='font-family:monospace;color:#00ff88;background:#070714;padding:40px'>"
+        "Brain Bot V16 API is running. Dashboard not found — build it with "
+        "`npm run build` in dashboard_src/ (expected at: " + dist_index + ")</h1>"
+    )
 
 
 @app.get("/api/health")
@@ -591,7 +646,7 @@ async def health():
 
     return _ok({
         "status":            "ok",
-        "version":           "v13-phase4c",
+        "version":           "v16.0.0",
         "symbol":            settings.SYMBOL,
         "leverage":          settings.LEVERAGE,
         "testnet":           settings.BINANCE_TESTNET,

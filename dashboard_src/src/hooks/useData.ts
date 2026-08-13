@@ -44,6 +44,7 @@ import { api, wsEvents, wsDecision, wsAgents, wsMissions, wsML } from '@/lib/api
 import {
   useDecision, useHealth, useMissions, useAgents,
   useMarket, useJournal, useML, useCommander, useUI, useEventLog,
+  useAccount,
 } from '@/stores'
 import type { BusEvent } from '@/types/api'
 
@@ -301,6 +302,24 @@ export function useCommanderData() {
   usePoll(f, 5000)
 }
 
+// V16 Track W14-1 Item 4/5 — real account/position telemetry. Polls
+// GET /api/account/state directly (no WS channel for this yet — C1's
+// own cache TTL, not this poll interval, is what actually rate-limits
+// upstream Binance calls; see api/account_api.py's module docstring).
+// Deliberately does NOT gate on lifecycle_state/commander state — Item 3
+// requires telemetry to keep updating no matter what the bot's
+// START/STOP state is, and this hook has no dependency on useCommander
+// at all, so there is nothing here that could accidentally add one.
+export function useAccountData() {
+  const { setAccount } = useAccount()
+
+  const f = useCallback(async () => {
+    try { setAccount(await api.accountState() as any) } catch {}
+  }, [setAccount])
+
+  usePoll(f, 5000)
+}
+
 export function useAllData() {
   useDecisionData()
   useHealthData()
@@ -311,4 +330,5 @@ export function useAllData() {
   useMLData()
   useEventStream()
   useCommanderData()
+  useAccountData()
 }

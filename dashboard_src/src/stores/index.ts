@@ -5,10 +5,12 @@
  * when data is reference-identical or semantically unchanged.
  */
 import { create } from 'zustand'
+import { api } from '@/lib/api'
 import type {
   DecisionData, SystemHealthData, MissionsData, AgentsData, TelemetryData,
   IntelligenceData, FuturesData, RegimeData, JournalData, SignalsData,
   MLStatus, MLPerformance, PaperMetrics, CommandState, BusEvent, ReconciliationData,
+  AccountStateData,
 } from '@/types/api'
 
 // ── Equality helpers ─────────────────────────────────────────────────────────
@@ -153,4 +155,52 @@ interface UIState { connected: boolean; setConnected: (v: boolean) => void }
 export const useUI = create<UIState>(set => ({
   connected: false,
   setConnected: connected => set(s => s.connected === connected ? s : { connected }),
+}))
+
+// ── Account (V16 Track W14-1 Item 4/5 — real telemetry) ─────────────────────────
+
+interface AccountState { account: AccountStateData | null; setAccount: (d: AccountStateData) => void }
+export const useAccount = create<AccountState>(set => ({
+  account: null,
+  setAccount: account => set(s => shallowEqual(s.account as any, account as any) ? s : { account }),
+}))
+
+// ── Auth (V16 Track W14-1 Item 7) ────────────────────────────────────────────
+//
+// Reactive mirror of lib/api.ts's in-memory token state, so components
+// (LoginModal, LifecycleControl) re-render on login/logout without api.ts
+// needing to know about React at all. The token itself never lives here
+// (or anywhere in React state) — only role/expiresAt/error, which are
+// safe to display. See api.ts's own module docstring for why the token
+// is in-memory only (no localStorage/sessionStorage, not baked into the
+// build).
+interface AuthState {
+  role: string | null
+  expiresAt: number | null
+  error: string | null
+  loggingIn: boolean
+  login: (apiKey: string) => Promise<boolean>
+  logout: () => void
+}
+export const useAuth = create<AuthState>(set => ({
+  role: null,
+  expiresAt: null,
+  error: null,
+  loggingIn: false,
+  login: async (apiKey: string) => {
+    set({ loggingIn: true, error: null })
+    try {
+      const { role, expiresAt } = await api.login(apiKey)
+      set({ role, expiresAt, loggingIn: false, error: null })
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Login failed'
+      set({ loggingIn: false, error: message, role: null, expiresAt: null })
+      return false
+    }
+  },
+  logout: () => {
+    api.logout()
+    set({ role: null, expiresAt: null, error: null })
+  },
 }))

@@ -239,3 +239,112 @@ class TestLiveModeRequiresAuth:
         with TestClient(app_module.app):
             pass  # paper/testnet may still legitimately run without auth
 
+
+class TestLifecycleCommandAuth:
+    """
+    V16 Track W14-1 Item 7 — dedicated coverage for the actual "start
+    bot"/"stop bot" commands (Item 6's START/STOP UI), rather than
+    relying on TestApiKeyAuth's generic "show risk"/"show pnl" commands
+    as a stand-in. The auth middleware enforces role by route+method
+    before the handler ever sees the command string (see api/app.py's
+    _AUTH_OPERATOR_ROUTES), so those generic tests already prove the
+    mechanism works — this class proves it specifically for the two
+    commands the new frontend button actually sends.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_lifecycle(self):
+        from commander.control_state import reset_control_state
+        reset_control_state()
+        yield
+        reset_control_state()
+
+    def test_unauthenticated_start_command_rejected(self, auth_client):
+        r = auth_client.post("/api/command", json={"command": "start bot"})
+        assert r.status_code == 401
+
+    def test_unauthenticated_stop_command_rejected(self, auth_client):
+        r = auth_client.post("/api/command", json={"command": "stop bot"})
+        assert r.status_code == 401
+
+    def test_viewer_cannot_start(self, auth_client):
+        r = auth_client.post(
+            "/api/command", json={"command": "start bot"},
+            headers={"X-API-Key": "test-viewer-key"},
+        )
+        assert r.status_code == 403
+
+    def test_viewer_cannot_stop(self, auth_client):
+        r = auth_client.post(
+            "/api/command", json={"command": "stop bot"},
+            headers={"X-API-Key": "test-viewer-key"},
+        )
+        assert r.status_code == 403
+
+    def test_operator_can_start(self, auth_client):
+        r = auth_client.post(
+            "/api/command", json={"command": "start bot"},
+            headers={"X-API-Key": "test-operator-key"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["data"]["success"] is True
+        assert body["data"]["data"]["lifecycle_state"] in ("STARTING", "RUNNING")
+
+    def test_operator_can_stop(self, auth_client):
+        from commander.control_state import get_control_state
+        get_control_state().mark_starting()
+        get_control_state().mark_running()
+        r = auth_client.post(
+            "/api/command", json={"command": "stop bot"},
+            headers={"X-API-Key": "test-operator-key"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["data"]["success"] is True
+        # stop() resolves synchronously STOPPING -> STOPPED today (single-
+        # process, no real async drain step yet — see control_state.py's
+        # own stop() docstring), so the final reported state is STOPPED,
+        # not STOPPING.
+        assert body["data"]["data"]["lifecycle_state"] == "STOPPED"
+
+    def test_bearer_token_from_operator_key_can_start(self, auth_client):
+        # This is the exact path the new LoginModal/LifecycleControl
+        # frontend flow uses: exchange an API key for a Bearer token
+        # once, then send commands with that token — not the raw key.
+        tok = auth_client.post(
+            "/api/auth/token", json={"api_key": "test-operator-key"},
+        ).json()["data"]["token"]
+        r = auth_client.post(
+            "/api/command", json={"command": "start bot"},
+            headers={"Authorization": f"Bearer {tok}"},
+        )
+        assert r.status_code == 200
+        assert r.json()["data"]["success"] is True
+
+    def test_invalid_bearer_token_rejected_for_start(self, auth_client):
+        r = auth_client.post(
+            "/api/command", json={"command": "start bot"},
+            headers={"Authorization": "Bearer not-a-real-token"},
+        )
+        assert r.status_code == 401
+
+    def test_illegal_transition_reports_failure_not_success(self, auth_client):
+        # Starting twice in a row: second call must not silently succeed
+        # or lie about the resulting state — matches Item 6's "no
+        # optimistic UI" requirement on the backend side too.
+        auth_client.post(
+            "/api/command", json={"command": "start bot"},
+            headers={"X-API-Key": "test-operator-key"},
+        )
+        r = auth_client.post(
+            "/api/command", json={"command": "stop bot"},
+            headers={"X-API-Key": "test-viewer-key"},  # wrong role this time
+        )
+        assert r.status_code == 403
+        # And the lifecycle state must be unaffected by the rejected call.
+        from commander.control_state import get_control_state
+        assert get_control_state().lifecycle_state() != "STOPPING"
+

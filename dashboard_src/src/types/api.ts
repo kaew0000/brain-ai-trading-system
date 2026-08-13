@@ -34,5 +34,58 @@ export interface PaperMetricsValues { total_trades:number; wins:number; losses:n
 export interface PaperMetrics { enabled:boolean; metrics:PaperMetricsValues|null; reason:string|null }
 export interface Signal { id:number; timestamp:string; action:string; confidence:number; regime:string; entry_price:number }
 export interface SignalsData { symbol:string; count:number; signals:Signal[] }
-export interface CommandState { paused:boolean; paper_mode_forced:boolean; updated_at:string|null }
+export interface CommandState {
+  paused: boolean
+  paper_mode_forced: boolean
+  updated_at: string | null
+  // W14-0 — was already returned by GET /api/command/state
+  // (get_control_state().snapshot()) but never modeled on the frontend
+  // until Track W14-1. One of STOPPED/STARTING/RUNNING/STOPPING/FAILED —
+  // see commander/control_state.py.
+  lifecycle_state?: 'STOPPED' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'FAILED'
+}
+
+// V16 Track W14-1 Item 4/5 — real account telemetry (api/account_api.py).
+// Mirrors that endpoint's response exactly; every field can genuinely be
+// null/empty (see account_api.py's own "never fabricate a 0" rule) —
+// consumers must render an explicit "no data yet" state, not a 0.
+export interface AccountPosition {
+  symbol: string; side: 'LONG' | 'SHORT'; quantity: number
+  entry_price: number; mark_price: number; liquidation_price: number
+  leverage: number; margin_type: string; unrealized_pnl: number
+  notional: number; roi_pct: number | null
+  sl_price: number | null; tp_price: number | null; version: number
+}
+export interface AccountOrder {
+  symbol: string; order_id: number | string; client_order_id: string
+  side: string; type: string; status: string; stop_price: number | null
+  orig_qty: number; executed_qty: number; reduce_only: boolean
+  is_sl: boolean; is_tp: boolean
+}
+export interface SectorAllocationEntry { sector: string; notional: number; pct: number }
+export interface AccountPerformance {
+  total_trades: number; win_rate: number | null
+  profit_factor: number | null; avg_rr: number | null
+}
+export interface AccountStateData {
+  status: 'NO_DATA_YET' | 'LIVE' | 'STALE' | 'OFFLINE' | 'ERROR'
+  mode: string
+  account: {
+    wallet_balance: number; available_balance: number; unrealized_pnl: number
+    total_margin_balance: number; maintenance_margin: number; initial_margin: number
+    margin_ratio: number | null
+  } | null
+  positions: AccountPosition[]
+  orders: AccountOrder[]
+  sector_allocation: SectorAllocationEntry[]
+  realized_pnl_total: number | null
+  realized_pnl_today: number | null
+  performance: AccountPerformance
+  revision: number | null
+  fetched_at: number | null
+  age_seconds: number | null
+  degraded?: boolean
+  stale_reason?: string | null
+  health_score?: number
+}
 export interface BusEvent { agent:string; event:string; message:string; severity:'info'|'warning'|'critical'; payload:Record<string,unknown>; timestamp:string; seq?:number }

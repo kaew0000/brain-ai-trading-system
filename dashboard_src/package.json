@@ -1,6 +1,6 @@
 {
-  "name": "brain-bot-v15-dashboard",
-  "version": "15.0.0",
+  "name": "brain-bot-v16-dashboard",
+  "version": "16.0.0",
   "private": true,
   "type": "module",
   "scripts": {
