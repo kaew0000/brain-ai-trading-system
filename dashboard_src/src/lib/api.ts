@@ -28,13 +28,73 @@
 const BASE = ''
 const FETCH_TIMEOUT_MS = 8_000
 
+// ── Auth (V16 Track W14-1 Item 7) ───────────────────────────────────────────
+//
+// In-memory only — never localStorage/sessionStorage (fails a page
+// reload, same as a real session token should), never baked into the
+// build (this is runtime state set by login(), not a build-time env
+// var). See api/auth.py's module docstring for the two-credential-type
+// design this bootstraps against: the OPERATOR enters their long-lived
+// API key once via the login form, and this module holds only the
+// resulting short-lived Bearer JWT for the rest of the session.
+let _authToken: string | null = null
+let _authRole: string | null = null
+let _authExpiresAt: number | null = null
+
+function authHeaders(): Record<string, string> {
+  return _authToken ? { Authorization: `Bearer ${_authToken}` } : {}
+}
+
+/** Exchanges an API key for a session Bearer token via the existing
+ *  POST /api/auth/token (api/app.py — already implemented, not a new
+ *  auth system). Throws with the backend's own error message on
+ *  failure (invalid key, etc.) — callers must show this as a real
+ *  failure, never treat it as success. */
+async function login(apiKey: string): Promise<{ role: string; expiresAt: number }> {
+  const controller = new AbortController()
+  const tid = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const r = await fetch(`${BASE}/api/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+      signal: controller.signal,
+    })
+    clearTimeout(tid)
+    const body = await r.json().catch(() => null)
+    if (!r.ok) {
+      const msg = body?.error || body?.detail || `login failed (HTTP ${r.status})`
+      throw new Error(msg)
+    }
+    const data = body?.data ?? {}
+    if (!data.token) throw new Error('login response missing token')
+    _authToken = data.token
+    _authRole = data.role ?? null
+    _authExpiresAt = data.expires_at ?? null
+    return { role: _authRole as string, expiresAt: _authExpiresAt as number }
+  } catch (err) {
+    clearTimeout(tid)
+    throw err
+  }
+}
+
+function logout(): void {
+  _authToken = null
+  _authRole = null
+  _authExpiresAt = null
+}
+
+function authSnapshot(): { authenticated: boolean; role: string | null; expiresAt: number | null } {
+  return { authenticated: _authToken !== null, role: _authRole, expiresAt: _authExpiresAt }
+}
+
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 async function get<T>(path: string): Promise<T> {
   const controller = new AbortController()
   const tid = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    const r = await fetch(`${BASE}${path}`, { signal: controller.signal })
+    const r = await fetch(`${BASE}${path}`, { signal: controller.signal, headers: authHeaders() })
     clearTimeout(tid)
     if (!r.ok) throw new Error(`${path} → ${r.status}`)
     const body = await r.json()
@@ -51,7 +111,7 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
   try {
     const r = await fetch(`${BASE}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(payload),
       signal: controller.signal,
     })
@@ -91,6 +151,13 @@ export const api = {
   mlPerformance:  () => get('/api/ml/performance'),
   forwardTest:    () => get('/api/forward_test'),
   commandState:   () => get('/api/command/state'),
+  // V16 Track W14-1 Item 4/5 — real account/position telemetry, replaces
+  // the MockPortfolioProvider Portfolio.tsx previously used.
+  accountState:   () => get('/api/account/state'),
+  // V16 Track W14-1 Item 7 — OPERATOR auth bootstrap for START/STOP.
+  login,
+  logout,
+  authSnapshot,
   sendCommand:    (cmd: string, params?: Record<string, unknown>) =>
     post('/api/command', { command: cmd, params }),
   chat:           (message: string) => post('/api/chat', { message }),
@@ -145,7 +212,11 @@ export class ManagedWS {
           this.handlers.forEach(h => h(d))
         } catch (err) {
           // V15: log parse errors rather than silently ignoring
-          if (process.env.NODE_ENV !== 'production') {
+          // V16 BUG-LIVE-RISK: process.env is Node-only and doesn't exist in
+          // the browser/Vite runtime (caused TS2580 build failure). Vite
+          // exposes import.meta.env.DEV/.PROD natively, statically replaced
+          // at build time, no @types/node dependency needed.
+          if (import.meta.env.DEV) {
             console.debug('[ManagedWS] parse error:', err)
           }
         }

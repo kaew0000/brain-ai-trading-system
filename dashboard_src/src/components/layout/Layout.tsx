@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { useUI, useDecision, useHealth } from '@/stores'
+import { useUI, useDecision, useHealth, useCommander } from '@/stores'
 import { StatusDot, ActionBadge } from '@/components/common'
+import LifecycleControl from '@/components/commander/LifecycleControl'
+import LoginModal from '@/components/auth/LoginModal'
 import clsx from 'clsx'
 
 const NAV = [
@@ -29,10 +31,23 @@ export default function Layout(){
   const connected=useUI(s=>s.connected)
   const decision=useDecision(s=>s.data)
   const health=useHealth(s=>s.data)
+  const commanderState=useCommander(s=>s.state)
   const loc=useLocation()
   const sig=decision?.signal
   const overall=health?.overall_status??'UNKNOWN'
   const ovColor=overall==='ALIVE'?'text-accent-green':overall==='DEGRADED'?'text-accent-gold':'text-accent-red'
+  // V16 Track W14-1 Item 5 — "Waiting for first cycle" fix. `sig` itself
+  // is never cleared/reset (useDecisionData()'s poll only ever updates it
+  // on success, keeping last-known-good on failure — see useData.ts —
+  // and the backend's /api/decision also never clears latest_decision on
+  // stop, see api/app.py). What WAS missing: any signal that the shown
+  // decision might be stale because the bot isn't currently RUNNING.
+  // lifecycle_state undefined (older backend / not yet polled) is
+  // treated as "unknown", not as "definitely running" — never implies
+  // freshness it can't confirm.
+  const lifecycleState=commanderState?.lifecycle_state
+  const isLive=lifecycleState==='RUNNING'
+  const [showLogin,setShowLogin]=useState(false)
 
   return(
     <div className="flex h-screen overflow-hidden bg-surface bg-grid bg-grid">
@@ -79,10 +94,19 @@ export default function Layout(){
                   <span className="text-xs font-mono text-text-secondary tabular-nums">{sig.confidence.toFixed(1)}%</span>
                 </div>
                 <span className="text-xs text-text-muted hidden md:block">{sig.regime}</span>
+                {!isLive&&lifecycleState&&(
+                  <span
+                    className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-gold/15 text-accent-gold"
+                    title="Bot is not RUNNING — showing the last decision from before it stopped, not a live signal"
+                  >
+                    {lifecycleState==='STOPPED'?'STOPPED · last signal':lifecycleState}
+                  </span>
+                )}
               </>
             ):<span className="text-xs text-text-muted animate-pulse">Waiting for first cycle…</span>}
           </div>
           <div className="flex items-center gap-4">
+            <LifecycleControl onRequireLogin={()=>setShowLogin(true)}/>
             <span className={clsx('hidden sm:block text-xs font-mono font-medium',ovColor)}>{overall}</span>
             <Clock/>
           </div>
@@ -93,6 +117,7 @@ export default function Layout(){
           </motion.div>
         </main>
       </div>
+      {showLogin&&<LoginModal onClose={()=>setShowLogin(false)}/>}
     </div>
   )
 }

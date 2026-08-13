@@ -242,14 +242,56 @@ def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent
     return port
 
 
-def _open_browser(port: int, delay: float = 1.5) -> None:
-    """Open the dashboard in the default browser after a short delay."""
+def _wait_for_health(port: int, timeout: float = 15.0, poll_interval: float = 0.25) -> bool:
+    """V16 Track W14-1 Item 10 — poll GET /api/health until it answers
+    200 or `timeout` elapses. Uses stdlib urllib only (no new dependency
+    for main.py). Never raises — a health check that can't itself fail
+    safely would defeat the point of it."""
+    import urllib.request
+    import urllib.error
+
+    url = f"http://127.0.0.1:{port}/api/health"
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1.0) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        _time.sleep(poll_interval)
+    return False
+
+
+def _open_browser(port: int, timeout: float = 15.0) -> None:
+    """Open the dashboard once the API server is actually answering
+    /api/health, instead of assuming a fixed 1.5s sleep was always
+    enough (Track W14-1 Item 10 — the fixed sleep was a real,
+    confirmed gap: a slow startup, e.g. a cold ML model load, could
+    open the browser before uvicorn was listening).
+
+    Still exactly one daemon thread, same as before — this does not add
+    a second polling system alongside the existing server supervision
+    (_supervised_broadcast() etc. in api/app.py); it only changes what
+    this one thread waits on before firing webbrowser.open().
+
+    On timeout it does not silently give up: it logs a clear warning
+    and still opens the browser once (arguably still useful — the
+    operator can refresh), rather than leaving them with no browser tab
+    and no explanation at all.
+    """
     def _open():
-        _time.sleep(delay)
-        url = f"http://localhost:{port}/"  # was /dashboard — no route existed for that path (see App.tsx and routing.test.tsx)
+        ready = _wait_for_health(port, timeout=timeout)
+        url = f"http://localhost:{port}/"
+        if not ready:
+            logger.warning(
+                f"Dashboard API did not answer /api/health within {timeout}s "
+                f"— opening browser anyway ({url}); refresh if it shows an "
+                "error, the server may still be starting."
+            )
         try:
             webbrowser.open(url)
-            logger.info(f"Browser opened: {url}")
+            logger.info(f"Browser opened: {url}" + ("" if ready else " (server readiness unconfirmed)"))
         except Exception as exc:
             logger.warning(f"Could not open browser: {exc} — open manually: {url}")
     t = threading.Thread(target=_open, daemon=True, name="browser-launch")
@@ -267,6 +309,28 @@ def build_system() -> dict:
 
     logger.info("[1/9] Data Layer …")
     data_provider = BinanceDataProvider()
+
+    # V16 Track W14-1 (Dashboard V16 real account telemetry): register
+    # the C1 ExchangeStateManager singleton here, unconditionally, so it
+    # exists in exchange_state.manager's process-wide registry BEFORE
+    # _start_api_server() starts (main() calls build_system() then
+    # _start_api_server() — build_system() always runs first). This is
+    # the SAME get_manager(data_provider, mode=EXECUTION_MODE) call the
+    # ORDER_TIMELINE_ENABLED block below already makes when that flag is
+    # on; calling it here too is a no-op for that path — get_manager()'s
+    # registry hands back the existing instance for a given (mode,
+    # exchange, account_id) key, never builds a second one (see
+    # exchange_state/manager.py). Construction alone makes no Binance
+    # call (see ExchangeStateManager.__init__) — the first real upstream
+    # call happens lazily, on the first get_snapshot(), which
+    # api/account_api.py's GET /api/account/state triggers on its first
+    # request. Previously this registration only happened when
+    # ORDER_TIMELINE_ENABLED=True (default False), which was the actual
+    # gap the read-only C1/C3 audit identified: real account telemetry
+    # for the dashboard should not depend on the unrelated order-timeline
+    # feature flag.
+    from exchange_state.manager import get_manager as _get_exchange_state_manager
+    exchange_manager = _get_exchange_state_manager(data_provider, mode=EXECUTION_MODE)
 
     logger.info("[2/9] Feature Layer …")
     smc_engine    = SMCEngine()
@@ -582,6 +646,7 @@ def build_system() -> dict:
         "market_scanner":        market_scanner,
         "execution_scheduler":   execution_scheduler,
         "order_timeline":        order_timeline,
+        "exchange_manager":      exchange_manager,
         "current_mission_id":    None,
     }
 
