@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-12T11:32:57Z",
+  "updated_at": "2026-08-12T12:01:47Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -340,7 +340,7 @@
       "branch": "feature/phase4c-step8-persistent-trading-knowledge",
       "bundle_filename": "phase4c-step8-persistent-trading-knowledge.bundle",
       "status": "failed",
-      "imported_at": "2026-08-12T11:32:57Z",
+      "imported_at": "2026-08-12T12:01:47Z",
       "pushed": false,
       "reason": "fetch failed: From /data/data/com.termux/files/home/brain-ai-trading-system/update/incoming/phase4c-step8-persistent-trading-knowledge.bundle\n ! [rejected] feature/phase4c-step8-persistent-trading-knowledge -> feature/phase4c-step8-persistent-trading-knowledge  (non-fast-forward)"
     }
