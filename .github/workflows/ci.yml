@@ -25,6 +25,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Track W14-1 (PR #53) added tests/test_dashboard_serving.py, which
+      # asserts against the real Vite build output at dashboard_src/dist/
+      # (see that file's module docstring). dist/ is gitignored, so it
+      # only exists if this job builds it first — without this step those
+      # tests fail on every clean checkout, CI included.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard_src/package-lock.json
+      - name: Build dashboard_src (required by tests/test_dashboard_serving.py)
+        run: |
+          cd dashboard_src
+          npm ci
+          npm run build
       - run: pip install -r requirements.txt
       - run: pip install pytest-cov
       - run: pytest tests/ -q --cov=. --cov-report=xml --cov-report=term
