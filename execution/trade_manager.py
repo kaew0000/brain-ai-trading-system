@@ -716,7 +716,7 @@ class TradeManager:
     ) -> dict:
         """
         Complete execution sequence:
-          1. Set leverage + ISOLATED margin
+          1. Set leverage + margin type (settings.MARGIN_TYPE)
           2. Cancel stale orders
           3. Calculate position size
           4. Market entry
@@ -760,7 +760,7 @@ class TradeManager:
         try:
             intended_leverage = leverage or settings.LEVERAGE
             leverage_ok = self.set_leverage(intended_leverage)
-            self.set_margin_type("ISOLATED")
+            self.set_margin_type(settings.MARGIN_TYPE)
             self.cancel_all_orders()
 
             # V16 BUG-LIVE-RISK-03: set_leverage()'s return value used to be

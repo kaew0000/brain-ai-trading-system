@@ -123,7 +123,7 @@ class ExecutionCoordinator:
         return manager
 
     def initialize(
-        self, leverage: int | None = None, margin_type: str = "ISOLATED"
+        self, leverage: int | None = None, margin_type: str | None = None
     ) -> dict[str, bool]:
         """
         Pre-warm every configured symbol: create its TradeManager and set
@@ -135,11 +135,12 @@ class ExecutionCoordinator:
         without this method raising and aborting the other symbols.
         """
         results: dict[str, bool] = {}
+        effective_margin_type = margin_type or settings.MARGIN_TYPE
         for symbol in self._symbols:
             try:
                 mgr = self.get_manager(symbol)
                 lev_ok = mgr.set_leverage(leverage)
-                margin_ok = mgr.set_margin_type(margin_type)
+                margin_ok = mgr.set_margin_type(effective_margin_type)
                 results[symbol] = bool(lev_ok and margin_ok)
             except Exception as exc:
                 logger.error(f"ExecutionCoordinator.initialize({symbol}) failed: {exc}")
