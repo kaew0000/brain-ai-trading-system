@@ -120,7 +120,17 @@ class TestFeatureFlag:
 
         result = gated.get_signal("BTCUSDT")
 
-        assert result == LONG_SIGNAL
+        # V16 W14-2A: result is no longer byte-identical to LONG_SIGNAL —
+        # get_signal() now also threads agent_attribution_from_ceo_decision()
+        # onto the outgoing ExecutionSignal (see TestAttributionWiring
+        # below for dedicated coverage of that new field). Compare the
+        # pre-existing pricing/direction fields explicitly instead of
+        # full dataclass equality, per this test's own original intent
+        # (confirm the CEO-routed pricing came from `adapter`, not `sp`).
+        assert result.direction == LONG_SIGNAL.direction
+        assert result.entry_price == LONG_SIGNAL.entry_price
+        assert result.stop_loss == LONG_SIGNAL.stop_loss
+        assert result.take_profit == LONG_SIGNAL.take_profit
         assert adapter.calls == ["BTCUSDT"]
         assert sp.get_signal_calls == []  # bare get_signal() never called when enabled
 
@@ -156,7 +166,14 @@ class TestEnabledBehavior:
         decision = CEODecision(action="LONG", direction="LONG", confidence=85.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
-        assert gated.get_signal("BTCUSDT") == LONG_SIGNAL
+        result = gated.get_signal("BTCUSDT")
+        # V16 W14-2A: agent_attribution is now populated (see
+        # TestAttributionWiring below) — compare pricing fields only,
+        # matching this test's original "priced signal" intent.
+        assert result.direction == LONG_SIGNAL.direction
+        assert result.entry_price == LONG_SIGNAL.entry_price
+        assert result.stop_loss == LONG_SIGNAL.stop_loss
+        assert result.take_profit == LONG_SIGNAL.take_profit
 
     def test_ceo_vetoes_by_disagreement_returns_none(self):
         decision = CEODecision(action="SHORT", direction="SHORT", confidence=85.0)
@@ -265,4 +282,12 @@ class TestJournalPersistence:
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, journal=journal, enabled=True)
         result = gated.get_signal("BTCUSDT")  # must not raise
-        assert result == LONG_SIGNAL  # the trading decision itself still succeeds
+        # the trading decision itself still succeeds. V16 W14-2A:
+        # agent_attribution is built in-process from ceo_decision (no
+        # I/O), so it's still populated even though every journal write
+        # above failed — compare pricing fields only, same reasoning as
+        # the other two updated assertions in this file.
+        assert result.direction == LONG_SIGNAL.direction
+        assert result.entry_price == LONG_SIGNAL.entry_price
+        assert result.stop_loss == LONG_SIGNAL.stop_loss
+        assert result.take_profit == LONG_SIGNAL.take_profit

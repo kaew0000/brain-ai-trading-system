@@ -3675,3 +3675,109 @@ safety audit. `trade_knowledge`/`agent_knowledge` tests use a real
 `TradeJournalV2` (tmp_path-backed SQLite, same established pattern
 §35's own tests use) — not a mocked journal — so the Step 7C
 integration claims above are proven against real code paths.
+
+## 37. CEO-to-Agent Attribution Pipeline Wiring — V16 W14-2A (2026-08-14)
+
+### Purpose
+
+`journal/trade_attribution.py`'s `agent_attribution_from_ceo_decision()`
+(§32, Phase 4B Step 2) and `record_trade_outcome()`'s `agent_attribution`
+parameter existed and were tested, but had no production caller — no
+live code path actually built an attribution list from a real
+`CEODecision` and persisted it against a trade. This phase adds exactly
+that: a live caller on each of this codebase's two CEO-decision paths.
+
+### Attribution call site
+
+Two call sites, one per execution path (`settings.CEO_MULTI_SYMBOL_ENABLED`
+selects which is live):
+
+- **Path A — `main.py`'s single-symbol `run_trading_cycle()`** (the
+  default, `CEO_MULTI_SYMBOL_ENABLED=False`): right after
+  `jrn.save_trade(rec, signal_id=sig_id)`, if this cycle produced a
+  `ceo_decision` (10a), `agent_attribution_from_ceo_decision(ceo_decision.to_dict())`
+  is built and persisted via the existing `jrn.save_execution_attribution(tid, agent_attribution=...)`
+  merge API — wrapped in a non-fatal try/except, same convention as
+  this file's existing per-agent `save_agent_decision()` calls.
+- **Path B — `execution/ceo_gated_signal_provider.py`'s
+  `CEOGatedSignalProvider._get_signal_ceo_enabled()`** (`CEO_MULTI_SYMBOL_ENABLED=True`):
+  the same builder call threads `agent_attribution` onto the outgoing
+  `ExecutionSignal` (new field, default `None` — every pre-existing
+  construction site untouched) via `dataclasses.replace()`, mirroring
+  `signal_id`'s own Step 7C (§35) threading pattern. `execution/execution_orchestrator.py`'s
+  `_record_trade_opened()` passes `signal.agent_attribution` straight
+  into `TradeLifecycle.open_confirmed()`, which already forwarded an
+  `agent_attribution` kwarg to `record_trade_outcome()` (§32) — no
+  change needed there.
+
+Neither call site fires from a test-only path, the dashboard, a polling
+endpoint, or a mock/paper engine — both sit at the point each pipeline
+already finalizes its own live `CEODecision` for the cycle.
+
+### Identity flow
+
+```
+CEODecision (agents/ceo_agent.py)
+      -> agent_attribution_from_ceo_decision() (journal/trade_attribution.py, §32, unchanged)
+      -> [Path A] jrn.save_execution_attribution(trade_id, agent_attribution=...)
+         [Path B] ExecutionSignal.agent_attribution -> TradeLifecycle.open_confirmed()
+                   -> record_trade_outcome() -> journal.save_execution_attribution()
+      -> trades.extra_data.attribution.agent_attribution (journal_v2.py, existing column/shape)
+```
+
+`journal_v2.get_trade_attribution()`'s pre-existing, already-documented
+precedence rule — an explicit `agent_attribution` on the trade wins
+over the `agent_decisions` signal_id join — means Path B trades now
+read back through that explicit branch for the first time; the join
+itself (§35) is unchanged and still exercised for trades that carry no
+explicit attribution.
+
+### Persistence
+
+Existing mechanism only: `journal_v2.TradeJournalV2.save_execution_attribution()`
+(§32's Task 5 API, a read-modify-write merge into `trades.extra_data`).
+No new table, no new column, no new persistence method.
+
+### Idempotency
+
+`trade_id` (Path A) is the natural idempotency key —
+`save_execution_attribution()` merges into `extra_data` rather than
+appending, so re-invoking it for the same trade with the same content
+is a no-op overwrite. `agent_attribution_from_ceo_decision()` is a pure
+function of `ceo_decision` (no I/O), so Path B's attribution is
+byte-identical across repeated calls for the same decision.
+
+### Failure semantics
+
+Fail-open telemetry on both paths: a persistence or build failure is
+logged and swallowed, never raised, and never affects whether the
+trade itself executed — matches every other diagnostic-write
+try/except already in `main.py` and `execution/execution_orchestrator.py`.
+
+### Lifecycle / live safety
+
+Both call sites sit strictly after W14-0's lifecycle gate(s) — Path A
+after the `lifecycle_state != "RUNNING"` early-return and the
+paper-mode-forced early-return (main.py), so a STOPPED or forced-paper
+cycle never reaches either the CEO decision step or the attribution
+call. No new execution/order-routing logic was added by this phase;
+attribution is purely additive metadata on a trade that already
+executed through pre-existing, unmodified code.
+
+### Tests
+
+`tests/test_w14_2a_attribution_wiring.py` (new, 8 tests): live call
+path, correct trade_id, missing-agent-vote honesty (no fabrication),
+non-fatal persistence-failure handling, idempotent/pure-function
+attribution content, W14-0 lifecycle-STOPPED never building or
+persisting attribution, and paper-mode-forced never persisting
+attribution. Six pre-existing tests across
+`tests/test_ceo_gated_signal_provider.py`,
+`tests/test_ceo_live_recommendation_wiring.py`,
+`tests/test_recommendation_dataset_row_count_wiring.py`,
+`tests/test_phase4b_step3c_verification.py`, and
+`tests/test_ceo_multi_symbol_agent_attribution.py` had assertions
+updated (documented inline at each site) to reflect this phase's
+intentional, backward-compatible field addition to `ExecutionSignal`
+and the `get_trade_attribution()` precedence rule now actually being
+exercised.
