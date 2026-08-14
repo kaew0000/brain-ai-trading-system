@@ -161,6 +161,15 @@ class ExecutionSignal:
     # literal) — see _record_trade_opened() below for how this is
     # consumed at trade-open time.
     signal_id:   int | None = None
+    # V16 W14-2A: optional per-agent attribution list carried from a
+    # CEO-gated signal-layer provider (execution/ceo_gated_signal_provider.py)
+    # that already ran agents/ceo_agent.py's CEOAgent for this cycle —
+    # see journal/trade_attribution.py's agent_attribution_from_ceo_decision()
+    # for the shape. Default None preserves every pre-existing
+    # positional/keyword construction site unchanged (same rationale as
+    # signal_id above). Consumed at trade-open time by
+    # _record_trade_opened() below.
+    agent_attribution: list[dict] | None = None
 
 
 SignalProvider = Callable[[str], ExecutionSignal | None]
@@ -485,12 +494,17 @@ class ExecutionOrchestrator:
         agents/ceo_agent.py's dynamic-weight fallback and main.py's
         per-agent try/except around save_agent_decision()).
 
-        No agent_attribution is recorded here — this pipeline
-        (execution/portfolio_signal_provider.py) doesn't run
-        agents/ceo_agent.py's CEOAgent, so there are no real per-agent
-        votes to attach (see docs/architecture.md §29 "Scope boundary").
-        get_trade_attribution() honestly returns an empty
-        agent_participation list for these trades rather than this
+        V16 W14-2A: agent_attribution is recorded here ONLY when
+        `signal` already carries one (i.e. signal.agent_attribution is
+        not None) — set by execution/ceo_gated_signal_provider.py when
+        it ran agents/ceo_agent.py's CEOAgent for this cycle (see
+        journal/trade_attribution.py's agent_attribution_from_ceo_decision()).
+        For every other caller (the plain execution/portfolio_signal_provider.py
+        path above, strategy_registry.py, every pre-W14-2A test's
+        ExecutionSignal(...) literal — none of which run CEOAgent),
+        signal.agent_attribution defaults to None and nothing changes:
+        get_trade_attribution() still honestly returns an empty
+        agent_participation list for those trades rather than this
         method fabricating one.
 
         V16 Phase 4C Step 7C: when `signal` already carries a signal_id
@@ -566,6 +580,7 @@ class ExecutionOrchestrator:
                 execution_id=execution_id,
                 order_id=order_id or None,
                 slippage=slippage,
+                agent_attribution=signal.agent_attribution,
                 source="EXECUTION_ORCHESTRATOR",
                 # fees: not recorded — Binance Futures' market-order
                 # response doesn't include commission; that requires a

@@ -116,7 +116,15 @@ class TestBackwardCompatibility:
         adapter = FakeAdapterNoKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
         result = gated.get_signal("BTCUSDT")
-        assert result == LONG_SIGNAL
+        # V16 W14-2A: agent_attribution_from_ceo_decision() output is now
+        # threaded onto the returned signal — compare pricing/direction
+        # fields only, matching this test's own "byte-identical call
+        # shape" intent (about the decide_with_signal() call, not the
+        # returned signal's full equality).
+        assert result.direction == LONG_SIGNAL.direction
+        assert result.entry_price == LONG_SIGNAL.entry_price
+        assert result.stop_loss == LONG_SIGNAL.stop_loss
+        assert result.take_profit == LONG_SIGNAL.take_profit
         assert adapter.calls == ["BTCUSDT"]
 
     def test_recommendation_provider_alone_still_works_unchanged(self):
@@ -210,7 +218,12 @@ class TestFailureSafety:
             dataset_row_count_provider=_boom,
         )
         result = gated.get_signal("BTCUSDT")
-        assert result == LONG_SIGNAL  # decision cycle proceeds regardless
+        # decision cycle proceeds regardless. V16 W14-2A: compare pricing
+        # fields only — see this file's other updated assertion above.
+        assert result.direction == LONG_SIGNAL.direction
+        assert result.entry_price == LONG_SIGNAL.entry_price
+        assert result.stop_loss == LONG_SIGNAL.stop_loss
+        assert result.take_profit == LONG_SIGNAL.take_profit
         assert adapter.calls == [("BTCUSDT", None, None)]
 
     def test_dataset_row_count_provider_failure_does_not_affect_recommendations(self):

@@ -289,7 +289,18 @@ class TestExecutionFollowsCeoDecisionExactly:
 
         gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), enabled=True)
         result = gated.get_signal("BTCUSDT")
-        assert result is priced_signal  # exactly the priced signal, not a reconstructed one
+        # V16 W14-2A: no longer the exact same object — get_signal() now
+        # always threads agent_attribution_from_ceo_decision() onto the
+        # outgoing signal via dataclasses.replace() (see
+        # tests/test_w14_2a_attribution_wiring.py for dedicated
+        # coverage), so a plain `is` check no longer holds. The pricing
+        # invariant this test actually cares about — CEO confirms the
+        # already-priced signal rather than reconstructing one with
+        # different numbers — still holds: same direction/entry/stop/tp.
+        assert result.direction == priced_signal.direction
+        assert result.entry_price == priced_signal.entry_price
+        assert result.stop_loss == priced_signal.stop_loss
+        assert result.take_profit == priced_signal.take_profit
 
     def test_short_decision_disagreeing_with_a_long_priced_signal_never_executes(self):
         """CEO cannot flip a LONG-priced signal into a SHORT trade — it

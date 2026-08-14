@@ -388,7 +388,17 @@ class TestRecommendationProviderWiring:
         adapter = FakeAdapterNoKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
         result = gated.get_signal("BTCUSDT")
-        assert result == LONG_SIGNAL
+        # V16 W14-2A: agent_attribution_from_ceo_decision() output is now
+        # threaded onto the returned signal (see
+        # tests/test_w14_2a_attribution_wiring.py for dedicated coverage)
+        # — compare pricing/direction fields only, matching this test's
+        # own "byte-identical call shape" intent (which is about the
+        # decide_with_signal() call, not the returned signal's full
+        # equality).
+        assert result.direction == LONG_SIGNAL.direction
+        assert result.entry_price == LONG_SIGNAL.entry_price
+        assert result.stop_loss == LONG_SIGNAL.stop_loss
+        assert result.take_profit == LONG_SIGNAL.take_profit
         assert adapter.calls == ["BTCUSDT"]
 
     def test_recommendation_provider_result_is_threaded_through(self):
@@ -414,7 +424,13 @@ class TestRecommendationProviderWiring:
             recommendation_provider=_boom,
         )
         result = gated.get_signal("BTCUSDT")
-        assert result == LONG_SIGNAL  # decision cycle proceeds; recommendations just weren't available
+        # decision cycle proceeds; recommendations just weren't available.
+        # V16 W14-2A: compare pricing fields only — see this file's other
+        # updated assertion above for why.
+        assert result.direction == LONG_SIGNAL.direction
+        assert result.entry_price == LONG_SIGNAL.entry_price
+        assert result.stop_loss == LONG_SIGNAL.stop_loss
+        assert result.take_profit == LONG_SIGNAL.take_profit
         assert adapter.calls == [("BTCUSDT", None)]  # empty kwargs -> .get() defaults to None
 
     def test_empty_list_from_provider_is_threaded_through_as_empty(self):

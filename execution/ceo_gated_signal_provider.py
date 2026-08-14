@@ -84,6 +84,7 @@ from typing import Optional
 from agents.multi_symbol_adapter import MultiSymbolCEOAdapter
 from execution.execution_orchestrator import ExecutionSignal
 from execution.portfolio_signal_provider import PortfolioSignalProvider
+from journal.trade_attribution import agent_attribution_from_ceo_decision
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -240,6 +241,22 @@ class CEOGatedSignalProvider:
         signal_id = self._journal_ceo_decision(symbol, ceo_decision)
         if final_signal is not None and signal_id is not None:
             final_signal = replace(final_signal, signal_id=signal_id)
+        # V16 W14-2A: build per-agent attribution from the SAME
+        # ceo_decision this whole cycle already produced (Step 7's
+        # agent_reports/weights_used, Step 6's confidence/action —
+        # nothing recalculated) and thread it onto the outgoing
+        # ExecutionSignal, mirroring signal_id's own pattern just above.
+        # Only when there's a final_signal to attach it to — a
+        # vetoed/WAIT/BLOCKED cycle has nothing to open a trade for, so
+        # there's nothing for execution_orchestrator.py's
+        # _record_trade_opened() to record attribution against.
+        # agent_attribution_from_ceo_decision() itself never raises and
+        # returns [] for a malformed/None decision, so this can't turn a
+        # real trade into a failure.
+        if final_signal is not None and ceo_decision is not None:
+            attribution = agent_attribution_from_ceo_decision(ceo_decision.to_dict())
+            if attribution:
+                final_signal = replace(final_signal, agent_attribution=attribution)
         return final_signal
 
     def _journal_ceo_decision(self, symbol: str, ceo_decision) -> int | None:

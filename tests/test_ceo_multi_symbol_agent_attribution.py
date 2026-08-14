@@ -370,7 +370,32 @@ class TestH8GetTradeAttributionSeesAgents:
         """Not raw-row inspection — the real, documented reader
         (journal_v2.get_trade_attribution(), already backing
         /api/trades/{id}/attribution or equivalent) must itself surface
-        the join, exactly as its own docstring promises."""
+        this trade's attribution.
+
+        V16 W14-2A: execution_orchestrator.py's _record_trade_opened()
+        now threads ExecutionSignal.agent_attribution (built by
+        ceo_gated_signal_provider.py via
+        agent_attribution_from_ceo_decision()) into
+        TradeLifecycle.open_confirmed() -> record_trade_outcome() ->
+        save_execution_attribution(), so this trade now carries an
+        EXPLICIT agent_attribution. get_trade_attribution()'s own
+        pre-existing, already-documented precedence rule ("if the trade
+        carries an explicit agent_attribution... that is returned as-is
+        instead of the join — the explicit value is assumed more
+        complete") means this test now exercises that explicit-value
+        branch rather than the agent_decisions join it exercised before
+        this phase had a live caller for it. journal/trade_attribution.py's
+        canonical agent key for the CEO's own entry is "ceo" (see that
+        module's own docstring — it is not itself a CEOAgent.WEIGHTS key,
+        so it is not named "CEO_AGENT" as agent_decisions rows are), and
+        its contribution values come from CEODecision.score_breakdown —
+        which this test's own _confirmed_decision() helper leaves empty
+        — not from a confidence*weight reconstruction. The
+        agent_decisions join itself (rows keyed by trade.signal_id) is
+        unchanged and still covered directly by TestH7AttributionJoinWorks
+        above and test_pre_step7c_trade_still_returns_empty_participation_not_fabricated
+        below (both exercise cases with no explicit agent_attribution on
+        the trade)."""
         decision = _confirmed_decision(agents=("smc", "futures"))
         signal = ExecutionSignal(direction=1, entry_price=100.0, stop_loss=90.0, take_profit=110.0)
         adapter = ControlledAdapter(decision, signal)
@@ -389,18 +414,27 @@ class TestH8GetTradeAttributionSeesAgents:
         assert attribution is not None
         assert attribution["trade_id"] == trade_id
         participation = attribution["agent_participation"]
-        # get_trade_attribution()'s join is unconditional on signal_id —
-        # CEO_AGENT shares the same signal_id (H2) and is itself a row
-        # in agent_decisions, so it's a legitimate third participant
-        # here, not a bug: 2 sub-agents + the CEO_AGENT row that gated
-        # them.
+        # 2 sub-agents (smc, futures) + the CEO's own aggregate entry —
+        # journal/trade_attribution.py's CEO_WEIGHTED_AGENT_KEYS-driven
+        # shape, not the agent_decisions join.
         assert len(participation) == 3
         agents_seen = {p["agent"] for p in participation}
-        assert agents_seen == {"CEO_AGENT", "smc", "futures"}
+        assert agents_seen == {"ceo", "smc", "futures"}
         for p in participation:
             assert set(p.keys()) == {"agent", "vote", "weight", "confidence", "contribution"}
             assert p["vote"] == "LONG"
-            assert p["contribution"] == round(p["confidence"] * p["weight"], 2)
+        ceo_entry = next(p for p in participation if p["agent"] == "ceo")
+        assert ceo_entry["weight"] == 1.0
+        assert ceo_entry["confidence"] == decision.confidence
+        assert ceo_entry["contribution"] == decision.confidence
+        for p in participation:
+            if p["agent"] != "ceo":
+                # _confirmed_decision() never populates score_breakdown,
+                # so contribution is honestly None here rather than a
+                # fabricated confidence*weight value — matches
+                # agent_attribution_from_ceo_decision()'s own documented
+                # "never fabricate" contract.
+                assert p["contribution"] is None
 
     def test_pre_step7c_trade_still_returns_empty_participation_not_fabricated(self, journal):
         """Backward compatibility: a trade with no signal_id (the

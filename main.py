@@ -55,6 +55,7 @@ from execution.execution_factory import build_execution_engine
 from execution.trade_lifecycle import CloseSource
 from analytics.trade_journal import TradeJournal, TradeRecord
 from journal.journal_v2 import TradeJournalV2
+from journal.trade_attribution import agent_attribution_from_ceo_decision
 from risk.risk_engine import RiskEngine
 from utils.logger import get_logger
 from agents import build_agent_layer
@@ -1225,6 +1226,28 @@ def run_trading_cycle(sys: dict) -> None:
         # so get_agent_performance() can join back to which agents voted for
         # the direction that was actually traded.
         tid = jrn.save_trade(rec, signal_id=sig_id)
+
+        # V16 W14-2A: build per-agent attribution from the SAME
+        # ceo_decision this cycle already produced above (10a) — nothing
+        # recalculated — and persist it against this trade row via the
+        # existing save_execution_attribution() merge API (the same one
+        # execution/trade_lifecycle.py's record_trade_outcome() uses for
+        # the CEO-gated multi-symbol path). trade_id is the natural
+        # idempotency key: save_execution_attribution() merges into
+        # trades.extra_data rather than appending, so calling this twice
+        # for the same tid is a no-op overwrite, not a duplicate. Never
+        # allowed to affect exec_result or raise past this point —
+        # attribution is diagnostic/audit data, not an execution
+        # authorization, matching this file's own established
+        # try/except-and-log convention around save_agent_decision() at
+        # 10c above.
+        if ceo_decision is not None and tid:
+            try:
+                attribution = agent_attribution_from_ceo_decision(ceo_decision.to_dict())
+                if attribution:
+                    jrn.save_execution_attribution(tid, agent_attribution=attribution)
+            except Exception as exc:
+                logger.debug(f"Trade attribution persist skipped for trade #{tid}: {exc}")
 
         if exec_result["success"]:
             logger.info(f"Trade #{tid} executed successfully")
