@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
@@ -22,6 +23,17 @@ class Settings(BaseSettings):
     # ── Trading ───────────────────────────────────────────
     SYMBOL: str = Field(default="BTCUSDT")
     LEVERAGE: int = Field(default=5)
+
+    # Binance rejects ISOLATED margin (error -4168) on accounts that have
+    # Multi-Assets Mode enabled — that mode only supports CROSSED. Default
+    # stays ISOLATED so every existing single-asset-mode deployment is
+    # unaffected; set MARGIN_TYPE=CROSSED in .env only if your Binance
+    # account itself is in Multi-Assets Mode. Switching this changes real
+    # trading risk: CROSSED shares margin across the whole futures wallet
+    # instead of isolating it per symbol.
+    MARGIN_TYPE: Literal["ISOLATED", "CROSSED"] = Field(
+        default="ISOLATED", alias="MARGIN_TYPE"
+    )
 
     # ── Multi-Symbol Foundation (V16 Phase 1, architecture only) ──────────
     # Optional list of symbols, e.g. SYMBOLS=["BTCUSDT","ETHUSDT"] in .env
