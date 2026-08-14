@@ -1,65 +1,43 @@
-# MIGRATION — V16 Phase 4C Step 8: Persistent Trading Knowledge Layer (Track A)
+# MIGRATION — Logging Subsystem Hotfix: Shared RotatingFileHandler
 
 ## Do you need to do anything?
 
-**No, not to keep the system running exactly as before.** This phase
-adds a new, standalone package (`knowledge_engine/`) and two new,
-currently-empty data directories (`raw/`, `knowledge/`). Nothing
-existing was modified — no schema change, no config flag, no import
-added to any file outside this phase's own new files. `main.py`, the
-scheduler, the dashboard, and every trading/risk/execution path are
-byte-for-byte unchanged.
+**No.** This is an internal implementation change inside
+`utils/logger.py` only. `get_logger(name)` keeps the exact same
+signature and return type (a standard `logging.Logger`), and every one
+of the ~83 existing call sites (`get_logger(__name__)`) needs no
+change. No config flag, no `.env` key, no schema change, no import
+added to any file outside `utils/logger.py` and the new test file.
 
-## If you want to actually use it
+## What actually changed, mechanically
 
-The knowledge layer isn't wired into any scheduled job — you invoke it
-yourself, e.g. from a Python shell or a small script, pointed at your
-real journal:
+Before: every distinct logger name got its own
+`RotatingFileHandler(cfg.LOG_FILE, ...)` instance — N names meant N
+open file handles on the same log file.
 
-```python
-from journal.journal_v2 import TradeJournalV2
-from knowledge_engine.trade_knowledge import ingest_closed_trade
-from knowledge_engine.agent_knowledge import ingest_agent_performance
-from knowledge_engine.index_builder import rebuild_index
-from knowledge_engine.chronolog import append_log_entry
+After: one shared `RotatingFileHandler` instance is created lazily on
+first use and reused for every logger name — exactly 1 open file
+handle on the log file, no matter how many modules call `get_logger()`.
 
-journal = TradeJournalV2()  # uses your real configured DB path
-
-# One closed trade:
-page = ingest_closed_trade(journal, trade_id=123)
-if page:
-    append_log_entry("ingest", f"trade-{page.entity_id}")
-
-# All agents with attributed trades so far:
-for page in ingest_agent_performance(journal):
-    append_log_entry("update", f"agent-{page.entity_id}")
-
-rebuild_index()  # regenerate knowledge/index.md from every page's frontmatter
-```
-
-Everything writes under `knowledge/` and `raw/` at the repository
-root by default (both `Path` parameters, overridable per-call).
-
-## What this can never do, even fully wired up
-
-- Cannot place a trade, modify an order, change SL/TP, alter risk
-  limits, override the CEO gate, or change execution mode —
-  structurally impossible, not just policy: `knowledge_engine/` has no
-  import path to any module that could do those things, and calls no
-  `journal_v2` write method (verified by
-  `tests/test_knowledge_safety.py`'s AST audit).
-- Cannot fabricate a win rate from too little evidence — below 5
-  attributed trades, an agent's page says `INSUFFICIENT_EVIDENCE`,
-  never a number.
-- Cannot silently lose a prior claim when new evidence disagrees —
-  large swings are recorded as a `## Revision History` entry, not
-  overwritten.
-- Cannot stage a secret into the git-versioned `raw/` tree — content
-  matching a secret-shaped pattern is refused, not silently dropped.
+This is why the Windows rotation was failing: `os.rename()` (used
+inside `doRollover()`) fails if any *other* handle on the same process
+still has the file open, and there were always dozens of others. With
+one shared handle, `doRollover()` closes it, renames cleanly, reopens
+it — no competing handle to block the rename.
 
 ## Rollback
 
-Delete `knowledge_engine/`, `raw/`, `knowledge/`, and
-`tests/test_knowledge_*.py`. Nothing else references them — no import
-anywhere outside this phase's own files, no config flag to unset, no
-schema to reverse.
+Revert `utils/logger.py` to the previous inline
+`RotatingFileHandler(...)` construction inside `get_logger()`, and
+delete `tests/test_logger.py`. Nothing else references the shared
+handler internals (`_file_handler`, `_get_shared_file_handler`) — they
+are private module state, not imported anywhere else in the codebase.
+
+## What this does not fix
+
+- It does not recover any log lines lost during the affected session
+  (they were dropped before the file write happened; nothing to
+  recover from disk).
+- It does not address the two other issues reported from the same
+  session (live-confirmation-vs-actual-mode mismatch, startup
+  reconciliation mismatch) — those are separate, not touched here.

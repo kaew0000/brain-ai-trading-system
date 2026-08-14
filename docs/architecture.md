@@ -3781,3 +3781,69 @@ updated (documented inline at each site) to reflect this phase's
 intentional, backward-compatible field addition to `ExecutionSignal`
 and the `get_trade_attribution()` precedence rule now actually being
 exercised.
+## 38. Logging Subsystem Hotfix — Shared RotatingFileHandler (2026-08-13)
+
+### Trigger
+
+Reported directly from a live/paper run's console output, not from a
+task brief: every single log line for the session showed a
+`--- Logging error ---` / `PermissionError: [WinError 32]` trying to
+rotate `logs/brain_bot.log`, meaning the file received effectively no
+records for the whole run.
+
+### Root cause
+
+`utils/logger.py::get_logger(name)` is idempotent per logger *name*,
+but ~83 distinct call sites across the codebase each pass a different
+name, so each independently constructed its own
+`RotatingFileHandler` on the same `cfg.LOG_FILE` path — ~83
+simultaneously open handles on one file from a single process. On
+Windows, `os.rename()` inside `doRollover()` fails whenever any other
+handle still has the file open, so once the file crossed `maxBytes`,
+every logger's next `emit()` re-triggered a rollover guaranteed to
+fail, and the record was dropped before `FileHandler.emit()` ever
+wrote it.
+
+### Fix
+
+`utils/logger.py` now lazily builds one shared `RotatingFileHandler`
+(`_get_shared_file_handler()`, module-level singleton behind a
+`threading.Lock`) and every `get_logger()` call attaches that same
+instance instead of constructing its own. Console handler behavior is
+unchanged (still per-name, colorized). No public API change.
+
+### Testing
+
+`tests/test_logger.py` (new, 4 tests): confirms distinct logger names
+share one `RotatingFileHandler` instance, confirms exactly one open
+stream exists regardless of how many names are created, confirms
+`get_logger()` is still idempotent for repeat calls with the same
+name, and forces a real `doRollover()` across multiple logger names to
+confirm no exception propagates.
+
+Full suite after the fix, against current `main` (post W14-1/W14-2A):
+`pytest tests/` 2538 passed, 3 failed, 5 warnings — the 3 failures are
+pre-existing on `main` itself (missing `dashboard_src` build in this
+environment, unrelated to logging; confirmed identical on `main`
+before rebasing: 2534 passed / same 3 failed) · `pytest world/tests/
+-m ""` 565 passed (unchanged) · `ruff check .` clean · `vulture
+--min-confidence 80` clean · `python3 -c "import main"` clean.
+
+`WinError 32` itself isn't reproducible on this Linux dev/CI
+environment (POSIX permits renaming an open file); verification
+instead confirmed the underlying mechanism directly — N handler
+instances on one path previously produced N distinct open file
+objects, the fix collapses that to 1 by construction.
+
+### Known follow-up work (explicitly out of scope for this hotfix)
+
+- Log data lost during the affected session is not recoverable — this
+  prevents recurrence only.
+- Two other issues surfaced from the same session are tracked
+  separately, not addressed here: the live-trading confirmation
+  prompt not reflecting the actual resolved `EXECUTION_MODE`/
+  `BINANCE_TESTNET` mode, and a startup `RECONCILIATION_MISMATCH`
+  between a pre-existing exchange position and the journal/paper
+  account.
+- `CHANGELOG.md` remains stale (pre-existing, previously flagged gap;
+  not touched here).
