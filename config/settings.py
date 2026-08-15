@@ -316,6 +316,17 @@ class Settings(BaseSettings):
     # Binance/requests-specific, not subprocess/git-specific).
     BUNDLE_PUSH_RETRIES:        int = Field(default=3,   alias="BUNDLE_PUSH_RETRIES")
     BUNDLE_GIT_TIMEOUT_SECONDS: int = Field(default=120, alias="BUNDLE_GIT_TIMEOUT_SECONDS")
+    # W14-2B: `cmd_import`'s real pass calls history.save() unconditionally
+    # (correct — see tools/history.py) but, left uncommitted, that write
+    # lingers as a local modification to a tracked file and trips
+    # get_dirty_files()'s preflight check on the *next* invocation. When
+    # true (default), cmd_import locally commits BUNDLE_HISTORY_FILE
+    # (that path only — see tools/git_utils.py:commit_paths()) right
+    # after saving it. Local commit only, never pushed. Set false to
+    # restore the pre-W14-2B manual `git add ... && git commit` workflow
+    # — e.g. if this environment has no git user.name/user.email
+    # configured and the commit step would just fail on every run.
+    BUNDLE_AUTO_COMMIT_HISTORY: bool = Field(default=True, alias="BUNDLE_AUTO_COMMIT_HISTORY")
 
     # ── V16 Phase 2E: Execution Wiring & Live Orchestrator ──────────────
     # Orchestration-level retry (see execution/execution_orchestrator.py's

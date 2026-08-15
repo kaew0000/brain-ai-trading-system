@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## [Unreleased] — V16 W14-2B: Bundle Manager Working-Tree Isolation Fix
+
+`cmd_import`'s real pass saves `bundle_history.json` unconditionally
+once per batch (correct — see `docs/architecture.md` §21/§39 and
+`tools/history.py`), including for failed-only outcomes (a legitimate
+audit-trail write). Left uncommitted, that write lingered as a dirty
+tracked file and tripped the *existing* preflight dirty-tree guard
+(PR #36) on every subsequent `cmd_import` invocation — including for
+entirely unrelated bundles — until a human committed it by hand. The
+tool was locking itself out with its own prior output.
+
+### Fixed
+- **Bundle Manager working-tree isolation** — `cmd_import`'s real pass
+  now locally commits `bundle_history.json` (that file only, never
+  pushed) immediately after `history.save()`, returning to
+  `base_branch` first so the commit lands on trunk rather than on
+  whichever feature branch the last bundle in the batch happened to
+  leave checked out. New setting `BUNDLE_AUTO_COMMIT_HISTORY` (default
+  `true`) gates this; set `false` to restore the exact pre-fix manual
+  `git add && git commit` workflow. The dry-run/preview pass, `sync`,
+  and `history` subcommands were already fully read-only with respect
+  to history and needed no change (verified by inspection, not
+  assumed). See `docs/architecture.md` §39 for the full root-cause
+  writeup.
+
+### Added
+- `tools/git_utils.py:commit_paths()` — scoped `git add` + conditional
+  `git commit`, no-op if nothing was actually staged.
+- `tests/test_bundle_manager_git_utils.py::TestCommitPaths`,
+  `tests/test_bundle_manager_cli.py::TestCommitHistoryFileWiring`,
+  `::TestReturnToBaseBranch` — mocked unit coverage of the new helper
+  and its wiring into `cmd_import`.
+- `tests/test_bundle_manager_worktree_isolation.py` — real local git
+  repositories in `tmp_path` (no mocking), proving the working tree
+  stays clean end-to-end, including the literal regression case: an
+  unrelated, valid bundle is no longer blocked by an earlier failure.
+
 ## [Unreleased] — $20 Live-Money Safety Patch (Track A)
 
 Read-only GO/NO-GO audit (fresh clone @ `c564985`) found three ways a

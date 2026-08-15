@@ -3781,6 +3781,9 @@ updated (documented inline at each site) to reflect this phase's
 intentional, backward-compatible field addition to `ExecutionSignal`
 and the `get_trade_attribution()` precedence rule now actually being
 exercised.
+
+---
+
 ## 38. Logging Subsystem Hotfix — Shared RotatingFileHandler (2026-08-13)
 
 ### Trigger
@@ -3847,3 +3850,116 @@ objects, the fix collapses that to 1 by construction.
   account.
 - `CHANGELOG.md` remains stale (pre-existing, previously flagged gap;
   not touched here).
+
+---
+
+## 39. Bundle Manager Working-Tree Isolation Fix — V16 W14-2B (2026-08-15)
+
+**Problem.** `cmd_import`'s real pass calls `history.save()`
+unconditionally once at the end of processing a batch (correct — see
+§21 and `tools/history.py`'s own docstring: `BundleHistory` is
+loaded once, mutated in memory, and saved explicitly so callers control
+exactly when the write happens). That write is to a tracked file
+(`bundle_history.json`) and was never committed. A **failed** import
+attempt legitimately records a `"failed"` entry too (audit trail —
+`has_sha()` only cares about `"applied"` status for the duplicate
+guard, but the failure is still worth keeping), and that save leaves
+the tree dirty exactly the same way a success does.
+
+Left uncommitted, that dirtiness then trips the *existing* preflight
+guard added in an earlier fix (`fix(bundle_manager): pre-flight
+dirty-tree check before checkout`, PR #36) — which correctly refuses to
+let `cmd_import` proceed to a real pass while tracked files are dirty,
+since a raw `git checkout` failure mid-batch is a confusing way to
+learn about this. The result: **the tool locks itself out with its own
+prior output.** One failed or successful import leaves
+`bundle_history.json` dirty; every subsequent `cmd_import` invocation —
+for *any* bundle, related or not — refuses to proceed until a human
+runs `git add bundle_history.json && git commit -m 'sync bundle
+history'` by hand (a workaround already visible twice in git log before
+this fix, and spelled out verbatim in the preflight guard's own error
+message).
+
+**Fix.** `cmd_import`'s real pass, immediately after `history.save()`,
+now also commits that one file locally (never pushed) when
+`BUNDLE_AUTO_COMMIT_HISTORY` is true (new setting, default `true`):
+
+1. `_return_to_base_branch()` — checks out `base_branch` first if the
+   last bundle in the batch left a feature branch checked out
+   (`github_actions.import_bundle` doesn't switch back on its own).
+   Necessary so the tracking commit lands on the trunk branch, not on a
+   feature branch that might later be deleted without merging — which
+   would make the history record unreachable from `base_branch` again,
+   silently reintroducing the exact duplicate-import risk
+   `bundle_history.json` exists to prevent.
+2. `git_utils.commit_paths()` — new helper: scoped `git add -- <paths>`
+   then a conditional `git commit -m <message> -- <paths>` (no-op,
+   returns `None`, if nothing was actually staged — `git commit` with
+   an empty diff exits non-zero, which isn't a real failure).
+   Deliberately scoped to exactly the given path both at `add` and at
+   `commit` time, so nothing else sitting in the working tree is ever
+   swept in alongside it.
+3. `_commit_history_file()` — calls the above with the message
+   `"sync bundle history"` (matching the two prior manual commits
+   already in git log using that exact message). Never raises: a
+   `GitCommandError` here (e.g. git `user.name`/`user.email` not
+   configured in this environment) becomes a `ui.warn()` and falls back
+   to exactly the pre-fix manual workflow, rather than turning a
+   commit-hygiene failure into a reported import failure.
+
+**What did not change.** The dry-run/preview pass was already fully
+read-only (confirmed by inspection: `import_bundle(..., dry_run=True)`
+never reaches `history.record_applied`/`record_failed`, both are
+guarded by `if not dry_run:`) — nothing needed fixing there.
+`cmd_sync` and `cmd_history` were already read-only with respect to
+history (`cmd_sync` only reads `history.all_records()`; `cmd_history`
+never calls `.save()`). The pre-existing dirty-tree preflight guard
+(PR #36) is untouched and still refuses to proceed when *unrelated*
+tracked files are dirty — this fix complements it (making the tree
+actually clean after a run) rather than loosening it. `"applied"`
+record persistence semantics are byte-identical to before; the only
+change is that the resulting write now also gets committed.
+
+**Read-only operations** (verified unchanged, no worktree mutation):
+preview/dry-run pass, `cmd_sync`, `cmd_history`.
+
+**Explicit mutation operations** (verified still persist): real-pass
+`history.save()` for both `"applied"` and `"failed"` outcomes — now
+additionally committed locally rather than left dangling.
+
+**Escape hatch.** `BUNDLE_AUTO_COMMIT_HISTORY=false` restores the
+exact pre-W14-2B manual-commit workflow, for environments where local
+git commits aren't desired or `user.name`/`user.email` genuinely can't
+be configured.
+
+**Files changed:**
+- `tools/git_utils.py` — `commit_paths()`.
+- `config/settings.py` — `BUNDLE_AUTO_COMMIT_HISTORY` (default `true`).
+- `tools/bundle_manager.py` — `_return_to_base_branch()`,
+  `_commit_history_file()`, wired into `cmd_import`'s real pass.
+
+**Tests (all new):**
+- `tests/test_bundle_manager_git_utils.py::TestCommitPaths` — mocked
+  unit coverage of `commit_paths()` (stage+commit, no-op, error
+  propagation, path scoping).
+- `tests/test_bundle_manager_cli.py::TestCommitHistoryFileWiring`,
+  `::TestReturnToBaseBranch` — mocked coverage of the `cmd_import`
+  wiring, the `BUNDLE_AUTO_COMMIT_HISTORY` gate, and graceful failure
+  handling.
+- `tests/test_bundle_manager_worktree_isolation.py` — **real** local
+  git repositories in `tmp_path`, no mocking of git at all (following
+  §21's own precedent that a real bug in this package was previously
+  caught by manual end-to-end testing, not the mocked unit suite).
+  Covers: clean tree after a successful import; repeated invocation
+  with nothing new never accumulates dirt; a failed import still leaves
+  the tree clean; **an unrelated, valid bundle is no longer blocked by
+  an earlier failure** (the literal reproduction of the reported bug,
+  now verified fixed); a failed attempt's history record is not lost;
+  history correctly reloads from disk after a fresh `BundleHistory()`
+  load; an unrelated pre-existing dirty file still correctly aborts the
+  real pass, unchanged.
+
+**Scope respected:** no changes to `agents/`, `decision/`, `risk/`,
+`execution/`, `portfolio/`, `commander/`, `dashboard_src/`, `world/`,
+`learning/`, W14-2A's attribution work, W14-2C (office assets), or
+W14-2D (dual-lane runtime). Not pushed, no PR opened, not merged.

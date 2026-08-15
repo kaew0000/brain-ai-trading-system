@@ -234,3 +234,102 @@ class TestPushBranch:
         args = run.call_args[0][0]
         assert "--force-with-lease" in args
         assert "--force" not in [a for a in args if a == "--force"]
+
+
+class TestCommitPaths:
+    """tools.git_utils.commit_paths() — W14-2B. Scoped `git add` +
+    conditional `git commit` used by bundle_manager.cmd_import() to keep
+    its own history.save() write from lingering as an uncommitted
+    modification that would trip get_dirty_files()'s preflight check on
+    the next invocation. See tools/bundle_manager.py's
+    _commit_history_file() for the call site."""
+
+    def test_stages_and_commits_when_there_are_staged_changes(self):
+        calls = []
+
+        def side_effect(args, cwd, timeout=60, check=True):
+            calls.append(list(args))
+            if args[0] == "diff":
+                return git_utils.GitResult(args, 1, "", "")  # 1 == staged changes exist
+            return git_utils.GitResult(args, 0, "", "")
+
+        with patch("tools.git_utils.run_git", side_effect=side_effect) as run:
+            result = git_utils.commit_paths(
+                ["bundle_history.json"], "sync bundle history", Path("."),
+            )
+
+        assert result is not None
+        assert calls[0] == ["add", "--", "bundle_history.json"]
+        assert calls[1] == ["diff", "--cached", "--quiet", "--", "bundle_history.json"]
+        assert calls[2] == ["commit", "-m", "sync bundle history", "--", "bundle_history.json"]
+        assert run.call_count == 3
+
+    def test_no_op_when_nothing_staged_after_add(self):
+        def side_effect(args, cwd, timeout=60, check=True):
+            if args[0] == "diff":
+                return git_utils.GitResult(args, 0, "", "")  # 0 == no staged changes
+            return git_utils.GitResult(args, 0, "", "")
+
+        with patch("tools.git_utils.run_git", side_effect=side_effect) as run:
+            result = git_utils.commit_paths(
+                ["bundle_history.json"], "sync bundle history", Path("."),
+            )
+
+        assert result is None
+        # add + diff only — commit must never be invoked when there's
+        # nothing to commit (git commit with an empty diff exits non-zero,
+        # which callers must not have to treat as a real failure).
+        commit_calls = [c for c in run.call_args_list if c[0][0][0] == "commit"]
+        assert commit_calls == []
+
+    def test_diff_check_uses_check_false(self):
+        """The `git diff --cached --quiet` probe must pass check=False —
+        its whole contract is a meaningful non-zero exit, not an error."""
+        def side_effect(args, cwd, timeout=60, check=True):
+            if args[0] == "diff":
+                assert check is False
+                return git_utils.GitResult(args, 1, "", "")
+            return git_utils.GitResult(args, 0, "", "")
+
+        with patch("tools.git_utils.run_git", side_effect=side_effect):
+            git_utils.commit_paths(["x.json"], "msg", Path("."))
+
+    def test_add_failure_propagates(self):
+        with patch("tools.git_utils.run_git",
+                    side_effect=git_utils.GitCommandError(["add"], 1, "", "fatal: pathspec")):
+            with pytest.raises(git_utils.GitCommandError):
+                git_utils.commit_paths(["missing.json"], "msg", Path("."))
+
+    def test_commit_failure_propagates(self):
+        def side_effect(args, cwd, timeout=60, check=True):
+            if args[0] == "diff":
+                return git_utils.GitResult(args, 1, "", "")
+            if args[0] == "commit":
+                raise git_utils.GitCommandError(
+                    args, 1, "", "fatal: unable to auto-detect email address",
+                )
+            return git_utils.GitResult(args, 0, "", "")
+
+        with patch("tools.git_utils.run_git", side_effect=side_effect):
+            with pytest.raises(git_utils.GitCommandError):
+                git_utils.commit_paths(["bundle_history.json"], "sync bundle history", Path("."))
+
+    def test_commit_scoped_to_given_paths_only(self):
+        """Both the `add` and the `commit` pathspec are restricted to
+        exactly the caller-supplied paths — never a blanket `-A`/`.`."""
+        calls = []
+
+        def side_effect(args, cwd, timeout=60, check=True):
+            calls.append(list(args))
+            if args[0] == "diff":
+                return git_utils.GitResult(args, 1, "", "")
+            return git_utils.GitResult(args, 0, "", "")
+
+        with patch("tools.git_utils.run_git", side_effect=side_effect):
+            git_utils.commit_paths(["a.json", "b.json"], "msg", Path("."))
+
+        add_args, commit_args = calls[0], calls[2]
+        assert add_args == ["add", "--", "a.json", "b.json"]
+        assert commit_args == ["commit", "-m", "msg", "--", "a.json", "b.json"]
+        assert "-A" not in add_args
+        assert "." not in add_args
