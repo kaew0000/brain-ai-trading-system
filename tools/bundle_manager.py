@@ -11,7 +11,12 @@ Workflow implemented by `import`:
   2. For each: verify -> extract branch+SHA -> skip if already imported
      (bundle_history.json) -> fetch -> checkout -> push -> move to
      update/applied/ (or update/failed/ on any failure at any step).
-  3. Print a results table; persist bundle_history.json once at the end.
+  3. Persist bundle_history.json once at the end and (unless
+     BUNDLE_AUTO_COMMIT_HISTORY=false) commit that one file locally —
+     never pushed — so the write never lingers as an uncommitted
+     modification that would block the *next* invocation's preflight
+     check (W14-2B; see tools/git_utils.py:commit_paths()). Print a
+     results table.
 
 `sync` fast-forwards the local base branch (default: main) onto origin
 after a feature branch has actually been merged there — see
@@ -58,6 +63,56 @@ def _resolve_dirs(repo_dir: Path, args: argparse.Namespace) -> dict:
         "failed":   _p(args.failed,   settings.BUNDLE_FAILED_DIR),
         "history":  _p(args.history_file, settings.BUNDLE_HISTORY_FILE),
     }
+
+
+def _return_to_base_branch(base_branch: str, repo_dir: Path, git_timeout: int) -> None:
+    """Best-effort checkout back to base_branch before persisting/committing
+    bundle_history.json (W14-2B — see cmd_import()'s call site). Never
+    raises: if this fails (e.g. base_branch itself is now unexpectedly
+    dirty for some unrelated reason), history.save() still writes to disk
+    on whatever branch is current — nothing is lost, it's just filed under
+    the wrong branch until a human sorts it out, exactly as it always was
+    before this fix existed."""
+    try:
+        if git_utils.get_current_branch(repo_dir) != base_branch:
+            git_utils.checkout_branch(base_branch, repo_dir, timeout=git_timeout)
+    except git_utils.GitCommandError as exc:
+        ui.warn(
+            f"Could not return to '{base_branch}' before saving bundle "
+            f"history ({exc.stderr.strip()[:200]}); history was saved on "
+            f"the current branch instead."
+        )
+
+
+def _commit_history_file(history_path: Path, repo_dir: Path) -> None:
+    """Best-effort local commit of the bundle_history.json write
+    cmd_import() just made via history.save() — see
+    git_utils.commit_paths()'s docstring for the working-tree-isolation
+    rationale (W14-2B). Local commit only, never pushed.
+
+    Never raises: this runs after the batch's real results are already
+    known and reported, so a commit failure here (e.g. no git
+    user.name/user.email configured in this environment) must not be
+    mistaken for an import failure or hide the results already printed.
+    It falls back to exactly the pre-W14-2B manual workflow — the next
+    invocation's existing get_dirty_files() preflight check will surface
+    the same actionable message it always has.
+    """
+    try:
+        path_str = history_path.resolve().as_posix()
+        result = git_utils.commit_paths(
+            [path_str], "sync bundle history", repo_dir,
+        )
+        if result is not None:
+            ui.info(f"Committed {history_path.name} locally (not pushed).")
+    except git_utils.GitCommandError as exc:
+        ui.warn(
+            f"Could not auto-commit {history_path.name} locally "
+            f"({exc.stderr.strip()[:200]}). Import results above are "
+            f"unaffected, but the next run will refuse to proceed until "
+            f"this is committed by hand:\n"
+            f"  git add {history_path.name} && git commit -m 'sync bundle history'"
+        )
 
 
 def cmd_import(args: argparse.Namespace) -> int:
@@ -140,7 +195,19 @@ def cmd_import(args: argparse.Namespace) -> int:
         )
         results.append(result)
 
+    if settings.BUNDLE_AUTO_COMMIT_HISTORY:
+        # bundle_history.json's tracking commit belongs on base_branch —
+        # the trunk that survives feature branches being deleted after
+        # merge — not on whichever feature branch the last bundle in this
+        # batch happened to leave checked out (github_actions.import_bundle
+        # doesn't switch back on its own; see its docstring, step 6).
+        # Otherwise the record risks becoming unreachable from base_branch
+        # if that feature branch is later deleted without merging —
+        # exactly the kind of history loss Section 8 forbids.
+        _return_to_base_branch(base_branch, repo_dir, git_timeout)
     history.save()
+    if settings.BUNDLE_AUTO_COMMIT_HISTORY:
+        _commit_history_file(dirs["history"], repo_dir)
     ui.results_table(results)
 
     failed_count = sum(1 for r in results if r.status == "failed")

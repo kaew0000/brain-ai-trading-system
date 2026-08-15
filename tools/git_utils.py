@@ -278,3 +278,33 @@ def pull_fast_forward(branch: str, cwd: Path, remote: str = "origin", timeout: i
     the remote doesn't. sync.py's job is to catch main up to origin/main,
     never to rewrite it."""
     return run_git(["pull", "--ff-only", remote, branch], cwd=cwd, timeout=timeout)
+
+
+def commit_paths(paths: Sequence[str], message: str, cwd: Path, timeout: int = 60) -> GitResult | None:
+    """`git add -- <paths>` then, only if that actually staged a change,
+    `git commit -m <message> -- <paths>`. Scoped to exactly the given
+    paths (both at `add` time and again via the commit's own pathspec)
+    so nothing else sitting in the working tree is ever swept into this
+    commit alongside them.
+
+    Returns None (no commit made — nothing to do) when `paths` already
+    match HEAD after the `add`; `git commit` with nothing staged exits
+    non-zero, which callers should not treat as failure the way a real
+    commit error would be.
+
+    W14-2B: bundle_manager.py's `cmd_import` uses this to commit
+    `bundle_history.json` locally (never pushed) immediately after
+    `history.save()` — see tools/history.py's `BundleHistory.save()` and
+    `cmd_import()`'s call site for why: that save is an explicit,
+    already-intended write to a tracked file, but left uncommitted it
+    would otherwise linger as local modifications that trip
+    `get_dirty_files()`'s preflight check on the *next* invocation —
+    the tool locking itself out with its own prior output.
+    """
+    run_git(["add", "--", *paths], cwd=cwd, timeout=timeout)
+    staged = run_git(
+        ["diff", "--cached", "--quiet", "--", *paths], cwd=cwd, timeout=timeout, check=False,
+    )
+    if staged.returncode == 0:
+        return None
+    return run_git(["commit", "-m", message, "--", *paths], cwd=cwd, timeout=timeout)
