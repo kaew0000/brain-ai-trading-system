@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-12T12:01:47Z",
+  "updated_at": "2026-08-14T08:22:46Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -343,6 +343,33 @@
       "imported_at": "2026-08-12T12:01:47Z",
       "pushed": false,
       "reason": "fetch failed: From /data/data/com.termux/files/home/brain-ai-trading-system/update/incoming/phase4c-step8-persistent-trading-knowledge.bundle\n ! [rejected] feature/phase4c-step8-persistent-trading-knowledge -> feature/phase4c-step8-persistent-trading-knowledge  (non-fast-forward)"
+    },
+    {
+      "sha": "cbc85141c6ce5fa6c45cb96d7b22790409a0ebc0",
+      "branch": "feat/w14-2a-ceo-agent-attribution",
+      "bundle_filename": "w14-2a-ceo-agent-attribution.bundle",
+      "status": "applied",
+      "imported_at": "2026-08-14T01:11:06Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "9d10cca280b01ceb76b139e08774c21da95fa6ea",
+      "branch": "fix/logger-shared-file-handler",
+      "bundle_filename": "logger-shared-file-handler.bundle",
+      "status": "applied",
+      "imported_at": "2026-08-14T08:08:29Z",
+      "pushed": true,
+      "reason": null
+    },
+    {
+      "sha": "d794c6bd720cdf3d9373322bce210aca69e9ec91",
+      "branch": "fix/logger-shared-file-handler",
+      "bundle_filename": "logger-shared-file-handler.bundle",
+      "status": "failed",
+      "imported_at": "2026-08-14T08:22:46Z",
+      "pushed": false,
+      "reason": "fetch failed: From /data/data/com.termux/files/home/brain-ai-trading-system/update/incoming/logger-shared-file-handler.bundle\n ! [rejected] fix/logger-shared-file-handler -> fix/logger-shared-file-handler  (non-fast-forward)"
     }
   ]
 }

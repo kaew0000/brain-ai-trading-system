@@ -1,104 +1,101 @@
-# PATCH NOTES — V16 Phase 4C Step 8: Persistent Trading Knowledge Layer (Track A)
+# PATCH NOTES — Logging Subsystem Hotfix: Shared RotatingFileHandler
 
-Branch: `feature/phase4c-step8-persistent-trading-knowledge`
-Base: `main` @ `4f6df7c` (verified current — origin/main had moved since
-Step 7C via PR #51 + an unrelated PR #52 "W14 live start-stop control
-plane"; both confirmed real and re-based against before this phase began)
+Branch: `fix/logger-shared-file-handler`
+Base: `main` @ `90a2874` (rebased — `origin/main` advanced past the
+original `f7e9caf` base via PR #53 W14-1 and PR #54 W14-2A while this
+branch was in flight; rebased cleanly onto current `main` with a single
+conflict in `docs/architecture.md` — both branches appended a new
+numbered section after §36. Resolved by keeping W14-2A's entry as the
+canonical §37 and renumbering this hotfix's entry to §38. No other
+file conflicted — W14-1/W14-2A never touched `utils/logger.py`,
+`tests/test_logger.py`, `PATCH_NOTES.md`, or `MIGRATION.md`.)
 
 ## Scope note
 
-No prior documentation defines a "Phase 4C Step 8" — checked
-`docs/architecture.md`, `CLAUDE.md`, `docs/ROADMAP.md`, and the Google
-Sheets project tracker before starting; all are frozen at or before
-Phase 4C Step 1. This phase's scope was supplied directly by the
-project owner as an explicit, detailed brief, not discovered in
-existing docs or guessed.
+This is not a numbered phase — it's a hotfix for a production incident
+reported directly from a live/paper run's console output, not from a
+task brief. No existing documentation (architecture.md, CLAUDE.md)
+described this as planned work; it was discovered and fixed reactively.
 
-## Summary
+## Root cause
 
-A git-versioned, persistent Markdown knowledge layer that accumulates
-institutional memory from the trading system's own real data
-(`journal_v2`, including Phase 4C Step 7C's signal_id attribution
-bridge), following Andrej Karpathy's "LLM Wiki" architecture pattern
-(adapted, not copied): immutable raw sources → a maintained,
-cross-linked wiki → an append-only chronological log. Informational /
-analytical only — cannot place trades, modify orders, or touch
-risk/execution/lifecycle state (verified structurally, see Safety
-section below).
+`utils/logger.py::get_logger(name)` is idempotent **per logger name**
+(`if logger.handlers: return logger`), but every one of the ~83 distinct
+call sites in this codebase (`get_logger(__name__)` in `main.py`,
+`data/binance_provider.py`, `risk/risk_engine.py`, `events/event_bus.py`,
+etc.) passes a *different* name. Each of those ~83 first-time calls
+independently constructed its own `logging.handlers.RotatingFileHandler`
+pointed at the same `cfg.LOG_FILE` path (`logs/brain_bot.log`).
 
-## What changed (all new, nothing existing modified)
+That left ~83 separate, simultaneously open OS file handles on one file,
+all owned by the same process. `RotatingFileHandler.doRollover()` closes
+*its own* stream, then calls `os.rename(source, dest)`. On Windows,
+`os.rename()` fails with `PermissionError: [WinError 32]` if *any other*
+handle still has the file open — and 82 other handlers always did. Once
+the file crossed `maxBytes` (10 MB), every logger's next `emit()` call
+re-triggered `shouldRollover() → True → doRollover() → raise`, and
+because the raise happens *before* `logging.FileHandler.emit()` actually
+writes the record, **every log line for the rest of the process's life
+was silently dropped from `brain_bot.log`** (visible only via the
+`--- Logging error ---` traceback printed to stderr).
 
-- `knowledge_engine/` — new package, 9 modules: `provenance.py`,
-  `pages.py`, `raw_store.py`, `chronolog.py`, `contradiction.py`,
-  `trade_knowledge.py`, `agent_knowledge.py`, `index_builder.py`,
-  `source_pages.py`.
-- `raw/` — new, empty (`.gitkeep` only) immutable-source staging tree:
-  `research/`, `trade_reviews/`, `market_notes/`, `incidents/`,
-  `architecture/`, `operator_notes/`, `external/`.
-- `knowledge/` — new, empty (`.gitkeep` only) wiki tree: `trades/`,
-  `agents/`, `sources/`. `index.md`/`log.md` are generated on first
-  use, not pre-created.
-- `tests/test_knowledge_*.py` — 10 new files, 77 tests.
-- `docs/architecture.md` — new §36.
+Confirmed mechanically (not just by inference from the traceback):
+constructing N `RotatingFileHandler` instances on one path produces N
+distinct `id(handler.stream)` values; the fix collapses this to exactly
+1 by construction. (`WinError 32` itself can't be reproduced from this
+Linux environment — POSIX allows rename of an open file — so the fix
+was verified by proving the underlying mechanism, multiple concurrent
+handles on one path from a single process, is eliminated, not by
+reproducing the Windows error text itself.)
 
-No existing file was modified. `journal/journal_v2.py` was not
-touched — this package only calls its existing `get_*` readers.
+## Fix
 
-## Why `knowledge/` and `raw/` ship empty
+`utils/logger.py`: added a module-level, lock-guarded singleton
+(`_get_shared_file_handler()`) that lazily creates **one**
+`RotatingFileHandler` on first use and returns that same instance to
+every subsequent caller regardless of logger name. `get_logger()` now
+calls this shared accessor instead of constructing a fresh handler
+inline. Console handler behavior (per-name, colorized) is unchanged.
 
-This phase ships the mechanism, proven against real `journal_v2`
-objects in tests (real SQLite, real Step 7C signal_id joins — not
-mocks). It does not seed the repository's actual `knowledge/`/`raw/`
-directories with content, because the only trade/agent data available
-in this environment is synthetic test fixtures — writing that into
-the committed knowledge tree would be exactly the fabricated
-production data the brief's Hard Rules and spec §14 prohibit. Real
-ingestion against the real production journal is the operator's own
-next action (see MIGRATION.md).
+No signature change, no new config, no behavior change for any of the
+83 call sites — they still just call `get_logger(__name__)`.
 
-## Safety audit
+## Files changed
 
-`tests/test_knowledge_safety.py` — AST-based (not grep) static proof
-that `knowledge_engine/`:
-- imports nothing from `execution/`, `risk/`, `decision/`, `agents/`,
-  `portfolio/`, `commander/`, `world/`, `dashboard*/`, or any
-  Binance/exchange client;
-- every local repository import is from `journal` or `knowledge_engine` itself;
-- never calls any `journal_v2` method whose name starts with
-  `save_`/`update_`/`delete_` — walks the AST for attribute access,
-  not a text match;
-- imports no networking library (`requests`/`httpx`/`websocket*`).
+- `utils/logger.py` — shared file handler singleton (the fix)
+- `tests/test_logger.py` — new regression tests (see below)
 
-## Secret audit
+## Test results (post-rebase, against current `main` @ `90a2874`)
 
-`raw_store.ingest_raw_source()` refuses to stage content matching a
-conservative secret-shaped pattern set (private key blocks, AWS-style
-key ids, `BINANCE_API_KEY`/`BINANCE_API_SECRET` assignments, generic
-`api_key=`/`password=`/`token=` assignments) — raises
-`SecretDetectedError`, content is never written to disk in that case
-(`tests/test_knowledge_raw_store.py::TestSecretDetection`). Manually
-re-checked: no `.env`, credential, or token content exists anywhere in
-this phase's diff.
+- `pytest tests/test_logger.py -v` → 4 passed (new)
+- Full `pytest tests/ -q` → 2538 passed, 3 failed, 5 warnings
+- `pytest world/tests/ -q -m ""` → 565 passed (unchanged)
+- `ruff check . --exclude dashboard_src --exclude dashboard` → clean
+- `vulture . --exclude dashboard_src,dashboard,tests --min-confidence 80` → clean
+- `python3 -c "import main"` → clean
 
-## Test results
+The 3 `tests/test_dashboard_serving.py` failures are **pre-existing on
+`main` itself**, unrelated to this change — confirmed by running the
+identical command on `origin/main` before rebasing: 2534 passed / 3
+failed, same 3 tests. They fail in this sandbox because
+`dashboard_src/dist/index.html` doesn't exist (no `npm run build` was
+run here; W14-1's CI job builds it as a separate pre-test step). 2538
+− 2534 = the 4 new tests added here, cleanly. Nothing regressed.
 
-- `pytest tests/test_knowledge_*.py -q` → 77 passed
-- Full `pytest tests/ -q` → see FINAL REPORT
-- `pytest world/tests/ -q -m ""` → see FINAL REPORT (untouched, unrelated)
-- `ruff check .` → clean
-- `vulture . --min-confidence 80` → clean
-- `python -c "import main"` → clean
-- `git diff --check` → clean
+Original baseline (captured before the rebase, against the
+then-current `main` @ `f7e9caf`, before W14-1/W14-2A existed): 2480
+passed / 565 passed / ruff clean / vulture clean / import clean — also
+matched exactly plus the 4 new tests.
 
-## Known follow-up work (explicitly out of scope for this phase)
+## Known follow-up work (explicitly out of scope for this hotfix)
 
-- Strategy and Regime entity pages (spec §5 lists them; no real
-  synthesis logic exists for them yet — not fabricated with
-  placeholders).
-- Query/retrieval tooling beyond "read index → follow links" (spec
-  §11 — no embeddings/vector DB; explicitly not needed yet).
-- Wiring this package into `main.py`'s scheduler or any live process —
-  there is no existing LLM/AI runtime interface anywhere in this
-  codebase to wire it to (checked; none exists).
-- Actually running a first real ingestion against the production
-  journal — operator's own next action.
+- The production log file (`logs/brain_bot.log`) from the affected
+  session is effectively empty for the run in question — this fix
+  prevents recurrence, it does not recover lost historical log data.
+- Not investigated here (separate reported issues, tracked
+  separately): the live-confirmation-vs-actual-mode banner mismatch,
+  and the startup reconciliation mismatch on a pre-existing exchange
+  position.
+- `CHANGELOG.md` remains stale (pre-existing, previously flagged gap;
+  not touched by this hotfix, consistent with how it's been handled in
+  prior phases).

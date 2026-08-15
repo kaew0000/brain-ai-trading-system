@@ -3,7 +3,7 @@
 ## [Unreleased] — V16 W14-2B: Bundle Manager Working-Tree Isolation Fix
 
 `cmd_import`'s real pass saves `bundle_history.json` unconditionally
-once per batch (correct — see `docs/architecture.md` §21/§38 and
+once per batch (correct — see `docs/architecture.md` §21/§39 and
 `tools/history.py`), including for failed-only outcomes (a legitimate
 audit-trail write). Left uncommitted, that write lingered as a dirty
 tracked file and tripped the *existing* preflight dirty-tree guard
@@ -22,7 +22,7 @@ tool was locking itself out with its own prior output.
   `git add && git commit` workflow. The dry-run/preview pass, `sync`,
   and `history` subcommands were already fully read-only with respect
   to history and needed no change (verified by inspection, not
-  assumed). See `docs/architecture.md` §38 for the full root-cause
+  assumed). See `docs/architecture.md` §39 for the full root-cause
   writeup.
 
 ### Added
