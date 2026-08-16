@@ -258,30 +258,59 @@ class RecoveryEngine:
         qty         = pos.get("positionAmt")
         entry_price = pos.get("entryPrice")
 
+        # V16 fix(paper-mode-orphan-sl): dp.get_position_info() reads the
+        # REAL exchange account (testnet or mainnet, per BINANCE_TESTNET)
+        # regardless of EXECUTION_MODE — so this branch can fire even when
+        # EXECUTION_MODE=paper, e.g. a leftover position from earlier
+        # manual/testnet activity that the journal never recorded. In that
+        # case `tm` (sys["trade_manager"]) is a PaperExecutionEngine /
+        # _PaperAdapter, which has no real order-placement path at all —
+        # calling place_stop_loss() on it was previously falling through
+        # to the generic `except Exception` below as an AttributeError,
+        # logged at ERROR with a full traceback that reads as a crash bug
+        # rather than an expected mode limitation. Detect it up front
+        # instead: skip the doomed call, log a clear one-line WARNING, and
+        # keep every safety outcome identical (sl_placed=False, orphan
+        # hold set, trading held) to the "exchange rejected the order"
+        # path this already handled correctly.
+        can_place_real_sl = hasattr(tm, "place_stop_loss")
+
         sl_price: float | None = None
         sl_order = None
-        try:
-            balance     = dp.get_account_balance()
-            risk_pct    = getattr(settings, "RISK_PER_TRADE_MAX", 0.01)
-            risk_amount = balance * risk_pct
-            if qty and qty > 0:
-                sl_dist  = risk_amount / qty
-                sl_price = (entry_price - sl_dist) if direction == "LONG" else (entry_price + sl_dist)
-                from execution.trade_manager import new_client_order_id
-                sl_order = tm.place_stop_loss(
-                    direction, qty, sl_price,
-                    client_order_id=new_client_order_id("ORPHANSL"),
-                )
-        except Exception as exc:
-            logger.error(f"Orphan-protect: SL placement failed: {exc}", exc_info=True)
-            sl_order = None
+        if not can_place_real_sl:
+            logger.warning(
+                "Orphan-protect: EXECUTION_MODE has no real order-placement "
+                "path (paper mode) — cannot auto-place a protective SL for "
+                f"this real exchange position ({direction} {qty} {symbol} "
+                f"@ {entry_price}). Trading held pending manual review."
+            )
+        else:
+            try:
+                balance     = dp.get_account_balance()
+                risk_pct    = getattr(settings, "RISK_PER_TRADE_MAX", 0.01)
+                risk_amount = balance * risk_pct
+                if qty and qty > 0:
+                    sl_dist  = risk_amount / qty
+                    sl_price = (entry_price - sl_dist) if direction == "LONG" else (entry_price + sl_dist)
+                    from execution.trade_manager import new_client_order_id
+                    sl_order = tm.place_stop_loss(
+                        direction, qty, sl_price,
+                        client_order_id=new_client_order_id("ORPHANSL"),
+                    )
+            except Exception as exc:
+                logger.error(f"Orphan-protect: SL placement failed: {exc}", exc_info=True)
+                sl_order = None
 
         sl_placed = sl_order is not None
         reason = (
             f"Unprotected exchange position detected: {direction} {qty} "
             f"{symbol} @ {entry_price} — "
-            + ("protective SL placed automatically" if sl_placed
-               else "AUTO SL PLACEMENT FAILED, position still naked")
+            + (
+                "protective SL placed automatically" if sl_placed
+                else "no real order-placement path available (paper mode), position still naked"
+                if not can_place_real_sl
+                else "AUTO SL PLACEMENT FAILED, position still naked"
+            )
             + " | acknowledge via acknowledge_orphaned_position() "
               "(or POST /api/system/reconciliation/acknowledge) once resolved"
         )
