@@ -196,6 +196,91 @@ class TestAuthEnabledByDefault:
         assert settings.API_AUTH_ENABLED is False
 
 
+class TestEphemeralKeyBootstrap:
+    """
+    api/auth.py's _bootstrap_ephemeral_api_key(): if API_AUTH_ENABLED is
+    true and API_KEYS is empty (e.g. a fresh .env with only
+    API_AUTH_ENABLED set), the dashboard must not come up fully locked
+    out. It should generate one ephemeral OPERATOR key, log it once at
+    CRITICAL, and that key must actually work — mirrors the existing
+    JWT_SECRET ephemeral-generation behavior a few lines above it.
+
+    Calls the function directly rather than importlib.reload(api.auth):
+    api/app.py holds direct references to this module's exports
+    (Role, AuthContext, the auth functions), and reloading api.auth
+    mid-suite desyncs those references for every test that runs
+    afterward — confirmed by TestLifecycleCommandAuth failing with 500s
+    instead of 401s only when a reload-based version of these tests ran
+    first in the same session.
+    """
+
+    def test_generates_one_operator_key_when_none_configured(self, monkeypatch):
+        from config.settings import settings
+        import api.auth as auth_module
+
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", True)
+        monkeypatch.setattr(settings, "API_KEYS", {})
+
+        auth_module._bootstrap_ephemeral_api_key()
+
+        assert len(settings.API_KEYS) == 1
+        (generated_key, role), = settings.API_KEYS.items()
+        assert role == "operator"
+        assert len(generated_key) > 20  # secrets.token_urlsafe(32), not a placeholder
+
+    def test_logs_critical_with_the_generated_key(self, monkeypatch, caplog):
+        import logging
+        from config.settings import settings
+        import api.auth as auth_module
+
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", True)
+        monkeypatch.setattr(settings, "API_KEYS", {})
+
+        with caplog.at_level(logging.CRITICAL, logger="api.auth"):
+            auth_module._bootstrap_ephemeral_api_key()
+
+        (generated_key,) = settings.API_KEYS.keys()
+        assert any(
+            "API_KEYS is empty" in rec.message and generated_key in rec.message
+            for rec in caplog.records
+        )
+
+    def test_generated_key_actually_authenticates(self, monkeypatch):
+        from config.settings import settings
+        import api.auth as auth_module
+
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", True)
+        monkeypatch.setattr(settings, "API_KEYS", {})
+
+        auth_module._bootstrap_ephemeral_api_key()
+
+        (generated_key,) = settings.API_KEYS.keys()
+        role = auth_module._lookup_api_key(generated_key)
+        assert role is auth_module.Role.OPERATOR
+
+    def test_configured_keys_are_left_untouched(self, monkeypatch):
+        from config.settings import settings
+        import api.auth as auth_module
+
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", True)
+        monkeypatch.setattr(settings, "API_KEYS", {"real-key": "viewer"})
+
+        auth_module._bootstrap_ephemeral_api_key()
+
+        assert settings.API_KEYS == {"real-key": "viewer"}
+
+    def test_noop_when_auth_disabled(self, monkeypatch):
+        from config.settings import settings
+        import api.auth as auth_module
+
+        monkeypatch.setattr(settings, "API_AUTH_ENABLED", False)
+        monkeypatch.setattr(settings, "API_KEYS", {})
+
+        auth_module._bootstrap_ephemeral_api_key()
+
+        assert settings.API_KEYS == {}
+
+
 class TestLiveModeRequiresAuth:
     """
     V16 BUG-LIVE-RISK-01: api/app.py's lifespan() refuses to start the
