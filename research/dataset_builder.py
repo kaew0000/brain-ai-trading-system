@@ -16,9 +16,11 @@ class DatasetBuilder:
         self._store = store or FeatureStore()
         self._lock = threading.Lock()
 
-    def capture_closed_mission(self, mission=None, trade_row: dict | None=None,
+    def capture_closed_mission(self, execution_lane: str, mission=None, trade_row: dict | None=None,
                                 market_context: dict | None=None,
                                 intelligence: dict | None=None) -> int | None:
+        """W14-2D-1: execution_lane is REQUIRED with no default — see
+        docs/architecture.md's W14-2D-1 section."""
         try:
             tr = trade_row or {}
             features = build_feature_vector(mission, tr, market_context, intelligence)
@@ -26,7 +28,7 @@ class DatasetBuilder:
             mid = getattr(mission,"id",None) if mission is not None else None
             tid = tr.get("id"); sym = tr.get("symbol") or (mission.symbol if mission else "BTCUSDT")
             with self._lock:
-                row_id = self._store.save_row(features, mission_id=mid, trade_id=tid, symbol=sym)
+                row_id = self._store.save_row(features, execution_lane=execution_lane, mission_id=mid, trade_id=tid, symbol=sym)
                 if result is not None:
                     self._store.update_outcome(row_id, result, pnl, ht)
             logger.info(f"DatasetBuilder: captured row #{row_id} (mission={mid} trade={tid} labelled={result is not None})")

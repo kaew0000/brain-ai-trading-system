@@ -74,10 +74,13 @@ CREATE TABLE IF NOT EXISTS order_timeline_history (
     state_before TEXT,
     state_after  TEXT    NOT NULL,
     source       TEXT    NOT NULL,
-    reason       TEXT
+    reason       TEXT,
+    execution_lane TEXT  NOT NULL CHECK(execution_lane IN ('LIVE','TRAINING','PAPER'))
 );
 CREATE INDEX IF NOT EXISTS idx_order_timeline_symbol
     ON order_timeline_history(symbol, id);
+CREATE INDEX IF NOT EXISTS idx_order_timeline_lane
+    ON order_timeline_history(execution_lane);
 """
 
 
@@ -145,6 +148,7 @@ class TimelineEntry:
     state_before: str | None
     state_after:  str
     source:       str
+    execution_lane: str      # W14-2D-1: required, no default — see module docstring
     reason:       str | None = None
     trade_id:     int | None = None
     order_id:     str | None = None
@@ -164,11 +168,21 @@ class OrderTimeline:
     def __init__(
         self,
         trade_lifecycle: TradeLifecycle,
+        execution_lane: str,
         exchange_manager=None,
         db_path: str | None = None,
         poll_interval_seconds: float = 5.0,
         max_history_rows: int = 100_000,
     ) -> None:
+        # W14-2D-1: required, no default — see this module's docstring and
+        # docs/architecture.md's W14-2D-1 section. This process runs exactly
+        # one lane (derived from EXECUTION_MODE via config/settings.py's
+        # EXECUTION_LANE), so every entry this instance persists shares it.
+        if execution_lane not in ("LIVE", "TRAINING", "PAPER"):
+            raise ValueError(
+                f"OrderTimeline: execution_lane must be LIVE/TRAINING/PAPER, got {execution_lane!r}"
+            )
+        self._execution_lane = execution_lane
         self._lifecycle = trade_lifecycle
         # Optional: dashboard-only / backtest deployments without live
         # exchange credentials still get correct TRADE-level composite
@@ -239,6 +253,7 @@ class OrderTimeline:
                 state_before=previous,
                 state_after=composed,
                 source="ORDER_TIMELINE",
+                execution_lane=self._execution_lane,
                 reason=info.get("exit_reason") if info else None,
                 trade_id=info.get("trade_id") if info else None,
                 order_id=None,
@@ -261,11 +276,11 @@ class OrderTimeline:
             with ManagedConn(self._db_path) as conn:
                 conn.executemany(
                     """INSERT INTO order_timeline_history
-                       (timestamp, symbol, trade_id, order_id, state_before, state_after, source, reason)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (timestamp, symbol, trade_id, order_id, state_before, state_after, source, reason, execution_lane)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     [
                         (e.timestamp, e.symbol, e.trade_id, e.order_id,
-                         e.state_before, e.state_after, e.source, e.reason)
+                         e.state_before, e.state_after, e.source, e.reason, e.execution_lane)
                         for e in entries
                     ],
                 )
@@ -390,19 +405,29 @@ _instance_lock = threading.Lock()
 
 
 def get_order_timeline(
+    execution_lane: str | None = None,
     trade_lifecycle: TradeLifecycle | None = None,
     exchange_manager=None,
     db_path: str | None = None,
     poll_interval_seconds: float = 5.0,
     max_history_rows: int = 100_000,
 ) -> OrderTimeline:
+    """W14-2D-1: execution_lane is only consulted on the very first call
+    (same "constructor args only matter once" contract this singleton
+    already documented for its other args) — it defaults to None here,
+    not because the underlying OrderTimeline accepts a default, but so
+    every existing call site that doesn't yet care about the lane keeps
+    working; None falls back to config.settings.EXECUTION_LANE, the same
+    single source of truth every other W14-2D-1 writer uses."""
     global _instance
     if _instance is None:
         with _instance_lock:
             if _instance is None:
                 from execution.trade_lifecycle import get_default_trade_lifecycle
+                from config.settings import EXECUTION_LANE
                 _instance = OrderTimeline(
                     trade_lifecycle=trade_lifecycle or get_default_trade_lifecycle(),
+                    execution_lane=execution_lane or EXECUTION_LANE,
                     exchange_manager=exchange_manager,
                     db_path=db_path,
                     poll_interval_seconds=poll_interval_seconds,

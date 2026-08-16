@@ -114,7 +114,7 @@ class TestBackwardCompatibility:
         **kwargs at all, exactly like Step 4's own equivalent test."""
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterNoKwargs(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True)
         result = gated.get_signal("BTCUSDT")
         # V16 W14-2A: agent_attribution_from_ceo_decision() output is now
         # threaded onto the returned signal — compare pricing/direction
@@ -136,7 +136,7 @@ class TestBackwardCompatibility:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             recommendation_provider=lambda: recs,
         )
         gated.get_signal("BTCUSDT")
@@ -154,7 +154,7 @@ class TestDatasetRowCountThreading:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             dataset_row_count_provider=lambda: 750,
         )
         gated.get_signal("BTCUSDT")
@@ -166,7 +166,7 @@ class TestDatasetRowCountThreading:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             recommendation_provider=lambda: recs,
             dataset_row_count_provider=lambda: 1200,
         )
@@ -180,7 +180,7 @@ class TestDatasetRowCountThreading:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             dataset_row_count_provider=lambda: 0,
         )
         gated.get_signal("BTCUSDT")
@@ -194,7 +194,7 @@ class TestDatasetRowCountThreading:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             dataset_row_count_provider=lambda: None,
         )
         gated.get_signal("BTCUSDT")
@@ -214,7 +214,7 @@ class TestFailureSafety:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             dataset_row_count_provider=_boom,
         )
         result = gated.get_signal("BTCUSDT")
@@ -239,7 +239,7 @@ class TestFailureSafety:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             recommendation_provider=lambda: recs,
             dataset_row_count_provider=_boom,
         )
@@ -343,7 +343,7 @@ class TestSafetyInvariantsUnaffectedByDatasetRowCount:
                                score_breakdown={"x": 1}, agreement_score=0.4)
         adapter = FakeAdapterWithKwargs(decision=blocked, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             dataset_row_count_provider=lambda: 5000,
         )
         result = gated.get_signal("BTCUSDT")

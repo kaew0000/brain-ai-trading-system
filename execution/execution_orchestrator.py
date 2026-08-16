@@ -274,6 +274,7 @@ class ExecutionOrchestrator:
         execution_engine,           # whatever execution.execution_factory.build_execution_engine() returned
         portfolio_manager,          # portfolio.portfolio_manager.PortfolioManager
         signal_provider: SignalProvider,
+        execution_lane: str,        # W14-2D-1: required, no default — see docs/architecture.md's W14-2D-1 section
         state: ExecutionState | None = None,
         max_retries: int | None = None,
         retry_delay_seconds: float | None = None,
@@ -282,6 +283,14 @@ class ExecutionOrchestrator:
     ) -> None:
         from config.settings import settings
         from execution.trade_lifecycle import TradeLifecycle
+        from journal.journal_v2 import VALID_EXECUTION_LANES
+
+        if execution_lane not in VALID_EXECUTION_LANES:
+            raise ValueError(
+                f"ExecutionOrchestrator: execution_lane must be one of "
+                f"{VALID_EXECUTION_LANES}, got {execution_lane!r}"
+            )
+        self.execution_lane = execution_lane
 
         self.execution_engine = execution_engine
         self.portfolio_manager = portfolio_manager
@@ -546,6 +555,7 @@ class ExecutionOrchestrator:
                         "stop_loss":   signal.stop_loss,
                         "take_profit": signal.take_profit,
                     },
+                    execution_lane=self.execution_lane,
                     symbol=alloc.symbol,
                 )
 
@@ -561,7 +571,7 @@ class ExecutionOrchestrator:
             rec.take_profit = signal.take_profit
             rec.quantity    = result.get("quantity") or 0.0
             rec.order_id    = order_id
-            trade_id = self.journal.save_trade(rec, signal_id=sig_id)
+            trade_id = self.journal.save_trade(rec, execution_lane=self.execution_lane, signal_id=sig_id)
 
             # V16 Phase 4B Step 3D: routed through TradeLifecycle instead
             # of calling record_trade_outcome() directly — same fields,

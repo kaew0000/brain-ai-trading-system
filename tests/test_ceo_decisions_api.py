@@ -50,6 +50,7 @@ class TestCeoDecisionsPopulated:
             agent="CEO_AGENT", decision=action, symbol=symbol, score=confidence,
             details={"reasons": reasons or ["SMC bullish", "funding negative"],
                       "agreement_score": agreement_score, "direction": direction},
+            execution_lane="LIVE",
         )
 
     def test_returns_the_seeded_decision(self, client_and_journal):
@@ -74,7 +75,7 @@ class TestCeoDecisionsPopulated:
     def test_only_ceo_agent_rows_returned_not_other_agents(self, client_and_journal):
         client, jrn = client_and_journal
         self._seed(jrn, symbol="BTCUSDT")
-        jrn.save_agent_decision(agent="SMC_ANALYST", decision="LONG", symbol="BTCUSDT", score=70.0, details={})
+        jrn.save_agent_decision(agent="SMC_ANALYST", decision="LONG", symbol="BTCUSDT", score=70.0, details={}, execution_lane="LIVE")
 
         data = client.get("/api/ceo-decisions").json()["data"]
         assert all(row["agent"] == "CEO_AGENT" for row in data)

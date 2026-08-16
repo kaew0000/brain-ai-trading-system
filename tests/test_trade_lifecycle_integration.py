@@ -216,6 +216,7 @@ class TestReplacementCloseIntegration:
         pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0, trade_id=42))
         lc = TradeLifecycle(journal=jrn, portfolio_manager=pm)
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=FakeEngine(), portfolio_manager=pm,
             signal_provider=lambda symbol: None, journal=jrn, lifecycle=lc,
             state=ExecutionState(),
@@ -316,6 +317,7 @@ class TestExchangeRejectOnClose:
         pstate.add_position(make_position("SOLUSDT", "LONG", qty=3.0, trade_id=42))
         lc = TradeLifecycle(journal=jrn, portfolio_manager=pm)
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=RejectingCloseEngine(), portfolio_manager=pm,
             signal_provider=lambda symbol: None, journal=jrn, lifecycle=lc,
             state=ExecutionState(), max_retries=0,

@@ -32,7 +32,7 @@ def _open_trade(journal: TradeJournalV2, sig_id: int, direction: str) -> int:
     rec.entry_price = 67000.0
     rec.stop_loss   = 65800.0
     rec.take_profit = 69400.0
-    return journal.save_trade(rec, signal_id=sig_id)
+    return journal.save_trade(rec, signal_id=sig_id, execution_lane="LIVE")
 
 
 class TestAgentPerformance:
@@ -56,9 +56,9 @@ class TestAgentPerformance:
         assert journal.get_agent_performance() == []
 
     def test_agreeing_agent_credited_with_win(self, journal):
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
         journal.save_agent_decision("SMC_ANALYST", "LONG", score=80.0, weight=0.25,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         tid = _open_trade(journal, sig_id, "LONG")
         journal.update_trade_result(tid, "WIN", 69000.0, 250.0)
 
@@ -76,11 +76,11 @@ class TestAgentPerformance:
         """An agent that voted the opposite direction of the trade actually
         taken should not show up in the winner's performance row nor be
         blamed for the loss — it didn't get the trade it voted for."""
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
         journal.save_agent_decision("SMC_ANALYST", "LONG", score=80.0, weight=0.25,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         journal.save_agent_decision("REGIME_ANALYST", "SHORT", score=55.0, weight=0.15,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         tid = _open_trade(journal, sig_id, "LONG")
         journal.update_trade_result(tid, "LOSS", 65800.0, -120.0)
 
@@ -90,13 +90,13 @@ class TestAgentPerformance:
         assert "REGIME_ANALYST" not in perf
 
     def test_win_rate_across_multiple_trades(self, journal):
-        sig1 = journal.save_signal({"action": "LONG", "direction": "LONG"})
-        journal.save_agent_decision("FUTURES_ANALYST", "LONG", signal_id=sig1)
+        sig1 = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
+        journal.save_agent_decision("FUTURES_ANALYST", "LONG", signal_id=sig1, execution_lane="LIVE")
         t1 = _open_trade(journal, sig1, "LONG")
         journal.update_trade_result(t1, "WIN", 69000.0, 300.0)
 
-        sig2 = journal.save_signal({"action": "LONG", "direction": "LONG"})
-        journal.save_agent_decision("FUTURES_ANALYST", "LONG", signal_id=sig2)
+        sig2 = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
+        journal.save_agent_decision("FUTURES_ANALYST", "LONG", signal_id=sig2, execution_lane="LIVE")
         t2 = _open_trade(journal, sig2, "LONG")
         journal.update_trade_result(t2, "LOSS", 65800.0, -150.0)
 
@@ -109,8 +109,8 @@ class TestAgentPerformance:
         assert fa["total_pnl"] == 150.0
 
     def test_open_trades_excluded(self, journal):
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
-        journal.save_agent_decision("SMC_ANALYST", "LONG", signal_id=sig_id)
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
+        journal.save_agent_decision("SMC_ANALYST", "LONG", signal_id=sig_id, execution_lane="LIVE")
         _open_trade(journal, sig_id, "LONG")  # left OPEN, never closed
 
         assert journal.get_agent_performance() == []
@@ -118,8 +118,8 @@ class TestAgentPerformance:
     def test_agent_decision_without_signal_id_ignored(self, journal):
         """Agent votes recorded with no signal_id (e.g. legacy/manual calls)
         must not crash the join and must not be attributed anything."""
-        journal.save_agent_decision("SMC_ANALYST", "LONG")  # signal_id=None
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
+        journal.save_agent_decision("SMC_ANALYST", "LONG", execution_lane="LIVE")  # signal_id=None
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
         tid = _open_trade(journal, sig_id, "LONG")
         journal.update_trade_result(tid, "WIN", 69000.0, 250.0)
 
@@ -127,8 +127,8 @@ class TestAgentPerformance:
 
     def test_limit_respected(self, journal):
         for i in range(3):
-            sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
-            journal.save_agent_decision(f"AGENT_{i}", "LONG", signal_id=sig_id)
+            sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
+            journal.save_agent_decision(f"AGENT_{i}", "LONG", signal_id=sig_id, execution_lane="LIVE")
             tid = _open_trade(journal, sig_id, "LONG")
             journal.update_trade_result(tid, "WIN", 69000.0, 100.0)
 

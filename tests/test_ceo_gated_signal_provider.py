@@ -104,7 +104,7 @@ class TestFeatureFlag:
     def test_disabled_is_byte_identical_passthrough(self):
         sp = FakeSignalProvider(signal=LONG_SIGNAL)
         adapter = FakeAdapter(decision=CEODecision(action="WAIT"), signal=None)
-        gated = CEOGatedSignalProvider(sp, adapter, enabled=False)
+        gated = CEOGatedSignalProvider(sp, adapter, execution_lane="LIVE", enabled=False)
 
         result = gated.get_signal("BTCUSDT")
 
@@ -116,7 +116,7 @@ class TestFeatureFlag:
         sp = FakeSignalProvider(signal=LONG_SIGNAL)  # would be wrong if used directly
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(sp, adapter, enabled=True)
+        gated = CEOGatedSignalProvider(sp, adapter, execution_lane="LIVE", enabled=True)
 
         result = gated.get_signal("BTCUSDT")
 
@@ -143,7 +143,7 @@ class TestFeatureFlag:
         sp = FakeSignalProvider(signal=LONG_SIGNAL)
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(sp, adapter)  # no enabled= override
+        gated = CEOGatedSignalProvider(sp, adapter, execution_lane="LIVE")  # no enabled= override
 
         monkeypatch.setattr(settings_module.settings, "CEO_MULTI_SYMBOL_ENABLED", False)
         gated.get_signal("BTCUSDT")
@@ -165,7 +165,7 @@ class TestEnabledBehavior:
     def test_ceo_confirms_returns_the_priced_signal(self):
         decision = CEODecision(action="LONG", direction="LONG", confidence=85.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True)
         result = gated.get_signal("BTCUSDT")
         # V16 W14-2A: agent_attribution is now populated (see
         # TestAttributionWiring below) — compare pricing fields only,
@@ -178,13 +178,13 @@ class TestEnabledBehavior:
     def test_ceo_vetoes_by_disagreement_returns_none(self):
         decision = CEODecision(action="SHORT", direction="SHORT", confidence=85.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True)
         assert gated.get_signal("BTCUSDT") is None
 
     def test_ceo_blocked_returns_none(self):
         decision = CEODecision(action="BLOCKED", confidence=0.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True)
         assert gated.get_signal("BTCUSDT") is None
 
     def test_no_usable_symbol_this_cycle_returns_none(self):
@@ -192,7 +192,7 @@ class TestEnabledBehavior:
         underlying pipeline has nothing this cycle (e.g. incomplete
         OHLCV) — must propagate cleanly, not crash."""
         adapter = FakeAdapter(decision=None, signal=None)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True)
         assert gated.get_signal("BTCUSDT") is None
 
     def test_adapter_exception_is_caught_not_raised(self):
@@ -200,14 +200,14 @@ class TestEnabledBehavior:
             def decide_with_signal(self, symbol):
                 raise ConnectionError("simulated failure")
 
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), RaisingAdapter(), enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), RaisingAdapter(), execution_lane="LIVE", enabled=True)
         result = gated.get_signal("BTCUSDT")  # must not raise
         assert result is None
 
     def test_call_dunder_matches_get_signal(self):
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True)
         assert gated("BTCUSDT") == gated.get_signal("BTCUSDT")
 
 
@@ -230,14 +230,14 @@ class TestJournalPersistence:
         journal = FakeJournal()
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(signal=LONG_SIGNAL), adapter, journal=journal, enabled=False)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(signal=LONG_SIGNAL), adapter, execution_lane="LIVE", journal=journal, enabled=False)
         gated.get_signal("BTCUSDT")
         assert journal.saved == []
 
     def test_no_journal_supplied_does_not_raise(self):
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, journal=None, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", journal=None, enabled=True)
         gated.get_signal("BTCUSDT")  # must not raise
 
     def test_enabled_with_decision_stores_ceo_action_confidence_reason(self):
@@ -247,7 +247,7 @@ class TestJournalPersistence:
             reasons=["SMC bullish", "funding negative"],
         )
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
 
         assert len(journal.saved) == 1
@@ -264,7 +264,7 @@ class TestJournalPersistence:
         journal = FakeJournal()
         decision = CEODecision(action="WAIT", confidence=20.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
         assert len(journal.saved) == 1
         assert journal.saved[0]["decision"] == "WAIT"
@@ -272,7 +272,7 @@ class TestJournalPersistence:
     def test_no_decision_this_cycle_stores_nothing(self):
         journal = FakeJournal()
         adapter = FakeAdapter(decision=None, signal=None)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
         assert journal.saved == []
 
@@ -280,7 +280,7 @@ class TestJournalPersistence:
         journal = FakeJournal(raise_on_save=True)
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapter(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
         result = gated.get_signal("BTCUSDT")  # must not raise
         # the trading decision itself still succeeds. V16 W14-2A:
         # agent_attribution is built in-process from ceo_decision (no

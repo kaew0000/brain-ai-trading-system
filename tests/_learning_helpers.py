@@ -40,14 +40,14 @@ def seed_trades(
     for i in range(n):
         sig_id = journal.save_signal({
             "action": "LONG", "direction": "LONG", "confidence": rng.uniform(20, 95),
-        })
+        }, execution_lane="LIVE")
         if with_agents:
-            journal.save_agent_decision("smc", "LONG", score=rng.uniform(30, 90), weight=0.25, signal_id=sig_id)
+            journal.save_agent_decision("smc", "LONG", score=rng.uniform(30, 90), weight=0.25, signal_id=sig_id, execution_lane="LIVE")
             journal.save_agent_decision(
                 "regime", "LONG" if rng.random() < 0.7 else "SHORT",
-                score=rng.uniform(30, 90), weight=0.15, signal_id=sig_id,
+                score=rng.uniform(30, 90), weight=0.15, signal_id=sig_id, execution_lane="LIVE",
             )
-            journal.save_agent_decision("ceo", "LONG", score=rng.uniform(30, 90), weight=1.0, signal_id=sig_id)
+            journal.save_agent_decision("ceo", "LONG", score=rng.uniform(30, 90), weight=1.0, signal_id=sig_id, execution_lane="LIVE")
 
         rec = TradeRecord()
         day = (i % 28) + 1
@@ -58,7 +58,7 @@ def seed_trades(
         rec.regime = regimes[i % len(regimes)]
         rec.entry_price = 100.0
         rec.confidence = rng.uniform(20, 95)
-        tid = journal.save_trade(rec, signal_id=sig_id)
+        tid = journal.save_trade(rec, execution_lane="LIVE", signal_id=sig_id)
 
         is_win = rng.random() < win_rate
         pnl = rng.uniform(5, 90) if is_win else -rng.uniform(5, 60)

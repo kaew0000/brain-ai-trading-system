@@ -111,7 +111,7 @@ def _make_gated_provider(journal, *, recommendations=None, dataset_row_count=750
         kwargs["dataset_row_count_provider"] = lambda: dataset_row_count
 
     return CEOGatedSignalProvider(
-        FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True, **kwargs,
+        FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True, **kwargs,
     )
 
 

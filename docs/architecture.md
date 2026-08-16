@@ -3963,3 +3963,121 @@ be configured.
 `execution/`, `portfolio/`, `commander/`, `dashboard_src/`, `world/`,
 `learning/`, W14-2A's attribution work, W14-2C (office assets), or
 W14-2D (dual-lane runtime). Not pushed, no PR opened, not merged.
+
+## 40. Execution-Lane Data Model — V16 W14-2D-1 (2026-08-17)
+
+**Problem.** Every journal/dataset table (`trades`, `signals`,
+`agent_decisions`, `feature_rows`, `ml_predictions`,
+`order_timeline_history`) had zero concept of which execution context
+produced a given row. `EXECUTION_MODE` already picks exactly one engine
+per process (`live`/`testnet` → `ExecutionCoordinator`, `paper` →
+`PaperExecutionEngine`, see `execution/execution_factory.py`), and
+`research/dataset_builder.py::get_training_rows()`/
+`export_training_dataframe()` pulled every row with no filter — meaning
+a real live trade and a paper-mode simulation were, at the data layer,
+indistinguishable. This is the audited gap the approved W14-2D-1 scope
+(data model only — see the design doc reviewed before implementation)
+exists to close, ahead of any later phase that runs LIVE and TRAINING
+concurrently in one process.
+
+**Fix — additive only, no runtime/lifecycle/dashboard changes:**
+
+1. `config/settings.py` — new derived, non-persisted constant
+   `EXECUTION_LANE`, computed once from the same `EXECUTION_MODE` value
+   the execution factory already reads: `live`/`testnet` → `LIVE`,
+   `paper` → `TRAINING`, anything unrecognized → `TRAINING` (fail-safe;
+   an unrecognized mode must never be silently labeled LIVE). `PAPER` is
+   a reserved third lane value for a future manual/dry-run path — no
+   runtime code produces it yet, deliberately not invented here.
+
+2. `database/schema_v13.sql` — `execution_lane TEXT NOT NULL
+   CHECK(execution_lane IN ('LIVE','TRAINING','PAPER'))` added to
+   `trades`, `signals`, `agent_decisions`, `feature_rows`,
+   `ml_predictions` (no SQL `DEFAULT` on any of them — every writer must
+   pass it explicitly). New append-only `execution_events` table: the
+   immutable audit trail this phase's "no implicit lane, no silent
+   pollution" requirement calls for — `event_id`, `execution_lane`,
+   `timestamp`, `symbol`, `order_id`, `trade_id`, `event_type`,
+   `source`, `payload`, `schema_version`, `correction_of`. A correction
+   is a new row referencing the original via `correction_of`, never an
+   `UPDATE`/`DELETE` — `journal/journal_v2.py::record_execution_event()`
+   is the only writer and is insert-only by construction; there is no
+   update/delete method anywhere in the class, and
+   `tests/test_execution_lane_contract.py` statically greps the whole
+   repository for the SQL verbs that would mutate this table.
+   `execution/order_timeline.py`'s separately-schema'd
+   `order_timeline_history` gets the identical column/constraint.
+
+3. `journal/journal_v2.py` — `save_trade`, `save_signal`,
+   `save_agent_decision` all gained `execution_lane` as a **required**
+   parameter (no default value in the Python signature — omitting it is
+   a `TypeError` at the call site, not a silent `None`/`LIVE`).
+   `VALID_EXECUTION_LANES` + `_validate_lane()` give defense-in-depth
+   ahead of the SQL `CHECK` constraint.
+
+4. Every real writer threaded the lane through explicitly, derived from
+   `config.settings.EXECUTION_LANE` at the point each process-wide
+   object is constructed (not re-derived per call):
+   `execution/execution_orchestrator.py::ExecutionOrchestrator.__init__`,
+   `execution/ceo_gated_signal_provider.py::CEOGatedSignalProvider.__init__`,
+   `execution/order_timeline.py::OrderTimeline.__init__` (+
+   `get_order_timeline()` singleton factory), `research/feature_store.py
+   ::FeatureStore.save_row`, `research/dataset_builder.py::DatasetBuilder
+   .capture_closed_mission`, `ml/ml_advisor.py::MLAdvisor.advise` (now
+   takes `execution_lane` as its 3rd argument, forwarded into
+   `_persist_prediction`). `main.py`'s two write paths (`run_trading_cycle`
+   and the objects it constructs in `build_system()`) all pass
+   `EXECUTION_LANE` at their respective call sites — confirmed via
+   exhaustive grep of every `.save_trade(`/`.save_signal(`/
+   `.save_agent_decision(`/`.save_row(`/`.capture_closed_mission(`/
+   `.advise(` call site in the repository, not assumed.
+
+5. `database/migrations/migration_001_execution_lane_backfill.py` —
+   new, standalone, idempotent migration for a pre-existing database
+   file (nothing in `database/db.py` runs this automatically; `CREATE
+   TABLE IF NOT EXISTS` cannot retrofit a `NOT NULL` column onto a
+   populated table). Parses the *actual* target `CREATE TABLE`
+   statements straight out of `schema_v13.sql` (no hand-duplicated SQL
+   to drift out of sync), rebuilds each of the six tables via SQLite's
+   standard 12-step pattern, and backfills every historical row's
+   `execution_lane` to the literal string `'LIVE'` — approved decision:
+   historical data predates any dual-lane concept and was all real
+   money. Usage: `python -m
+   database.migrations.migration_001_execution_lane_backfill
+   <db_path>`.
+
+**Safety boundary confirmed by diff, not assertion:** `git diff main --
+agents/ decision/ risk/ portfolio/portfolio_manager.py` is empty. No
+order sizing, SL/TP, strategy, signal logic, Binance order-placement
+behavior, W14-0 lifecycle/START-STOP semantics, or authentication
+changed. `EXECUTION_MODE` still selects exactly one engine per process,
+unchanged — this phase only labels the resulting records; concurrent
+LIVE+TRAINING runtime, the training scheduler, evaluation/promotion
+gate hardening, and dashboard visibility are explicitly deferred to
+W14-2D-2 through W14-2D-9.
+
+**Tests:** `tests/test_execution_lane_contract.py` (new, 45 cases) —
+required-argument/no-default checks on every writer named above;
+`NULL`/invalid-value rejection at both the Python and raw-SQL layers;
+`LIVE`/`TRAINING`/`PAPER` all accepted and round-trip correctly;
+migration backfill + idempotency + post-migration constraint
+enforcement against a synthetic legacy database; `execution_events`
+append-only guarantee including the static repo-wide grep for
+`UPDATE`/`DELETE` against it, and a correction-event round trip proving
+the original row is never touched; `EXECUTION_MODE` → `EXECUTION_LANE`
+derivation for `live`/`testnet`/`paper`/an unrecognized value (tested
+against the pure mapping dict, deliberately without reloading
+`config.settings` at runtime — an earlier draft of this test did
+reload the shared settings module mid-suite via `importlib.reload`,
+which leaked altered global state into ~200 unrelated tests running
+afterward in the same pytest process; caught by re-running the full
+suite after adding the new test file, not assumed safe). Every other
+call site across ~20 pre-existing test files updated to pass an
+explicit `execution_lane` (mechanical signature-compatibility changes,
+no test logic altered). Full suite: 2607 passed / 3 pre-existing
+failures (`tests/test_dashboard_serving.py`, missing Vite build,
+confirmed via `git stash -u` to predate this change and unrelated to
+it). World suite: 565/565 passed, unchanged. `ruff check .`: clean.
+`vulture . --min-confidence 80`: identical output to baseline (verified
+via `git stash -u` diff), no new findings. `import main`: clean.
+`git diff --check`: clean.

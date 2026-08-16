@@ -57,7 +57,7 @@ class TestByteIdenticalWhenDisabled:
         dp = _multi_symbol_data_provider()
         provider = PortfolioSignalProvider(data_provider=dp)
         dispatcher = MultiSymbolCEODispatcher(provider, CEOAgentSymbolCache())
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=False)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=False)
 
         for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
             direct = provider.get_signal(symbol)
@@ -70,7 +70,7 @@ class TestByteIdenticalWhenDisabled:
         dp = _multi_symbol_data_provider()
         provider = PortfolioSignalProvider(data_provider=dp)
         dispatcher = MultiSymbolCEODispatcher(provider, CEOAgentSymbolCache())
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=False)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=False)
 
         gated.get_signal("BTCUSDT")
         assert dp.requested_symbols == ["BTCUSDT"]  # exactly one fetch, not two
@@ -83,7 +83,7 @@ class TestByteIdenticalWhenDisabled:
         provider = PortfolioSignalProvider(data_provider=dp)
         cache = CEOAgentSymbolCache()
         dispatcher = MultiSymbolCEODispatcher(provider, cache)
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=False)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=False)
 
         for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
             gated.get_signal(symbol)
@@ -100,7 +100,7 @@ class TestIndependentDecisionsPerSymbol:
         provider = PortfolioSignalProvider(data_provider=dp)
         cache = CEOAgentSymbolCache()
         dispatcher = MultiSymbolCEODispatcher(provider, cache)
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=True)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=True)
 
         for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
             gated.get_signal(symbol)
@@ -116,7 +116,7 @@ class TestIndependentDecisionsPerSymbol:
         provider = PortfolioSignalProvider(data_provider=dp)
         cache = CEOAgentSymbolCache()
         dispatcher = MultiSymbolCEODispatcher(provider, cache)
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=True)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=True)
 
         gated.get_signal("BTCUSDT")
         gated.get_signal("ETHUSDT")
@@ -181,7 +181,7 @@ class TestNoDuplicateComputation:
         provider = PortfolioSignalProvider(data_provider=dp, context_builder=SpyContextBuilder())
         cache = CEOAgentSymbolCache()
         dispatcher = MultiSymbolCEODispatcher(provider, cache)
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=True)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=True)
 
         gated.get_signal("BTCUSDT")
         gated.get_signal("ETHUSDT")
@@ -202,7 +202,7 @@ class TestNoDuplicateComputation:
         provider = PortfolioSignalProvider(data_provider=dp, confidence_engine=SpyConfidenceEngine())
         cache = CEOAgentSymbolCache()
         dispatcher = MultiSymbolCEODispatcher(provider, cache)
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=True)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=True)
 
         gated.get_signal("BTCUSDT")
 
@@ -220,7 +220,7 @@ class TestNoDuplicateComputation:
         provider = PortfolioSignalProvider(data_provider=dp, regime_engine=SpyRegimeEngine(use_hmm=True))
         cache = CEOAgentSymbolCache()
         dispatcher = MultiSymbolCEODispatcher(provider, cache)
-        gated = CEOGatedSignalProvider(provider, dispatcher, enabled=True)
+        gated = CEOGatedSignalProvider(provider, dispatcher, execution_lane="LIVE", enabled=True)
 
         gated.get_signal("BTCUSDT")
 
@@ -267,7 +267,7 @@ class TestExecutionFollowsCeoDecisionExactly:
             def decide_with_signal(self, symbol):
                 return CEODecision(action="BLOCKED", confidence=0.0), priced_signal
 
-        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), enabled=True)
+        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), execution_lane="LIVE", enabled=True)
         assert gated.get_signal("BTCUSDT") is None  # BLOCKED always vetoes, regardless of a real priced signal
 
     def test_wait_decision_never_produces_a_tradeable_signal(self):
@@ -277,7 +277,7 @@ class TestExecutionFollowsCeoDecisionExactly:
             def decide_with_signal(self, symbol):
                 return CEODecision(action="WAIT", confidence=40.0), priced_signal
 
-        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), enabled=True)
+        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), execution_lane="LIVE", enabled=True)
         assert gated.get_signal("BTCUSDT") is None
 
     def test_long_decision_produces_exactly_the_priced_long_signal(self):
@@ -287,7 +287,7 @@ class TestExecutionFollowsCeoDecisionExactly:
             def decide_with_signal(self, symbol):
                 return CEODecision(action="LONG", direction="LONG", confidence=85.0), priced_signal
 
-        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), enabled=True)
+        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), execution_lane="LIVE", enabled=True)
         result = gated.get_signal("BTCUSDT")
         # V16 W14-2A: no longer the exact same object — get_signal() now
         # always threads agent_attribution_from_ceo_decision() onto the
@@ -313,5 +313,5 @@ class TestExecutionFollowsCeoDecisionExactly:
             def decide_with_signal(self, symbol):
                 return CEODecision(action="SHORT", direction="SHORT", confidence=90.0), priced_long_signal
 
-        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), enabled=True)
+        gated = CEOGatedSignalProvider(FakeDataProvider(), FixedAdapter(), execution_lane="LIVE", enabled=True)
         assert gated.get_signal("BTCUSDT") is None

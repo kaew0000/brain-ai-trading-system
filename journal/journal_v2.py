@@ -50,6 +50,20 @@ from analytics.trade_journal import TradeRecord
 
 logger = get_logger(__name__)
 
+# ── W14-2D-1: execution_lane contract ─────────────────────────────────────
+# Single validation point for every journal writer below. Deliberately
+# raises rather than coercing — see docs/architecture.md's W14-2D-1 section:
+# "no implicit/default lane that can make a TRAINING event look like LIVE".
+VALID_EXECUTION_LANES = ("LIVE", "TRAINING", "PAPER")
+
+
+def _validate_lane(execution_lane: str) -> str:
+    if execution_lane not in VALID_EXECUTION_LANES:
+        raise ValueError(
+            f"execution_lane must be one of {VALID_EXECUTION_LANES}, got {execution_lane!r}"
+        )
+    return execution_lane
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -108,15 +122,24 @@ class TradeJournalV2:
     def save_trade(
         self,
         rec: TradeRecord,
+        execution_lane: str,
         confidence_breakdown: dict | None = None,
         signal_id: int | None = None,
         explanation_id: int | None = None,
     ) -> int:
-        """Insert a trade. Backward compatible with v1 TradeRecord."""
+        """Insert a trade. Backward compatible with v1 TradeRecord.
+
+        W14-2D-1: execution_lane is REQUIRED with no default — see
+        docs/architecture.md's W14-2D-1 section. This is the authoritative
+        lane for the row regardless of whether `rec.execution_lane` was
+        also set by the caller; passing a mismatched value here is a bug
+        in the caller, not something this method silently reconciles.
+        """
         data = rec.to_dict()
         data["confidence_breakdown"] = _json(confidence_breakdown)
         data["signal_id"] = signal_id
         data["explanation_id"] = explanation_id
+        data["execution_lane"] = _validate_lane(execution_lane)
 
         sql = """
         INSERT INTO trades (
@@ -127,7 +150,7 @@ class TradeJournalV2:
             entry_price, stop_loss, take_profit, quantity,
             result, pnl, rr, exit_price,
             mtf_aligned, block_reasons, order_id,
-            signal_id, explanation_id, extra_data
+            signal_id, explanation_id, extra_data, execution_lane
         ) VALUES (
             :timestamp, :symbol, :direction, :regime,
             :bos, :choch, :fvg, :ob,
@@ -136,7 +159,7 @@ class TradeJournalV2:
             :entry_price, :stop_loss, :take_profit, :quantity,
             :result, :pnl, :rr, :exit_price,
             :mtf_aligned, :block_reasons, :order_id,
-            :signal_id, :explanation_id, :extra_data
+            :signal_id, :explanation_id, :extra_data, :execution_lane
         )"""
         with self._conn() as c:
             cur = c.execute(sql, data)
@@ -469,6 +492,7 @@ class TradeJournalV2:
     def save_signal(
         self,
         decision: dict,
+        execution_lane: str,
         symbol: str | None = None,
         confidence_breakdown: dict | None = None,
         raw_features: dict | None = None,
@@ -476,18 +500,21 @@ class TradeJournalV2:
         """
         Persist one decision-cycle output (DecisionResult.to_dict() or
         ConfidenceResult-derived dict). Returns the new signal id.
+
+        W14-2D-1: execution_lane is REQUIRED with no default — see
+        docs/architecture.md's W14-2D-1 section.
         """
         sql = """
         INSERT INTO signals (
             timestamp, symbol, action, direction,
             confidence, confidence_breakdown, score, max_score,
             regime, mtf_aligned, blocked, block_reasons,
-            entry_price, stop_loss, take_profit, raw_features
+            entry_price, stop_loss, take_profit, raw_features, execution_lane
         ) VALUES (
             :timestamp, :symbol, :action, :direction,
             :confidence, :confidence_breakdown, :score, :max_score,
             :regime, :mtf_aligned, :blocked, :block_reasons,
-            :entry_price, :stop_loss, :take_profit, :raw_features
+            :entry_price, :stop_loss, :take_profit, :raw_features, :execution_lane
         )"""
         params = {
             "timestamp": decision.get("timestamp") or _now_iso(),
@@ -506,6 +533,7 @@ class TradeJournalV2:
             "stop_loss": float(decision.get("stop_loss", 0.0)),
             "take_profit": float(decision.get("take_profit", 0.0)),
             "raw_features": _json(raw_features),
+            "execution_lane": _validate_lane(execution_lane),
         }
         with self._conn() as c:
             cur = c.execute(sql, params)
@@ -682,19 +710,23 @@ class TradeJournalV2:
         self,
         agent: str,
         decision: str,
+        execution_lane: str,
         symbol: str | None = None,
         score: float = 0.0,
         weight: float = 0.0,
         details: dict | None = None,
         signal_id: int | None = None,
     ) -> int:
+        """W14-2D-1: execution_lane is REQUIRED with no default — see
+        docs/architecture.md's W14-2D-1 section."""
+        lane = _validate_lane(execution_lane)
         sql = """
-        INSERT INTO agent_decisions (timestamp, agent, symbol, decision, score, weight, details, signal_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+        INSERT INTO agent_decisions (timestamp, agent, symbol, decision, score, weight, details, signal_id, execution_lane)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
         with self._conn() as c:
             cur = c.execute(sql, (
                 _now_iso(), agent, symbol or settings.SYMBOL, decision,
-                float(score), float(weight), _json(details), signal_id,
+                float(score), float(weight), _json(details), signal_id, lane,
             ))
             c.commit()
             return cur.lastrowid
@@ -828,6 +860,96 @@ class TradeJournalV2:
     def get_latest_explanation(self, symbol: str | None = None) -> dict | None:
         rows = self.get_explanations(limit=1, symbol=symbol)
         return rows[0] if rows else None
+
+    # ════════════════════════════════════════════════════════════════════
+    # EXECUTION EVENTS — W14-2D-1: immutable, append-only audit trail
+    # ════════════════════════════════════════════════════════════════════
+    #
+    # See database/schema_v13.sql's execution_events table comment for the
+    # full contract. This is the ONLY method in this module allowed to
+    # write to execution_events, and it is INSERT-only by construction —
+    # there is no update_execution_event()/delete_execution_event() method
+    # anywhere in this class, deliberately. A correction is recorded as a
+    # brand-new row via correction_of, never by mutating the original.
+    # tests/test_execution_lane_contract.py statically greps this whole
+    # repository for the SQL verbs that would mutate this table, paired
+    # with this table's name, and fails the suite if either appears.
+
+    def record_execution_event(
+        self,
+        execution_lane: str,
+        event_type: str,
+        source: str,
+        symbol: str,
+        payload: dict | None = None,
+        order_id: str | None = None,
+        trade_id: int | None = None,
+        correction_of: str | None = None,
+    ) -> str:
+        """Append one immutable event. Returns the new event_id (uuid4).
+
+        W14-2D-1: execution_lane is REQUIRED with no default. A
+        correction is created by calling this again with
+        event_type="CORRECTION" and correction_of=<original event_id> —
+        never by editing the original row.
+        """
+        import uuid
+
+        lane = _validate_lane(execution_lane)
+        event_id = str(uuid.uuid4())
+        sql = """
+        INSERT INTO execution_events (
+            event_id, execution_lane, timestamp, symbol, order_id, trade_id,
+            event_type, source, payload, schema_version, correction_of
+        ) VALUES (
+            :event_id, :execution_lane, :timestamp, :symbol, :order_id, :trade_id,
+            :event_type, :source, :payload, :schema_version, :correction_of
+        )"""
+        params = {
+            "event_id": event_id,
+            "execution_lane": lane,
+            "timestamp": _now_iso(),
+            "symbol": symbol,
+            "order_id": order_id,
+            "trade_id": trade_id,
+            "event_type": event_type,
+            "source": source,
+            "payload": _json(payload or {}),
+            "schema_version": 1,
+            "correction_of": correction_of,
+        }
+        with self._conn() as c:
+            c.execute(sql, params)
+            c.commit()
+        logger.info(f"ExecutionEvent #{event_id} saved | lane={lane} type={event_type}")
+        return event_id
+
+    def get_execution_events(
+        self,
+        limit: int = 100,
+        execution_lane: str | None = None,
+        symbol: str | None = None,
+        trade_id: int | None = None,
+    ) -> list[dict]:
+        """Read-only. No filtering-by-default — an explicit execution_lane
+        must be passed to scope results to one lane; omitting it returns
+        events across all lanes (read path only, not a writer contract)."""
+        sql = "SELECT * FROM execution_events WHERE 1=1"
+        args: list = []
+        if execution_lane is not None:
+            sql += " AND execution_lane=?"
+            args.append(_validate_lane(execution_lane))
+        if symbol is not None:
+            sql += " AND symbol=?"
+            args.append(symbol)
+        if trade_id is not None:
+            sql += " AND trade_id=?"
+            args.append(trade_id)
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        args.append(limit)
+        with self._conn() as c:
+            rows = c.execute(sql, args).fetchall()
+        return [_row_to_dict(r, json_cols=("payload",)) for r in rows]
 
     # ════════════════════════════════════════════════════════════════════
     # CONFIG PROFILES

@@ -119,7 +119,7 @@ class TestJournalV2:
         decision = {"action": "LONG", "score": 7, "confidence": 82.0,
                     "regime": "TREND", "direction": "LONG",
                     "entry_price": 67000.0, "stop_loss": 65800.0, "take_profit": 69400.0}
-        sid = journal.save_signal(decision, confidence_breakdown={"smc": 28, "volume": 18})
+        sid = journal.save_signal(decision, execution_lane="LIVE", confidence_breakdown={"smc": 28, "volume": 18})
         assert sid == 1
         sigs = journal.get_signals(limit=5)
         assert len(sigs) == 1
@@ -165,7 +165,8 @@ class TestJournalV2:
     def test_agent_decision(self, journal):
         did = journal.save_agent_decision("SMC_ANALYST", "BOS_BULLISH",
                                            score=2.0, weight=0.3,
-                                           details={"tf": "M15", "price": 67000})
+                                           details={"tf": "M15", "price": 67000},
+                                           execution_lane="LIVE")
         decisions = journal.get_agent_decisions(limit=5, agent="SMC_ANALYST")
         assert decisions[0]["decision"] == "BOS_BULLISH"
         assert isinstance(decisions[0]["details"], dict)
@@ -216,7 +217,7 @@ class TestJournalV2:
         rec.entry_price = 67000.0
         rec.stop_loss = 65800.0
         rec.take_profit = 69400.0
-        tid = journal.save_trade(rec)
+        tid = journal.save_trade(rec, execution_lane="LIVE")
         ok = journal.update_trade_result(tid, "WIN", 69000.0, 250.0)
         assert ok
         trades = journal.get_trades(limit=5)

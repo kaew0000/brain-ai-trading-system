@@ -59,7 +59,7 @@ def client(tmp_path_factory):
         "max_score": 9, "confidence": 78.0, "regime": "TREND",
         "mtf_aligned": True, "blocked": False, "block_reasons": [],
         "entry_price": 67000.0, "stop_loss": 65800.0, "take_profit": 69400.0,
-    }, confidence_breakdown={"smc": 28, "volume": 18, "oi": 16,
+    }, execution_lane="LIVE", confidence_breakdown={"smc": 28, "volume": 18, "oi": 16,
                               "funding": 8, "regime": 8})
 
     jrn.save_market_regime({

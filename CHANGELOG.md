@@ -1,5 +1,58 @@
 # CHANGELOG
 
+## [Unreleased] — V16 W14-2D-1: Execution-Lane Data Model
+
+Every journal/dataset table had zero concept of which execution context
+(live money vs. paper/training simulation) produced a row, and the
+training-dataset export path pulled every row with no filter — meaning
+a real live trade and a simulated one were indistinguishable at the
+data layer. See `docs/architecture.md` §40 for the full root-cause
+writeup and file-level detail.
+
+### Added
+- `execution_lane TEXT NOT NULL CHECK(... IN ('LIVE','TRAINING','PAPER'))`
+  on `trades`, `signals`, `agent_decisions`, `feature_rows`,
+  `ml_predictions`, `order_timeline_history` — no SQL `DEFAULT` on any
+  of them.
+- New append-only `execution_events` table + `journal/journal_v2.py
+  ::record_execution_event()` / `get_execution_events()` — immutable
+  audit trail; corrections are new rows via `correction_of`, never an
+  `UPDATE`/`DELETE` (statically enforced by a repo-wide grep test).
+- `config/settings.py::EXECUTION_LANE` — derived once from the existing
+  `EXECUTION_MODE` (`live`/`testnet`→`LIVE`, `paper`→`TRAINING`,
+  unrecognized→`TRAINING` fail-safe).
+- `database/migrations/migration_001_execution_lane_backfill.py` —
+  idempotent migration for pre-existing database files; backfills
+  historical rows to `LIVE` (approved: all historical data predates any
+  dual-lane concept and was real money), parsed directly from
+  `schema_v13.sql`'s own target schema so there's no drift risk.
+- `tests/test_execution_lane_contract.py` — 45 new tests covering the
+  full contract.
+
+### Changed
+- `journal/journal_v2.py::save_trade/save_signal/save_agent_decision` —
+  `execution_lane` is now a required parameter (no default; omitting it
+  is a `TypeError`, never a silent `LIVE`).
+- `execution/execution_orchestrator.py::ExecutionOrchestrator`,
+  `execution/ceo_gated_signal_provider.py::CEOGatedSignalProvider`,
+  `execution/order_timeline.py::OrderTimeline` — all require
+  `execution_lane` at construction; `main.py` passes `EXECUTION_LANE`
+  explicitly at every real call site.
+- `research/feature_store.py::FeatureStore.save_row`,
+  `research/dataset_builder.py::DatasetBuilder.capture_closed_mission`,
+  `ml/ml_advisor.py::MLAdvisor.advise` — same required-argument
+  contract.
+
+### Scope boundary
+No changes to `agents/`, `decision/`, `risk/`,
+`portfolio/portfolio_manager.py`, order sizing/SL/TP/strategy logic,
+Binance order-placement behavior, W14-0 START/STOP lifecycle, or
+authentication (verified by `git diff` against those paths, not
+assumed). `EXECUTION_MODE` still selects exactly one engine per
+process, unchanged — concurrent LIVE+TRAINING runtime, the training
+scheduler, and dashboard visibility remain W14-2D-2 through W14-2D-9.
+Not pushed, no PR opened, not merged.
+
 ## [Unreleased] — V16 W14-2B: Bundle Manager Working-Tree Isolation Fix
 
 `cmd_import`'s real pass saves `bundle_history.json` unconditionally

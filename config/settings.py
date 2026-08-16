@@ -466,3 +466,25 @@ settings = Settings()
 
 import os as _os
 EXECUTION_MODE: str = _os.environ.get("EXECUTION_MODE", "paper").lower()
+
+# ── W14-2D-1: execution_lane — derived, not independent state ────────────────
+# Single source of truth for "which lane does every journal/dataset write in
+# this process belong to". Deliberately NOT a new control-plane flag and NOT
+# persisted anywhere — it is a pure function of the EXECUTION_MODE this
+# process already booted with (see execution/execution_factory.py, which
+# picks the actual engine from the same EXECUTION_MODE value). Concurrent
+# LIVE + TRAINING in one process is out of scope for W14-2D-1 (see
+# docs/architecture.md's W14-2D-1 section) — today's reality is exactly one
+# engine per process, so exactly one lane per process is the honest mapping:
+#   live | testnet  -> LIVE      (real Binance account codepath, even though
+#                                  testnet's money is fake, the execution
+#                                  codepath and risk surface are the live one)
+#   paper           -> TRAINING  (the existing PaperExecutionEngine feeds the
+#                                  automated ML training pipeline)
+#   anything else   -> TRAINING  (fail-safe: an unrecognized EXECUTION_MODE
+#                                  must never be silently labeled LIVE)
+# PAPER is a reserved third value for a future manual/dry-run lane distinct
+# from the automated TRAINING lane — not derived here because no runtime
+# path in the codebase produces it yet (W14-2D-1 must not invent one).
+_EXECUTION_LANE_BY_MODE = {"live": "LIVE", "testnet": "LIVE", "paper": "TRAINING"}
+EXECUTION_LANE: str = _EXECUTION_LANE_BY_MODE.get(EXECUTION_MODE, "TRAINING")
