@@ -86,13 +86,35 @@ if settings.API_AUTH_ENABLED and not settings.JWT_SECRET:
         "will not survive a restart and won't validate against any other "
         "replica. Set JWT_SECRET in .env before running this in production."
     )
-if settings.API_AUTH_ENABLED and not settings.API_KEYS:
+def _bootstrap_ephemeral_api_key() -> None:
+    """Same failure mode as the JWT_SECRET check above, taken to its
+    actual conclusion: logging CRITICAL and leaving API_KEYS empty does
+    not "fail safe" — it fails *locked*, for the operator as much as
+    anyone else, since bearer tokens can only be minted from an API key.
+    Generate one ephemeral OPERATOR-role key so the dashboard stays
+    reachable, and log it in full (the one deliberate exception to
+    "never log credential values" elsewhere in this file — without it
+    there is no other way in at all).
+
+    Split into a function (called once below, at import time) rather
+    than left as a bare module-level block so it can also be called
+    directly by tests — api/app.py holds direct references to this
+    module's exports, which importlib.reload() would desync.
+    """
+    if not (settings.API_AUTH_ENABLED and not settings.API_KEYS):
+        return
+    ephemeral_key = _secrets.token_urlsafe(32)
+    settings.API_KEYS = {ephemeral_key: "operator"}
     logger.critical(
-        "API_AUTH_ENABLED=true but API_KEYS is empty — nobody, including "
-        "an operator, can authenticate (bearer tokens are minted from an "
-        "API key via /api/auth/token, so there is no other way in). "
-        "Configure API_KEYS in .env."
+        f"API_AUTH_ENABLED=true but API_KEYS is empty — generated a random "
+        f"ephemeral OPERATOR key for THIS PROCESS ONLY so the dashboard "
+        f"isn't fully locked out: {ephemeral_key} | This key is NOT "
+        f"persisted and will change on every restart — set API_KEYS in "
+        f".env before running this in production."
     )
+
+
+_bootstrap_ephemeral_api_key()
 
 
 # ── API key lookup ──────────────────────────────────────────────────────
