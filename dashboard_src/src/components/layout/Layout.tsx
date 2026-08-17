@@ -15,6 +15,7 @@ const NAV = [
   {to:'/portfolio',icon:'◎',label:'Portfolio',short:'PRT'},
   {to:'/intelligence',icon:'◬',label:'Market Intel',short:'MKT'},
   {to:'/memory',icon:'⬡',label:'AI Memory',short:'MEM'},
+  {to:'/train',icon:'◇',label:'Train Monitor',short:'TRN'},
   {to:'/replay',icon:'▷',label:'Trade Replay',short:'RPL'},
   {to:'/commander',icon:'⌘',label:'Commander',short:'CMD'},
   {to:'/health',icon:'♥',label:'System Health',short:'SYS'},

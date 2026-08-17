@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## [Unreleased] — Track B: Train Monitor Dashboard Tab
+
+New "Train Monitor" tab (`/train`) for checking ML training results
+and confirming the system is still training normally. See
+`PATCH_NOTES.md` for full detail.
+
+### Added
+- `dashboard_src/src/pages/TrainMonitor.tsx` — model version/training
+  history per model type (meta_label / confidence_calibrator /
+  outcome_predictor), currently-active model detail, last-prediction
+  detail, dataset row counts + session-local growth counter.
+- `dashboard_src/src/lib/trainMonitor.ts::computeRowsGrowth()` — new,
+  additive, pure, tested.
+- `dashboard_src/src/lib/tests/trainMonitor.test.ts` — 5 new cases.
+- `dashboard_src/src/types/api.ts::MLModelsData` — new, additive type
+  mirroring the existing (previously frontend-unused)
+  `GET /api/ml/models` response.
+
+### Changed
+- `App.tsx` — new `/train` route.
+- `components/layout/Layout.tsx` — new "Train Monitor" nav entry.
+
+No backend routes added or changed. No existing frontend export
+modified.
+
 ## [Unreleased] — Track B: LifecycleControl Unauthorized-State Visibility Fix
 
 Reactive UI bugfix. An unauthenticated viewer's START/STOP/LOGIN
