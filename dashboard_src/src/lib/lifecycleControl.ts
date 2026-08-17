@@ -74,3 +74,46 @@ export function lifecycleButtonInert(
   if (!authorized) return pending
   return spec.disabled || pending
 }
+
+export type LifecycleButtonTone = LifecycleButtonSpec['tone'] | 'login'
+
+export interface LifecycleButtonDisplay {
+  label: string
+  tone: LifecycleButtonTone
+}
+
+/**
+ * V16 fix(lifecycle-control-unauth-visibility): what the button should
+ * actually *look like* to an unauthorized viewer, as distinct from
+ * lifecycleButtonSpec() (which still governs real START/STOP semantics
+ * once authorized — untouched by this function).
+ *
+ * Root cause: lifecycleButtonInert() (fix/lifecycle-control-login-lockout)
+ * already made the button clickable while unauthorized so it can open the
+ * login modal, but LifecycleControl.tsx still sourced the button's visible
+ * label/tone from spec regardless of auth. The most common unauthorized
+ * case — a viewer who has never logged in — has lifecycle_state
+ * permanently undefined, since GET /api/command/state 401s. That's
+ * lifecycleButtonSpec()'s default branch: label '…', tone 'transitioning'
+ * (muted colors + cursor-wait), disabled:true. Muted/'…'/cursor-wait reads
+ * as "loading, nothing to do here" rather than "click to log in", and
+ * disabled:true also suppressed the caller's old "🔒 suffix" (only shown
+ * when `!spec.disabled`) in exactly this case — net effect, a real,
+ * clickable element with no visible affordance that it does anything.
+ * Confirmed against a live unauthenticated session: the click handler
+ * fires correctly, but there is nothing on screen inviting the click.
+ *
+ * Fix: while unauthorized, label/tone are fully decoupled from spec —
+ * the same posture handleClick() already takes (spec.command is never
+ * read until after the authorized check). Once authorized, this returns
+ * spec's own label/tone unchanged, so the authorized flow (including the
+ * in-flight "pending" state) is byte-for-byte identical to before.
+ */
+export function lifecycleButtonDisplay(
+  spec: Pick<LifecycleButtonSpec, 'label' | 'tone'>,
+  authorized: boolean,
+  pending: boolean,
+): LifecycleButtonDisplay {
+  if (!authorized) return { label: 'LOGIN', tone: 'login' }
+  return { label: pending ? '…' : spec.label, tone: spec.tone }
+}
