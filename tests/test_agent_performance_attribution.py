@@ -33,7 +33,7 @@ def _open_trade(journal: TradeJournalV2, direction: str, signal_id: int | None =
     rec.entry_price = 67000.0
     rec.stop_loss   = 65800.0
     rec.take_profit = 69400.0
-    return journal.save_trade(rec, signal_id=signal_id)
+    return journal.save_trade(rec, execution_lane="LIVE", signal_id=signal_id)
 
 
 @pytest.fixture
@@ -112,9 +112,9 @@ class TestStep7CPathUnchanged:
     identical to tests/test_agent_outcome_attribution.py."""
 
     def test_step7c_path_still_works(self, journal):
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
         journal.save_agent_decision("SMC_ANALYST", "LONG", score=80.0, weight=0.25,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         tid = _open_trade(journal, "LONG", signal_id=sig_id)
         journal.update_trade_result(tid, "WIN", 69000.0, 250.0)
 
@@ -128,11 +128,11 @@ class TestStep7CPathUnchanged:
         assert row["total_pnl"] == 250.0
 
     def test_step7c_dissenting_agent_not_attributed(self, journal):
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
         journal.save_agent_decision("SMC_ANALYST", "LONG", score=80.0, weight=0.25,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         journal.save_agent_decision("REGIME_ANALYST", "SHORT", score=55.0, weight=0.15,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         tid = _open_trade(journal, "LONG", signal_id=sig_id)
         journal.update_trade_result(tid, "LOSS", 65800.0, -120.0)
 
@@ -148,9 +148,9 @@ class TestMixedDatabase:
 
     def test_mixed_paths_both_aggregate(self, journal):
         # Step 7C trade
-        sig_id = journal.save_signal({"action": "SHORT", "direction": "SHORT"})
+        sig_id = journal.save_signal({"action": "SHORT", "direction": "SHORT"}, execution_lane="LIVE")
         journal.save_agent_decision("REGIME_ANALYST", "SHORT", score=70.0, weight=0.2,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         t1 = _open_trade(journal, "SHORT", signal_id=sig_id)
         journal.update_trade_result(t1, "LOSS", 68000.0, -80.0)
 
@@ -176,9 +176,9 @@ class TestDuplicateAttributionProtection:
     (explicit wins, join-derived participants for that trade are ignored)."""
 
     def test_dual_source_trade_not_double_counted(self, journal):
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
         journal.save_agent_decision("FUTURES_ANALYST", "LONG", score=60.0, weight=0.2,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         tid = _open_trade(journal, "LONG", signal_id=sig_id)
         journal.update_trade_result(tid, "WIN", 70000.0, 300.0)
         journal.save_execution_attribution(
@@ -198,9 +198,9 @@ class TestDuplicateAttributionProtection:
     def test_dual_source_trade_combined_with_others_no_double_count(self, journal):
         """Same dual-source trade, plus a pure explicit trade for the same
         agent — total_trades for 'ceo' must be exactly 2, not 3+."""
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
         journal.save_agent_decision("FUTURES_ANALYST", "LONG", score=60.0, weight=0.2,
-                                     signal_id=sig_id)
+                                     signal_id=sig_id, execution_lane="LIVE")
         t1 = _open_trade(journal, "LONG", signal_id=sig_id)
         journal.update_trade_result(t1, "WIN", 70000.0, 300.0)
         journal.save_execution_attribution(
