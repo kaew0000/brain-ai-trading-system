@@ -67,11 +67,17 @@ CREATE TABLE IF NOT EXISTS trades (
     signal_id       INTEGER REFERENCES signals(id),
     explanation_id  INTEGER REFERENCES ai_explanations(id),
 
-    extra_data      TEXT    DEFAULT ''
+    extra_data      TEXT    DEFAULT '',
+
+    -- W14-2D-1: which lane produced this row. NOT NULL, no SQL DEFAULT —
+    -- every writer (journal/journal_v2.py::save_trade) must pass it
+    -- explicitly. See docs/architecture.md's W14-2D-1 section.
+    execution_lane  TEXT    NOT NULL CHECK(execution_lane IN ('LIVE','TRAINING','PAPER'))
 );
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol    ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_result    ON trades(result);
+CREATE INDEX IF NOT EXISTS idx_trades_lane      ON trades(execution_lane);
 
 
 -- ----------------------------------------------------------------------------
@@ -110,11 +116,15 @@ CREATE TABLE IF NOT EXISTS signals (
     entry_price     REAL    DEFAULT 0.0,
     stop_loss       REAL    DEFAULT 0.0,
     take_profit     REAL    DEFAULT 0.0,
-    raw_features    TEXT    DEFAULT ''           -- JSON: SMC/volume/trend/futures snapshot
+    raw_features    TEXT    DEFAULT '',          -- JSON: SMC/volume/trend/futures snapshot
+
+    -- W14-2D-1: see trades.execution_lane above — same contract.
+    execution_lane  TEXT    NOT NULL CHECK(execution_lane IN ('LIVE','TRAINING','PAPER'))
 );
 CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp);
 CREATE INDEX IF NOT EXISTS idx_signals_symbol    ON signals(symbol);
 CREATE INDEX IF NOT EXISTS idx_signals_action    ON signals(action);
+CREATE INDEX IF NOT EXISTS idx_signals_lane      ON signals(execution_lane);
 
 
 -- ----------------------------------------------------------------------------
@@ -253,10 +263,14 @@ CREATE TABLE IF NOT EXISTS agent_decisions (
     score           REAL    DEFAULT 0.0,
     weight          REAL    DEFAULT 0.0,
     details         TEXT    DEFAULT '',          -- JSON
-    signal_id       INTEGER REFERENCES signals(id)
+    signal_id       INTEGER REFERENCES signals(id),
+
+    -- W14-2D-1: see trades.execution_lane above — same contract.
+    execution_lane  TEXT    NOT NULL CHECK(execution_lane IN ('LIVE','TRAINING','PAPER'))
 );
 CREATE INDEX IF NOT EXISTS idx_agent_decisions_timestamp ON agent_decisions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_agent_decisions_agent     ON agent_decisions(agent);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_lane      ON agent_decisions(execution_lane);
 
 
 -- ----------------------------------------------------------------------------
@@ -356,10 +370,16 @@ CREATE TABLE IF NOT EXISTS feature_rows (
     holding_time_s         REAL,
     result                REAL,
     pnl                  REAL,
-    extra_json            TEXT    DEFAULT ''
+    extra_json            TEXT    DEFAULT '',
+
+    -- W14-2D-1: see trades.execution_lane above — same contract. This is
+    -- the column research/dataset_builder.py must filter on once lane-aware
+    -- dataset export ships (W14-2D-3) — NOT filtered yet in W14-2D-1.
+    execution_lane        TEXT    NOT NULL CHECK(execution_lane IN ('LIVE','TRAINING','PAPER'))
 );
 CREATE INDEX IF NOT EXISTS idx_feature_rows_created  ON feature_rows(created_at);
 CREATE INDEX IF NOT EXISTS idx_feature_rows_result   ON feature_rows(result);
+CREATE INDEX IF NOT EXISTS idx_feature_rows_lane     ON feature_rows(execution_lane);
 
 CREATE TABLE IF NOT EXISTS model_registry (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -390,9 +410,47 @@ CREATE TABLE IF NOT EXISTS ml_predictions (
     calibrated_confidence  REAL    DEFAULT 0.0,
     meta_label            TEXT    DEFAULT '',
     outcome_probability    REAL    DEFAULT 0.0,
-    actual_result         TEXT    DEFAULT ''
+    actual_result         TEXT    DEFAULT '',
+
+    -- W14-2D-1: see trades.execution_lane above — same contract.
+    execution_lane        TEXT    NOT NULL CHECK(execution_lane IN ('LIVE','TRAINING','PAPER'))
 );
 CREATE INDEX IF NOT EXISTS idx_ml_predictions_timestamp ON ml_predictions(timestamp);
+CREATE INDEX IF NOT EXISTS idx_ml_predictions_lane      ON ml_predictions(execution_lane);
+
+-- ----------------------------------------------------------------------------
+-- execution_events — W14-2D-1: immutable, append-only audit trail. Additive
+-- to (not a replacement for) trades/signals/etc. above, which remain the
+-- mutable "current state" projections the dashboard already reads. This
+-- table is the source of truth for "what actually happened, per lane" and
+-- feeds the lane-aware dataset builder in a later phase (W14-2D-3).
+--
+-- Application code MUST NEVER issue UPDATE or DELETE against this table —
+-- enforced by tests/test_execution_lane_contract.py's static grep guard and
+-- by journal/journal_v2.py::record_execution_event() being insert-only. A
+-- correction is a NEW row with event_type='CORRECTION' and correction_of
+-- pointing at the event_id being corrected — readers fold corrections
+-- forward, they never trust the first row in isolation.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS execution_events (
+    event_id        TEXT    PRIMARY KEY,          -- uuid4, generated at write time
+    execution_lane   TEXT    NOT NULL CHECK(execution_lane IN ('LIVE','TRAINING','PAPER')),
+    timestamp        TEXT    NOT NULL,             -- ISO-8601 UTC
+    symbol           TEXT    NOT NULL,
+    order_id         TEXT,
+    trade_id         INTEGER,
+    event_type       TEXT    NOT NULL,             -- SIGNAL_GENERATED | ORDER_SUBMITTED |
+                                                     -- ORDER_FILLED | TRADE_OPENED |
+                                                     -- TRADE_CLOSED | CORRECTION | ...
+    source           TEXT    NOT NULL,             -- e.g. "main.run_trading_cycle",
+                                                     -- "execution_orchestrator", "ceo_gated_signal_provider"
+    payload          TEXT    NOT NULL DEFAULT '',  -- JSON, full event detail
+    schema_version   INTEGER NOT NULL DEFAULT 1,
+    correction_of    TEXT    REFERENCES execution_events(event_id)  -- set only on CORRECTION events
+);
+CREATE INDEX IF NOT EXISTS idx_exec_events_lane_ts ON execution_events(execution_lane, timestamp);
+CREATE INDEX IF NOT EXISTS idx_exec_events_trade   ON execution_events(trade_id);
+CREATE INDEX IF NOT EXISTS idx_exec_events_symbol  ON execution_events(symbol, timestamp);
 
 -- ----------------------------------------------------------------------------
 -- portfolio_history — V16 Phase 2B (Portfolio Manager Orchestrator). One row

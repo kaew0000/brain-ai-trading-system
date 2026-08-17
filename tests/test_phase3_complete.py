@@ -314,7 +314,7 @@ class TestFeatureStore:
     def test_save_and_get(self, db):
         from research.feature_store import FeatureStore
         store = FeatureStore(db_path=db)
-        rid = store.save_row(_feat(), mission_id="m1", trade_id=None)
+        rid = store.save_row(_feat(), execution_lane="LIVE", mission_id="m1", trade_id=None)
         row = store.get_row(rid)
         assert row["direction"] == "LONG"
         assert row["confidence"] == 78.0
@@ -323,13 +323,13 @@ class TestFeatureStore:
     def test_extra_fields_go_to_json(self, db):
         from research.feature_store import FeatureStore
         store = FeatureStore(db_path=db)
-        rid = store.save_row(_feat(custom="hello"))
+        rid = store.save_row(_feat(custom="hello"), execution_lane="LIVE")
         assert store.get_row(rid)["extra_json"]["custom"] == "hello"
 
     def test_update_outcome(self, db):
         from research.feature_store import FeatureStore
         store = FeatureStore(db_path=db)
-        rid = store.save_row(_feat())
+        rid = store.save_row(_feat(), execution_lane="LIVE")
         assert store.update_outcome(rid, 1.0, 42.0, 3600.0)
         row = store.get_row(rid)
         assert row["result"] == 1.0 and row["pnl"] == 42.0
@@ -337,15 +337,15 @@ class TestFeatureStore:
     def test_get_training_rows_excludes_unlabelled(self, db):
         from research.feature_store import FeatureStore
         store = FeatureStore(db_path=db)
-        labelled = store.save_row(_feat())
+        labelled = store.save_row(_feat(), execution_lane="LIVE")
         store.update_outcome(labelled, 1.0, 10.0, 100.0)
-        store.save_row(_feat())  # unlabelled
+        store.save_row(_feat(), execution_lane="LIVE")  # unlabelled
         assert len(store.get_training_rows()) == 1
 
     def test_count(self, db):
         from research.feature_store import FeatureStore
         store = FeatureStore(db_path=db)
-        r1 = store.save_row(_feat()); r2 = store.save_row(_feat())
+        r1 = store.save_row(_feat(), execution_lane="LIVE"); r2 = store.save_row(_feat(), execution_lane="LIVE")
         store.update_outcome(r1, 1.0, 5.0, 100.0)
         assert store.count(labelled_only=False) == 2
         assert store.count(labelled_only=True)  == 1
@@ -355,7 +355,7 @@ class TestFeatureStore:
         if the trade row doesn't exist in the trades table yet."""
         from research.feature_store import FeatureStore
         store = FeatureStore(db_path=db)
-        rid = store.save_row(_feat(), trade_id=99999)
+        rid = store.save_row(_feat(), execution_lane="LIVE", trade_id=99999)
         assert rid is not None
         assert store.get_row(rid)["trade_id"] == 99999
 
@@ -425,7 +425,7 @@ class TestDatasetBuilder:
         m = MagicMock(); m.id="m1"; m.symbol="BTCUSDT"; m.direction="LONG"
         m.confidence=78.0; m.meta={}
         tr = {"id":1,"result":"WIN","pnl":42.0,"entry_price":67000.0}
-        rid = builder.capture_closed_mission(mission=m, trade_row=tr)
+        rid = builder.capture_closed_mission(execution_lane="LIVE", mission=m, trade_row=tr)
         assert rid is not None
         assert builder.row_count(labelled_only=True) == 1
 
@@ -433,7 +433,7 @@ class TestDatasetBuilder:
         from research.feature_store import FeatureStore
         from research.dataset_builder import DatasetBuilder
         builder = DatasetBuilder(store=FeatureStore(db_path=db))
-        rid = builder.capture_closed_mission(mission=object(), trade_row=None)
+        rid = builder.capture_closed_mission(execution_lane="LIVE", mission=object(), trade_row=None)
         assert rid is None  # failed gracefully
 
     def test_export_returns_none_below_min(self, db):
@@ -448,7 +448,7 @@ class TestDatasetBuilder:
         store = FeatureStore(db_path=db)
         builder = DatasetBuilder(store=store)
         for i in range(15):
-            rid = store.save_row(_feat()); store.update_outcome(rid, float(i%2), float(i), 100.0)
+            rid = store.save_row(_feat(), execution_lane="LIVE"); store.update_outcome(rid, float(i%2), float(i), 100.0)
         df = builder.export_training_dataframe(min_rows=10)
         assert df is not None and len(df)==15
         assert "direction_enc" in df.columns and "regime_enc" in df.columns
@@ -585,17 +585,17 @@ class TestMLAdvisor:
     def test_wait_decision_unchanged(self):
         from ml.ml_advisor import get_ml_advisor
         d = self._decision("WAIT")
-        result = get_ml_advisor().advise(d, {})
+        result = get_ml_advisor().advise(d, {}, "LIVE")
         assert result.action == "WAIT"
 
     def test_none_decision_returned_unchanged(self):
         from ml.ml_advisor import get_ml_advisor
-        assert get_ml_advisor().advise(None, {}) is None
+        assert get_ml_advisor().advise(None, {}, "LIVE") is None
 
     def test_never_raises(self):
         from ml.ml_advisor import get_ml_advisor
         d = self._decision("LONG")
-        get_ml_advisor().advise(d, None)  # must not raise
+        get_ml_advisor().advise(d, None, "LIVE")  # must not raise
 
     def test_skip_sets_action_to_wait(self, monkeypatch):
         from ml.ml_advisor import get_ml_advisor
@@ -604,7 +604,7 @@ class TestMLAdvisor:
         filt.evaluate.return_value = ("SKIP", 30.0)
         monkeypatch.setattr(ml_mod, "get_meta_label_filter", lambda: filt)
         d = self._decision("LONG")
-        get_ml_advisor().advise(d, {})
+        get_ml_advisor().advise(d, {}, "LIVE")
         assert d.action == "WAIT"
         assert d.blocked is True
 
@@ -620,7 +620,7 @@ class TestMLAdvisor:
         adv = get_ml_advisor()
         adv._calibrator = object()  # truthy non-None
         adv._calibrator_loaded = True
-        adv.advise(d, {})
+        adv.advise(d, {}, "LIVE")
         assert abs(d.confidence - 75.0) < 1.0  # boosted by up to MAX_BOOST
 
     def test_singleton(self):

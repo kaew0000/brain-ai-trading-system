@@ -39,7 +39,7 @@ def _open_trade(journal: TradeJournalV2, sig_id: int | None = None, direction: s
     rec.stop_loss   = 65800.0
     rec.take_profit = 69400.0
     rec.quantity    = 0.01
-    return journal.save_trade(rec, signal_id=sig_id)
+    return journal.save_trade(rec, signal_id=sig_id, execution_lane="LIVE")
 
 
 @pytest.fixture
@@ -118,9 +118,9 @@ class TestGetTradeAttribution:
         """No signal_id -> agent_decisions join available (V16
         multi-symbol trades today, see module docstring) still returns
         [] honestly rather than raising."""
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
-        journal.save_agent_decision("smc", "LONG", score=80.0, weight=0.25, signal_id=sig_id)
-        journal.save_agent_decision("regime", "SHORT", score=40.0, weight=0.15, signal_id=sig_id)
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
+        journal.save_agent_decision("smc", "LONG", score=80.0, weight=0.25, signal_id=sig_id, execution_lane="LIVE")
+        journal.save_agent_decision("regime", "SHORT", score=40.0, weight=0.15, signal_id=sig_id, execution_lane="LIVE")
         tid = _open_trade(journal, sig_id=sig_id)
 
         attrib = journal.get_trade_attribution(tid)
@@ -137,8 +137,8 @@ class TestGetTradeAttribution:
         assert attrib["agent_participation"] == []
 
     def test_explicit_agent_attribution_takes_precedence_over_join(self, journal):
-        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"})
-        journal.save_agent_decision("smc", "LONG", score=80.0, weight=0.25, signal_id=sig_id)
+        sig_id = journal.save_signal({"action": "LONG", "direction": "LONG"}, execution_lane="LIVE")
+        journal.save_agent_decision("smc", "LONG", score=80.0, weight=0.25, signal_id=sig_id, execution_lane="LIVE")
         tid = _open_trade(journal, sig_id=sig_id)
 
         explicit = [{"agent": "ceo", "vote": "LONG", "weight": 1.0, "confidence": 91.0, "contribution": 91.0}]

@@ -28,8 +28,15 @@ class FeatureStore:
     def _conn(self) -> ManagedConn:
         return ManagedConn(self.db_path)
 
-    def save_row(self, features: dict, mission_id: str | None = None,
+    def save_row(self, features: dict, execution_lane: str, mission_id: str | None = None,
                  trade_id: int | None = None, symbol: str = "BTCUSDT") -> int:
+        """W14-2D-1: execution_lane is REQUIRED with no default — see
+        docs/architecture.md's W14-2D-1 section. Not filtered on yet by
+        get_training_rows()/get_recent() below — that's W14-2D-3."""
+        if execution_lane not in ("LIVE", "TRAINING", "PAPER"):
+            raise ValueError(
+                f"FeatureStore.save_row: execution_lane must be LIVE/TRAINING/PAPER, got {execution_lane!r}"
+            )
         extra = {k: v for k, v in features.items() if k not in FEATURE_COLUMNS}
         with self._conn() as c:
             cur = c.execute(
@@ -37,8 +44,8 @@ class FeatureStore:
                    (created_at,mission_id,trade_id,symbol,direction,confidence,
                     funding,open_interest,oi_delta,liquidation_signal,fear_greed,
                     regime,volatility,atr,smc_score,volume_score,
-                    entry_price,stop_loss,take_profit,extra_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    entry_price,stop_loss,take_profit,extra_json,execution_lane)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (datetime.now(timezone.utc).isoformat(), mission_id, trade_id, symbol,
                  features.get("direction",""), float(features.get("confidence",0)),
                  float(features.get("funding",0)), float(features.get("open_interest",0)),
@@ -47,7 +54,8 @@ class FeatureStore:
                  float(features.get("volatility",0)), float(features.get("atr",0)),
                  float(features.get("smc_score",0)), float(features.get("volume_score",0)),
                  float(features.get("entry_price",0)), float(features.get("stop_loss",0)),
-                 float(features.get("take_profit",0)), json.dumps(extra) if extra else ""),
+                 float(features.get("take_profit",0)), json.dumps(extra) if extra else "",
+                 execution_lane),
             )
             c.commit()
             return cur.lastrowid

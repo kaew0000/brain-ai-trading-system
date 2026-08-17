@@ -39,7 +39,7 @@ import threading
 import time as _time
 import webbrowser
 
-from config.settings import settings, EXECUTION_MODE
+from config.settings import settings, EXECUTION_MODE, EXECUTION_LANE
 from data.binance_provider import BinanceDataProvider
 from features.smc_engine import SMCEngine, SMCSignals
 from features.volume_engine import VolumeEngine
@@ -520,6 +520,7 @@ def build_system() -> dict:
                         signal_provider = CEOGatedSignalProvider(
                             signal_provider=signal_provider,
                             ceo_adapter=ceo_dispatcher,
+                            execution_lane=EXECUTION_LANE,
                             journal=journal_v2,
                             recommendation_provider=_get_learning_recommendations,
                             dataset_row_count_provider=_get_learning_dataset_row_count,
@@ -553,6 +554,7 @@ def build_system() -> dict:
                     execution_engine=trade_manager,
                     portfolio_manager=portfolio_manager,
                     signal_provider=signal_provider,
+                    execution_lane=EXECUTION_LANE,
                     journal=journal_v2,
                     lifecycle=trade_lifecycle,
                 )
@@ -585,6 +587,7 @@ def build_system() -> dict:
 
             exchange_manager = get_exchange_state_manager(data_provider, mode=EXECUTION_MODE)
             order_timeline = get_order_timeline(
+                execution_lane=EXECUTION_LANE,
                 trade_lifecycle=trade_lifecycle,
                 exchange_manager=exchange_manager,
                 poll_interval_seconds=settings.ORDER_TIMELINE_POLL_INTERVAL_SECONDS,
@@ -917,7 +920,7 @@ def run_trading_cycle(sys: dict) -> None:
         # ML may adjust confidence or recommend SKIP; it cannot place orders.
         try:
             from ml.ml_advisor import get_ml_advisor
-            decision = get_ml_advisor().advise(decision, market_ctx)
+            decision = get_ml_advisor().advise(decision, market_ctx, EXECUTION_LANE)
         except Exception as exc:
             logger.debug(f"MLAdvisor skipped: {exc}")
 
@@ -981,6 +984,7 @@ def run_trading_cycle(sys: dict) -> None:
             sig_dict["score"] = decision.raw_score  # to_dict() uses raw_score key
             sig_id = jrn.save_signal(
                 sig_dict,
+                execution_lane       = EXECUTION_LANE,
                 symbol               = settings.SYMBOL,
                 confidence_breakdown = decision.breakdown,
                 raw_features         = market_ctx,
@@ -1001,6 +1005,7 @@ def run_trading_cycle(sys: dict) -> None:
                         jrn.save_agent_decision(
                             agent     = report.get("agent", agent_key.upper()),
                             decision  = report.get("signal", "NEUTRAL"),
+                            execution_lane = EXECUTION_LANE,
                             symbol    = settings.SYMBOL,
                             score     = float(report.get("confidence", 0.0)),
                             weight    = float(_weights.get(agent_key, 0.0)),
@@ -1225,7 +1230,7 @@ def run_trading_cycle(sys: dict) -> None:
         # Phase 4B Step 1: carries this cycle's signal_id onto the trade row
         # so get_agent_performance() can join back to which agents voted for
         # the direction that was actually traded.
-        tid = jrn.save_trade(rec, signal_id=sig_id)
+        tid = jrn.save_trade(rec, execution_lane=EXECUTION_LANE, signal_id=sig_id)
 
         # V16 W14-2A: build per-agent attribution from the SAME
         # ceo_decision this cycle already produced above (10a) — nothing
@@ -1400,6 +1405,7 @@ def monitor_open_trades(sys: dict) -> None:
                 resolved["pnl"] = pnl
                 mm = (mission_obj.meta if mission_obj else {}) or {}
                 get_dataset_builder().capture_closed_mission(
+                    execution_lane=EXECUTION_LANE,
                     mission=mission_obj,
                     trade_row=resolved,
                     market_context=mm.get("market_context_snapshot"),

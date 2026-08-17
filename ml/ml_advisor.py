@@ -49,12 +49,15 @@ class MLAdvisor:
         from ml.meta_label import get_meta_label_filter
         get_meta_label_filter().reload()
 
-    def advise(self, decision, market_context: dict) -> object:
+    def advise(self, decision, market_context: dict, execution_lane: str) -> object:
         """
         Apply ML advisory to a ConfidenceResult-like decision object.
         Returns the (possibly modified) decision — same object type, same
         public API, never raises. If models are unavailable, returns
         decision unchanged so the system behaves exactly as it did without ML.
+
+        W14-2D-1: execution_lane is REQUIRED with no default — see
+        docs/architecture.md's W14-2D-1 section.
         """
         if decision is None:
             return decision
@@ -123,7 +126,7 @@ class MLAdvisor:
             with self._lock:
                 self._last_prediction = pred_record
 
-            self._persist_prediction(pred_record, decision)
+            self._persist_prediction(pred_record, decision, execution_lane)
 
         except Exception as exc:
             logger.error(f"MLAdvisor.advise failed (returning decision unchanged): {exc}",
@@ -131,18 +134,20 @@ class MLAdvisor:
 
         return decision
 
-    def _persist_prediction(self, record: dict, decision) -> None:
+    def _persist_prediction(self, record: dict, decision, execution_lane: str) -> None:
         try:
+            if execution_lane not in ("LIVE", "TRAINING", "PAPER"):
+                raise ValueError(f"execution_lane must be LIVE/TRAINING/PAPER, got {execution_lane!r}")
             from database.db import ManagedConn, get_db_path
             with ManagedConn(get_db_path()) as c:
                 c.execute(
                     """INSERT INTO ml_predictions
                        (timestamp,model_type,model_version,raw_confidence,
-                        calibrated_confidence,meta_label,outcome_probability)
-                       VALUES (?,?,?,?,?,?,?)""",
+                        calibrated_confidence,meta_label,outcome_probability,execution_lane)
+                       VALUES (?,?,?,?,?,?,?,?)""",
                     (record["timestamp"], "ml_advisor", "active",
                      record["raw_confidence"], record["calibrated_confidence"],
-                     record["label"], record["outcome_probability"]),
+                     record["label"], record["outcome_probability"], execution_lane),
                 )
                 c.commit()
         except Exception as exc:

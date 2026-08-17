@@ -65,8 +65,8 @@ class TestConcurrentOpenAndClose:
             try:
                 h = lc.open_pending(symbol)
                 lc.open_executing(h)
-                sig_id = real_journal.save_signal({"action": "LONG", "confidence": 70.0}, symbol=symbol)
-                trade_id = real_journal.save_trade(_make_trade_record(symbol), signal_id=sig_id)
+                sig_id = real_journal.save_signal({"action": "LONG", "confidence": 70.0}, execution_lane="LIVE", symbol=symbol)
+                trade_id = real_journal.save_trade(_make_trade_record(symbol), execution_lane="LIVE", signal_id=sig_id)
                 lc.open_confirmed(h, trade_id, execution_id=f"exec-{symbol}")
 
                 exit_h = lc.request_exit(symbol, CloseSource.TAKE_PROFIT, "tp_hit", trade_id=trade_id)
@@ -134,8 +134,8 @@ class TestConcurrentDuplicateCloseAttempts:
         lc = TradeLifecycle(journal=real_journal)
         h = lc.open_pending("RACEUSDT")
         lc.open_executing(h)
-        sig_id = real_journal.save_signal({"action": "LONG", "confidence": 70.0}, symbol="RACEUSDT")
-        trade_id = real_journal.save_trade(_make_trade_record("RACEUSDT"), signal_id=sig_id)
+        sig_id = real_journal.save_signal({"action": "LONG", "confidence": 70.0}, execution_lane="LIVE", symbol="RACEUSDT")
+        trade_id = real_journal.save_trade(_make_trade_record("RACEUSDT"), execution_lane="LIVE", signal_id=sig_id)
         lc.open_confirmed(h, trade_id)
 
         winners: list[int] = []
@@ -191,8 +191,8 @@ class TestOpenFailureUnderConcurrency:
                 if i % 2 == 0:
                     lc.open_failed(h, reason="simulated_exchange_reject")
                 else:
-                    sig_id = real_journal.save_signal({"action": "LONG", "confidence": 70.0}, symbol=symbol)
-                    trade_id = real_journal.save_trade(_make_trade_record(symbol), signal_id=sig_id)
+                    sig_id = real_journal.save_signal({"action": "LONG", "confidence": 70.0}, execution_lane="LIVE", symbol=symbol)
+                    trade_id = real_journal.save_trade(_make_trade_record(symbol), execution_lane="LIVE", signal_id=sig_id)
                     lc.open_confirmed(h, trade_id)
             except Exception as exc:
                 with lock:

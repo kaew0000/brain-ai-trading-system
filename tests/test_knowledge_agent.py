@@ -18,12 +18,12 @@ def journal(tmp_path):
 
 
 def _record_agent_trade(journal, agent="smc", agent_vote="LONG", trade_direction="LONG", result="WIN", symbol="BTCUSDT"):
-    signal_id = journal.save_signal({"timestamp": "t", "action": trade_direction, "direction": trade_direction, "confidence": 70.0}, symbol=symbol)
-    journal.save_agent_decision(agent=agent, decision=agent_vote, symbol=symbol, score=70.0, weight=0.25, details={}, signal_id=signal_id)
+    signal_id = journal.save_signal({"timestamp": "t", "action": trade_direction, "direction": trade_direction, "confidence": 70.0}, symbol=symbol, execution_lane="LIVE")
+    journal.save_agent_decision(agent=agent, decision=agent_vote, symbol=symbol, score=70.0, weight=0.25, details={}, signal_id=signal_id, execution_lane="LIVE")
     rec = TradeRecord()
     rec.symbol, rec.direction = symbol, trade_direction
     rec.entry_price, rec.stop_loss = 100.0, 90.0
-    trade_id = journal.save_trade(rec, signal_id=signal_id)
+    trade_id = journal.save_trade(rec, signal_id=signal_id, execution_lane="LIVE")
     pnl = 50.0 if result == "WIN" else -25.0
     journal.update_trade_result(trade_id, result, exit_price=110.0 if result == "WIN" else 90.0, pnl=pnl)
     return trade_id

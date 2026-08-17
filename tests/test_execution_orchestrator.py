@@ -151,6 +151,7 @@ class NoCloseEngine:
 
 def make_orchestrator(engine=None, pm=None, signal_provider=always_long_signal, state=None, **kwargs):
     return ExecutionOrchestrator(
+        execution_lane="LIVE",
         execution_engine=engine or FakeEngine(),
         portfolio_manager=pm or FakePortfolioManager(),
         signal_provider=signal_provider,

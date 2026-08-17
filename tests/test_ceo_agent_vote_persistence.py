@@ -95,7 +95,7 @@ class TestLiveVotePersistence:
     def test_agent_reports_persist_to_journal_details(self):
         journal = FakeJournal()
         dispatcher = _make_real_dispatcher()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         gated.get_signal("BTCUSDT")
 
@@ -116,7 +116,7 @@ class TestLiveVotePersistence:
     def test_weights_used_persist_to_journal_details(self):
         journal = FakeJournal()
         dispatcher = _make_real_dispatcher()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         gated.get_signal("BTCUSDT")
 
@@ -132,7 +132,7 @@ class TestLiveVotePersistence:
         decision, _signal = dispatcher.decide_with_signal("BTCUSDT")
 
         journal = FakeJournal()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
 
         persisted = journal.saved[0]["details"]["agent_reports"]
@@ -147,7 +147,7 @@ class TestLiveVotePersistence:
 
         journal = FakeJournal()
         dispatcher = _make_real_dispatcher()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
 
         json.dumps(journal.saved[0]["details"])  # must not raise
@@ -162,7 +162,7 @@ class TestExistingFieldsUnaffected:
     def test_recommendation_explanations_still_present_and_correct(self):
         journal = FakeJournal()
         dispatcher = _make_real_dispatcher()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
 
         details = journal.saved[0]["details"]
@@ -171,7 +171,7 @@ class TestExistingFieldsUnaffected:
     def test_reasons_agreement_score_direction_still_present(self):
         journal = FakeJournal()
         dispatcher = _make_real_dispatcher()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
 
         details = journal.saved[0]["details"]
@@ -185,7 +185,7 @@ class TestFailureIsolation:
     def test_journal_write_failure_does_not_break_signal_cycle(self):
         journal = FakeJournal(raise_on_save=True)
         dispatcher = _make_real_dispatcher()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         gated.get_signal("BTCUSDT")  # must not raise
 
@@ -194,7 +194,7 @@ class TestBackwardCompatibility:
 
     def test_no_journal_configured_is_a_no_op(self):
         dispatcher = _make_real_dispatcher()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=None, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=None, enabled=True)
         gated.get_signal("BTCUSDT")  # must not raise with journal=None
 
     def test_ceodecision_agent_reports_default_unaffected(self):
@@ -216,7 +216,7 @@ class TestBackwardCompatibility:
                 decision = ceo.decide({"symbol": symbol, "regime": "TRENDING"})
                 return decision, None
 
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), _DirectAdapter(), journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), _DirectAdapter(), execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
 
         assert journal.saved[0]["details"]["agent_reports"] == {}

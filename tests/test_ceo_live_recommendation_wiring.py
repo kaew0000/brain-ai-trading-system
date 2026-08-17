@@ -386,7 +386,7 @@ class TestRecommendationProviderWiring:
         an adapter fake with the OLD signature that has no **kwargs."""
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterNoKwargs(decision=decision, signal=LONG_SIGNAL)
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True)
         result = gated.get_signal("BTCUSDT")
         # V16 W14-2A: agent_attribution_from_ceo_decision() output is now
         # threaded onto the returned signal (see
@@ -407,7 +407,7 @@ class TestRecommendationProviderWiring:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             recommendation_provider=lambda: recs,
         )
         gated.get_signal("BTCUSDT")
@@ -420,7 +420,7 @@ class TestRecommendationProviderWiring:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             recommendation_provider=_boom,
         )
         result = gated.get_signal("BTCUSDT")
@@ -437,7 +437,7 @@ class TestRecommendationProviderWiring:
         decision = CEODecision(action="LONG", direction="LONG", confidence=80.0)
         adapter = FakeAdapterWithKwargs(decision=decision, signal=LONG_SIGNAL)
         gated = CEOGatedSignalProvider(
-            FakeSignalProvider(), adapter, enabled=True,
+            FakeSignalProvider(), adapter, execution_lane="LIVE", enabled=True,
             recommendation_provider=lambda: [],
         )
         gated.get_signal("BTCUSDT")

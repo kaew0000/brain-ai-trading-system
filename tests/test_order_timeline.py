@@ -80,7 +80,7 @@ class TestRunOnce:
     def test_new_pending_trade_is_recorded_as_new(self, tmp_path):
         lifecycle = TradeLifecycle()
         lifecycle.open_pending("BTCUSDT")
-        ot = OrderTimeline(lifecycle, db_path=str(tmp_path / "t.db"))
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", db_path=str(tmp_path / "t.db"))
 
         entries = ot.run_once()
 
@@ -92,7 +92,7 @@ class TestRunOnce:
     def test_no_duplicate_entry_when_state_unchanged(self, tmp_path):
         lifecycle = TradeLifecycle()
         lifecycle.open_pending("BTCUSDT")
-        ot = OrderTimeline(lifecycle, db_path=str(tmp_path / "t.db"))
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", db_path=str(tmp_path / "t.db"))
 
         ot.run_once()
         second = ot.run_once()
@@ -102,7 +102,7 @@ class TestRunOnce:
 
     def test_full_open_to_close_sequence_produces_expected_transitions(self, tmp_path):
         lifecycle = TradeLifecycle()
-        ot = OrderTimeline(lifecycle, db_path=str(tmp_path / "t.db"))
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", db_path=str(tmp_path / "t.db"))
 
         handle = lifecycle.open_pending("BTCUSDT")
         ot.run_once()  # NEW
@@ -137,7 +137,7 @@ class TestRunOnce:
         very next poll. get_handle_snapshot() (added this phase) fixes
         this by reading the terminal handle directly."""
         lifecycle = TradeLifecycle()
-        ot = OrderTimeline(lifecycle, db_path=str(tmp_path / "t.db"))
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", db_path=str(tmp_path / "t.db"))
 
         handle = lifecycle.open_pending("ETHUSDT")
         lifecycle.open_executing(handle)
@@ -158,7 +158,7 @@ class TestRunOnce:
         lifecycle.open_executing(handle)
 
         exchange = _fake_exchange_manager({"BNBUSDT": "PARTIALLY_FILLED"})
-        ot = OrderTimeline(lifecycle, exchange_manager=exchange, db_path=str(tmp_path / "t.db"))
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", exchange_manager=exchange, db_path=str(tmp_path / "t.db"))
 
         ot.run_once()  # NEW is skipped (created before first run_once() call in this test)
         assert ot.current_state("BNBUSDT")["state"] == TimelineState.PARTIALLY_FILLED
@@ -166,7 +166,7 @@ class TestRunOnce:
     def test_missing_exchange_manager_does_not_crash(self, tmp_path):
         lifecycle = TradeLifecycle()
         lifecycle.open_pending("BTCUSDT")
-        ot = OrderTimeline(lifecycle, exchange_manager=None, db_path=str(tmp_path / "t.db"))
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", exchange_manager=None, db_path=str(tmp_path / "t.db"))
 
         entries = ot.run_once()
 
@@ -182,7 +182,7 @@ class TestPersistenceAndRestart:
 
         lifecycle_a = TradeLifecycle()
         lifecycle_a.open_pending("BTCUSDT")
-        ot_a = OrderTimeline(lifecycle_a, db_path=db_path)
+        ot_a = OrderTimeline(lifecycle_a, execution_lane="LIVE", db_path=db_path)
         ot_a.run_once()
 
         # Simulate a restart: a brand-new OrderTimeline, brand-new
@@ -190,7 +190,7 @@ class TestPersistenceAndRestart:
         # still show the row ot_a wrote, even though this new instance's
         # in-memory current_state()/recent() start empty.
         lifecycle_b = TradeLifecycle()
-        ot_b = OrderTimeline(lifecycle_b, db_path=db_path)
+        ot_b = OrderTimeline(lifecycle_b, execution_lane="LIVE", db_path=db_path)
 
         assert ot_b.recent() == []
         rows = ot_b.history(symbol="BTCUSDT")
@@ -200,7 +200,7 @@ class TestPersistenceAndRestart:
     def test_history_is_ordered_newest_first_and_respects_limit(self, tmp_path):
         db_path = str(tmp_path / "timeline.db")
         lifecycle = TradeLifecycle()
-        ot = OrderTimeline(lifecycle, db_path=db_path)
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", db_path=db_path)
 
         handle = lifecycle.open_pending("BTCUSDT")
         ot.run_once()
@@ -216,15 +216,15 @@ class TestPersistenceAndRestart:
 
     def test_schema_init_is_idempotent_across_instances(self, tmp_path):
         db_path = str(tmp_path / "timeline.db")
-        OrderTimeline(TradeLifecycle(), db_path=db_path)
-        OrderTimeline(TradeLifecycle(), db_path=db_path)  # must not raise
+        OrderTimeline(TradeLifecycle(), execution_lane="LIVE", db_path=db_path)
+        OrderTimeline(TradeLifecycle(), execution_lane="LIVE", db_path=db_path)  # must not raise
 
     def test_history_is_trimmed_once_row_cap_is_exceeded(self, tmp_path):
         """ORDER_TIMELINE_HISTORY_MAX_ROWS guard — order_timeline_history
         must not grow unbounded on a long-running process."""
         db_path = str(tmp_path / "timeline.db")
         lifecycle = TradeLifecycle()
-        ot = OrderTimeline(lifecycle, db_path=db_path, max_history_rows=5)
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", db_path=db_path, max_history_rows=5)
         ot._TRIM_CHECK_INTERVAL = 1  # check every persisted batch for this test
 
         # Produce more than 5 persisted transitions across distinct symbols.
@@ -239,7 +239,7 @@ class TestPersistenceAndRestart:
     def test_trim_does_not_run_before_the_check_interval(self, tmp_path):
         db_path = str(tmp_path / "timeline.db")
         lifecycle = TradeLifecycle()
-        ot = OrderTimeline(lifecycle, db_path=db_path, max_history_rows=1)
+        ot = OrderTimeline(lifecycle, execution_lane="LIVE", db_path=db_path, max_history_rows=1)
         # Default _TRIM_CHECK_INTERVAL (200) — a couple of persisted
         # batches must NOT trigger a trim yet, even though max_rows=1.
         lifecycle.open_pending("BTCUSDT")
@@ -255,7 +255,7 @@ class TestPersistenceAndRestart:
 class TestThreadLifecycle:
 
     def test_start_stop_is_running(self, tmp_path):
-        ot = OrderTimeline(TradeLifecycle(), db_path=str(tmp_path / "t.db"), poll_interval_seconds=0.05)
+        ot = OrderTimeline(TradeLifecycle(), execution_lane="LIVE", db_path=str(tmp_path / "t.db"), poll_interval_seconds=0.05)
         assert ot.is_running() is False
 
         ot.start()
@@ -268,7 +268,7 @@ class TestThreadLifecycle:
         assert ot.is_running() is False
 
     def test_start_is_idempotent(self, tmp_path):
-        ot = OrderTimeline(TradeLifecycle(), db_path=str(tmp_path / "t.db"), poll_interval_seconds=0.05)
+        ot = OrderTimeline(TradeLifecycle(), execution_lane="LIVE", db_path=str(tmp_path / "t.db"), poll_interval_seconds=0.05)
         ot.start()
         first_thread = ot._thread
         ot.start()  # should not spawn a second thread

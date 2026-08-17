@@ -129,11 +129,21 @@ class CEOGatedSignalProvider:
         self,
         signal_provider: PortfolioSignalProvider,
         ceo_adapter: MultiSymbolCEOAdapter,
+        execution_lane: str,        # W14-2D-1: required, no default — see docs/architecture.md's W14-2D-1 section
         journal=None,
         enabled: Optional[bool] = None,
         recommendation_provider=None,
         dataset_row_count_provider=None,
     ) -> None:
+        from journal.journal_v2 import VALID_EXECUTION_LANES
+
+        if execution_lane not in VALID_EXECUTION_LANES:
+            raise ValueError(
+                f"CEOGatedSignalProvider: execution_lane must be one of "
+                f"{VALID_EXECUTION_LANES}, got {execution_lane!r}"
+            )
+        self.execution_lane = execution_lane
+
         self.signal_provider = signal_provider
         self.ceo_adapter = ceo_adapter
         self.journal = journal
@@ -352,6 +362,7 @@ class CEOGatedSignalProvider:
                     "direction":  ceo_decision.direction,
                     "confidence": ceo_decision.confidence,
                 },
+                execution_lane=self.execution_lane,
                 symbol=symbol,
             )
         except Exception as exc:
@@ -379,6 +390,7 @@ class CEOGatedSignalProvider:
                     "agent_reports": ceo_decision.agent_reports,
                     "weights_used": ceo_decision.weights_used,
                 },
+                execution_lane=self.execution_lane,
                 signal_id=signal_id,
             )
         except Exception as exc:
@@ -400,6 +412,7 @@ class CEOGatedSignalProvider:
                     score=report.get("confidence", 0.0),
                     weight=weights_used.get(agent_name, 0.0),
                     details=report,
+                    execution_lane=self.execution_lane,
                     signal_id=signal_id,
                 )
             except Exception as exc:

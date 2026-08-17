@@ -331,7 +331,7 @@ class TestIdempotency:
             def get_signal(self, symbol):
                 return None
 
-        gated = CEOGatedSignalProvider(FakeSignalProvider(), FakeAdapter(), enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProvider(), FakeAdapter(), execution_lane="LIVE", enabled=True)
         first = gated.get_signal("BTCUSDT")
         second = gated.get_signal("BTCUSDT")
         assert first.agent_attribution == second.agent_attribution

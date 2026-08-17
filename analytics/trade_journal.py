@@ -64,6 +64,12 @@ class TradeRecord:
         self.block_reasons: str   = ""
         self.order_id:      str   = ""
         self.extra_data:    str   = ""
+        # W14-2D-1: informational only — journal/journal_v2.py::save_trade()
+        # takes execution_lane as its own REQUIRED argument and is the sole
+        # source of truth for the persisted value; it does not read this
+        # attribute. Kept here so TradeRecord.to_dict()/from_decision()
+        # callers can inspect/carry intent without a schema mismatch.
+        self.execution_lane: str   = ""
 
     def to_dict(self) -> dict:
         return {
@@ -92,6 +98,7 @@ class TradeRecord:
             "block_reasons": self.block_reasons,
             "order_id":      self.order_id,
             "extra_data":    self.extra_data,
+            "execution_lane": self.execution_lane,
         }
 
     @classmethod

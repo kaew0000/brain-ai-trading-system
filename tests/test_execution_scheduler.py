@@ -97,6 +97,7 @@ def make_scheduler(ranker=None, pm=None, dp=None, orch=None, **kwargs):
     dp = dp or FakeDataProvider()
     if orch is None:
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=FakeExecutionEngine(), portfolio_manager=pm,
             signal_provider=lambda s: ExecutionSignal(1, 100.0, 90.0, 110.0),
             state=reset_execution_state(),

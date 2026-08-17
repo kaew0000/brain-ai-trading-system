@@ -25,19 +25,20 @@ def journal(tmp_path):
 def _make_closed_trade(journal, symbol="BTCUSDT", result="WIN", with_agents=True):
     signal_id = journal.save_signal(
         {"timestamp": "2026-08-11T00:00:00+00:00", "action": "LONG", "direction": "LONG", "confidence": 80.0},
+        execution_lane="LIVE",
         symbol=symbol,
     )
     if with_agents:
         journal.save_agent_decision(agent="smc", decision="LONG", symbol=symbol, score=75.0, weight=0.3,
-                                     details={"summary": "bullish structure"}, signal_id=signal_id)
+                                     details={"summary": "bullish structure"}, signal_id=signal_id, execution_lane="LIVE")
         journal.save_agent_decision(agent="futures", decision="LONG", symbol=symbol, score=65.0, weight=0.2,
-                                     details={"summary": "positive funding"}, signal_id=signal_id)
+                                     details={"summary": "positive funding"}, signal_id=signal_id, execution_lane="LIVE")
 
     rec = TradeRecord()
     rec.symbol, rec.direction = symbol, "LONG"
     rec.entry_price, rec.stop_loss, rec.take_profit, rec.quantity = 100.0, 90.0, 120.0, 1.0
     rec.regime = "TRENDING"
-    trade_id = journal.save_trade(rec, signal_id=signal_id)
+    trade_id = journal.save_trade(rec, execution_lane="LIVE", signal_id=signal_id)
 
     pnl = 200.0 if result == "WIN" else -100.0
     exit_price = 120.0 if result == "WIN" else 90.0
@@ -47,10 +48,10 @@ def _make_closed_trade(journal, symbol="BTCUSDT", result="WIN", with_agents=True
 
 class TestClosedOnlyFilter:
     def test_open_trade_returns_none(self, journal, tmp_path):
-        signal_id = journal.save_signal({"timestamp": "t", "action": "LONG", "direction": "LONG", "confidence": 50.0}, symbol="BTCUSDT")
+        signal_id = journal.save_signal({"timestamp": "t", "action": "LONG", "direction": "LONG", "confidence": 50.0}, execution_lane="LIVE", symbol="BTCUSDT")
         rec = TradeRecord()
         rec.symbol, rec.direction = "BTCUSDT", "LONG"
-        trade_id = journal.save_trade(rec, signal_id=signal_id)  # never closed — result stays "OPEN"
+        trade_id = journal.save_trade(rec, execution_lane="LIVE", signal_id=signal_id)  # never closed — result stays "OPEN"
 
         page = ingest_closed_trade(journal, trade_id, knowledge_root=tmp_path)
         assert page is None

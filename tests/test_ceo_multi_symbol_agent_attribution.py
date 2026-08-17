@@ -165,7 +165,7 @@ class TestH1OneSignalIdPerCycle:
         WAIT, see module docstring) still creates exactly one signals
         row, shared by every journaled row from this cycle."""
         dispatcher = _make_live_dispatcher(trend="up")
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         result = gated.get_signal("BTCUSDT")
 
@@ -186,7 +186,7 @@ class TestH2CeoRowGetsSharedId:
 
     def test_ceo_agent_row_carries_the_cycles_signal_id(self, journal):
         dispatcher = _make_live_dispatcher(trend="up")
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         gated.get_signal("BTCUSDT")
 
@@ -204,7 +204,7 @@ class TestH3AgentRowsShareSameId:
 
     def test_every_real_sub_agent_row_has_the_ceo_cycles_signal_id(self, journal):
         dispatcher = _make_live_dispatcher(trend="up")
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         gated.get_signal("BTCUSDT")
 
@@ -229,7 +229,7 @@ class TestH4PerAgentAttributionPreserved:
 
     def test_each_agent_is_its_own_row_not_one_merged_blob(self, journal):
         dispatcher = _make_live_dispatcher(trend="up")
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         gated.get_signal("BTCUSDT")
 
@@ -260,7 +260,7 @@ class TestH5ExecutionSignalCarriesId:
         decision = _confirmed_decision()
         signal = ExecutionSignal(direction=1, entry_price=60_000.0, stop_loss=59_000.0, take_profit=62_000.0)
         adapter = ControlledAdapter(decision, signal)
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
 
         result = gated.get_signal("BTCUSDT")
 
@@ -279,7 +279,7 @@ class TestH5ExecutionSignalCarriesId:
         decision = _confirmed_decision(action="SHORT", direction="SHORT")
         signal = ExecutionSignal(direction=1, entry_price=60_000.0, stop_loss=59_000.0, take_profit=62_000.0)
         adapter = ControlledAdapter(decision, signal)
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
 
         result = gated.get_signal("BTCUSDT")
 
@@ -300,9 +300,10 @@ class TestH6TradeReusesId:
         decision = _confirmed_decision()
         signal = ExecutionSignal(direction=1, entry_price=100.0, stop_loss=90.0, take_profit=110.0)
         adapter = ControlledAdapter(decision, signal)
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
 
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=FakeEngine(), portfolio_manager=FakePortfolioManager(),
             signal_provider=gated, state=ExecutionState(), journal=journal,
         )
@@ -317,6 +318,7 @@ class TestH6TradeReusesId:
         portfolio_signal_provider.py path, strategy_registry.py) never
         set signal_id — behavior there is byte-identical to before."""
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=FakeEngine(), portfolio_manager=FakePortfolioManager(),
             signal_provider=lambda s: ExecutionSignal(direction=1, entry_price=100.0, stop_loss=90.0, take_profit=110.0),
             state=ExecutionState(), journal=journal,
@@ -340,9 +342,10 @@ class TestH7AttributionJoinWorks:
         decision = _confirmed_decision(agents=("smc", "futures", "regime"))
         signal = ExecutionSignal(direction=1, entry_price=100.0, stop_loss=90.0, take_profit=110.0)
         adapter = ControlledAdapter(decision, signal)
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
 
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=FakeEngine(), portfolio_manager=FakePortfolioManager(),
             signal_provider=gated, state=ExecutionState(), journal=journal,
         )
@@ -399,9 +402,10 @@ class TestH8GetTradeAttributionSeesAgents:
         decision = _confirmed_decision(agents=("smc", "futures"))
         signal = ExecutionSignal(direction=1, entry_price=100.0, stop_loss=90.0, take_profit=110.0)
         adapter = ControlledAdapter(decision, signal)
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
 
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=FakeEngine(), portfolio_manager=FakePortfolioManager(),
             signal_provider=gated, state=ExecutionState(), journal=journal,
         )
@@ -443,6 +447,7 @@ class TestH8GetTradeAttributionSeesAgents:
         fabricate entries. Matches this method's own pre-existing
         docstring guarantee."""
         orch = ExecutionOrchestrator(
+            execution_lane="LIVE",
             execution_engine=FakeEngine(), portfolio_manager=FakePortfolioManager(),
             signal_provider=lambda s: ExecutionSignal(direction=1, entry_price=100.0, stop_loss=90.0, take_profit=110.0),
             state=ExecutionState(), journal=journal,
@@ -465,13 +470,13 @@ class TestH9MultiSymbolIsolation:
         decision_btc = _confirmed_decision(action="LONG", direction="LONG", agents=("smc", "futures"))
         signal_btc = ExecutionSignal(direction=1, entry_price=60_000.0, stop_loss=59_000.0, take_profit=62_000.0)
         gated_btc = CEOGatedSignalProvider(
-            FakeSignalProviderUnused(), ControlledAdapter(decision_btc, signal_btc), journal=journal, enabled=True,
+            FakeSignalProviderUnused(), ControlledAdapter(decision_btc, signal_btc), execution_lane="LIVE", journal=journal, enabled=True,
         )
 
         decision_eth = _confirmed_decision(action="SHORT", direction="SHORT", agents=("regime", "risk"))
         signal_eth = ExecutionSignal(direction=-1, entry_price=3_000.0, stop_loss=3_100.0, take_profit=2_800.0)
         gated_eth = CEOGatedSignalProvider(
-            FakeSignalProviderUnused(), ControlledAdapter(decision_eth, signal_eth), journal=journal, enabled=True,
+            FakeSignalProviderUnused(), ControlledAdapter(decision_eth, signal_eth), execution_lane="LIVE", journal=journal, enabled=True,
         )
 
         result_btc = gated_btc.get_signal("BTCUSDT")
@@ -505,7 +510,7 @@ class TestBackwardCompatibility:
 
     def test_no_journal_configured_is_still_a_complete_noop(self):
         dispatcher = _make_live_dispatcher(trend="up")
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=None, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=None, enabled=True)
         assert gated.get_signal("BTCUSDT") is None  # must not raise with journal=None
 
     def test_empty_agents_ceoagent_still_journals_cleanly_with_shared_id(self, journal):
@@ -520,7 +525,7 @@ class TestBackwardCompatibility:
             def decide_with_signal(self, symbol, **kwargs):
                 return ceo.decide({"symbol": symbol, "regime": "TRENDING"}), None
 
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), _DirectAdapter(), journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), _DirectAdapter(), execution_lane="LIVE", journal=journal, enabled=True)
         gated.get_signal("BTCUSDT")
 
         rows = journal.get_agent_decisions(limit=10)
@@ -546,7 +551,7 @@ class TestFailureIsolation:
     def test_save_signal_failure_degrades_to_none_not_a_crash(self):
         dispatcher = _make_live_dispatcher(trend="up")
         journal = self._NoSaveSignalJournal()
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), dispatcher, execution_lane="LIVE", journal=journal, enabled=True)
 
         result = gated.get_signal("BTCUSDT")  # must not raise
 
@@ -573,7 +578,7 @@ class TestFailureIsolation:
         journal.save_agent_decision = flaky_save  # type: ignore[method-assign]
 
         adapter = ControlledAdapter(decision, None)
-        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, journal=journal, enabled=True)
+        gated = CEOGatedSignalProvider(FakeSignalProviderUnused(), adapter, execution_lane="LIVE", journal=journal, enabled=True)
 
         gated.get_signal("BTCUSDT")  # must not raise
 
