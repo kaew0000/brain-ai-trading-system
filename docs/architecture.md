@@ -4081,3 +4081,113 @@ it). World suite: 565/565 passed, unchanged. `ruff check .`: clean.
 `vulture . --min-confidence 80`: identical output to baseline (verified
 via `git stash -u` diff), no new findings. `import main`: clean.
 `git diff --check`: clean.
+---
+
+## 41. Agent Performance Attribution Unification — V16 Phase 4C Track A (2026-08-16)
+
+### Purpose
+
+Post-Step-8-audit gap fix. `journal_v2.get_trade_attribution()` (§29,
+extended §37) already reads a trade's agent attribution from EITHER
+representation — the `agent_decisions` signal_id join (§27/§35, "Path
+A") or the explicit `trades.extra_data.attribution.agent_attribution`
+list W14-2A now writes for the default execution loop (§37, "Path B")
+— with explicit attribution winning per trade when present.
+`journal_v2.get_agent_performance()` (§27) was never given the same
+treatment: it only ever executed the Path A join. Reproduced live: a
+trade opened with `signal_id=None` and explicit `agent_attribution`
+(exactly W14-2A's own write pattern) returned 7 agents from
+`get_trade_attribution()` and **0 rows** from `get_agent_performance()`
+for the identical trade. Silent, not previously flagged in this file.
+
+### Who this affected
+
+- `agents/ceo_agent.py`'s `_effective_weights()` — `DYNAMIC_AGENT_WEIGHTS_ENABLED`
+  (`config/settings.py`, default `False`) blends static weights toward
+  measured per-agent win-rate via this exact method. Not live today
+  (flag defaults off), but would have silently and permanently fallen
+  back to static weights under the default execution loop the moment
+  anyone enabled it, with no error surfaced.
+- `knowledge_engine/agent_knowledge.py` (§36, Step 8) — would have
+  produced zero agent knowledge pages for any trade taken through the
+  default (non-multi-symbol) execution loop, even after that package's
+  own (separate, still-unwired) ingestion step is scheduled.
+- `learning/agent_statistics.py`.
+
+### Fix — landed via PR #58 (`fix/v16-4c-track-a-agent-performance-attribution`, commit `30f0f7241b8ed4c5d7bb58e4db1c4952bb9cb326`)
+
+Two independent sessions audited this repository and diagnosed the
+identical gap around the same time; PR #58 merged first, so it is the
+authoritative fix. `journal/journal_v2.py`'s `get_agent_performance()`
+only — same file, no new module, no new table, no schema change. Its
+approach: iterate every closed trade and call
+`self.get_trade_attribution(trade_id)` directly (rather than
+re-implementing that method's precedence rule a second time), then
+aggregate whichever `agent_participation` list it returns. Because
+`get_trade_attribution()` already guarantees "explicit wins if
+present, else the signal_id join, never both" for a single trade,
+calling it per trade makes double-counting structurally impossible —
+there is only ever one precedence implementation in the codebase, not
+two that could drift apart. Direction-match crediting (a vote must
+equal the trade's actual direction to be credited or blamed) is
+unchanged, applied uniformly to whichever source won precedence.
+
+Trade-off, noted rather than hidden: this iterates closed trades one
+`get_trade_attribution()` call at a time (N+1-shaped), rather than
+bulk-fetching `agent_decisions` once up front. Given
+`get_agent_performance()` sits behind `DYNAMIC_AGENT_WEIGHTS_ENABLED`
+(default `False`, and TTL-refreshed rather than called per decision
+when on) and behind Step 8's own not-yet-scheduled ingestion, this is
+the same accepted trade-off already documented for
+`get_ensemble_learning_dataset()` — correctness and single-source-of-truth
+over micro-optimizing a cold path. Not something this entry treats as
+a blocking follow-up.
+
+Return shape, field names, `win_rate`/`total_pnl` rounding, `ORDER BY
+wins DESC`, and `limit` semantics are byte-identical to the
+pre-existing method — verified by every pre-existing
+`get_agent_performance()` test passing unmodified.
+
+**Known, documented, NOT fixed by this change:** the two sources use
+different agent-identifier strings by design — the join path uses
+whatever name `save_agent_decision()` was called with (e.g.
+`"CEO_AGENT"`); the explicit path uses
+`agent_attribution_from_ceo_decision()`'s `CEOAgent.WEIGHTS` keys (e.g.
+`"ceo"`, `"smc"`). This fix does not rename or merge those identifiers
+— doing so would be inventing a second attribution format, explicitly
+out of scope. A caller wanting one unified agent taxonomy across both
+representations still needs its own explicit mapping.
+
+### Tests
+
+`tests/test_agent_performance_attribution.py` (PR #58, 8 tests):
+explicit-attribution path, Step 7C join path unchanged, mixed
+database, dual-source duplicate-count protection. All pre-existing
+`tests/test_agent_outcome_attribution.py` (Path A's original coverage)
+and `tests/test_dynamic_agent_weights.py` (uses a `FakeJournal` stub,
+unaffected) pass unmodified. Independently re-verified in a fresh
+clone of `main` post-merge: reproduction script confirms all 7
+explicit-attribution agents now visible, 50/50 across the full
+attribution/dynamic-weight test set green.
+
+### Note on parallel work
+
+An independently-developed second implementation of this exact fix
+(branch `feat/phase-4c-track-a-agent-performance-attribution`, bulk-query
+instead of per-trade, otherwise equivalent) reached PR (#61) shortly
+after PR #58 merged. Rather than merge a second, competing
+implementation of identical logic into this file, PR #61 was rebased
+to drop its now-redundant `journal_v2.py` change and duplicate test
+file, keeping only this documentation update (corrected here to credit
+PR #58 as the actual fix) — the one piece PR #58 itself didn't add.
+
+### Scope respected
+
+No changes to BUY/SELL logic, CEO voting logic, `RiskEngine`, position
+sizing, `ExecutionOrchestrator`, `PaperExecutionEngine`, Binance
+execution, lifecycle control, W14-0/W14-1/W14-2A/W14-2B,
+`DYNAMIC_AGENT_WEIGHTS_ENABLED` (still `False` by default — this fix
+changes what data would feed it if enabled, not whether it's enabled),
+the knowledge-engine architecture, recommendation→outcome causal
+linkage, cross-symbol HMM behavior, or `get_ensemble_learning_dataset()`.
+W14-2D not implemented.

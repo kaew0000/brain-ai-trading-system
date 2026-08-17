@@ -746,14 +746,27 @@ class TradeJournalV2:
     def get_agent_performance(self, limit: int = 500) -> list[dict]:
         """
         Per-agent win-rate — Phase 4B Step 1 (architecture.md §27).
+        V16 Phase 4C Track A: unified across both attribution sources.
 
-        Joins agent_decisions back to trades via the signal_id both tables
-        already carried in the V13 schema (agent_decisions.signal_id,
-        trades.signal_id) — no new tables or columns. Only counts a vote
-        toward its agent's record when ad.decision matches the direction
-        that was actually traded (t.direction): a dissenting agent didn't
-        get the trade it voted for, so it is neither credited with the win
-        nor blamed for the loss.
+        For each closed trade, this reuses get_trade_attribution()'s
+        existing agent_participation — the SAME precedence it already
+        uses for the single-trade case: an explicit
+        trades.extra_data.attribution.agent_attribution (W14-2A, the
+        default V16 multi-symbol execution path, where signal_id is
+        NULL) wins when present; otherwise it falls back to the
+        agent_decisions <-> trades.signal_id join (Step 7C). A trade
+        is therefore never double-counted even when both an
+        agent_attribution and a signal_id with agent_decisions rows
+        exist, because get_trade_attribution() only ever returns one
+        or the other for a given trade, never both.
+
+        Only counts a vote toward its agent's record when that vote's
+        direction matches the direction actually traded: a dissenting
+        agent didn't get the trade it voted for, so it is neither
+        credited with the win nor blamed for the loss. This mirrors
+        the join's original `ad.decision = t.direction` filter,
+        applied here to participant["vote"] regardless of which of
+        the two sources it came from.
 
         Returns one row per agent with raw win/loss counts and total_pnl —
         deliberately NOT a weight recommendation. A future phase (4B proper)
@@ -761,37 +774,47 @@ class TradeJournalV2:
         before letting it influence CEOAgent.WEIGHTS) — this method only
         answers "what actually happened per agent so far".
         """
-        sql = """
-        SELECT ad.agent AS agent,
-               COUNT(*) AS total,
-               SUM(CASE WHEN t.result = 'WIN'  THEN 1 ELSE 0 END) AS wins,
-               SUM(CASE WHEN t.result = 'LOSS' THEN 1 ELSE 0 END) AS losses,
-               SUM(t.pnl) AS total_pnl
-        FROM agent_decisions ad
-        JOIN trades t ON t.signal_id = ad.signal_id
-        WHERE t.result IN ('WIN', 'LOSS')
-          AND ad.signal_id IS NOT NULL
-          AND ad.decision = t.direction
-        GROUP BY ad.agent
-        ORDER BY wins DESC
-        LIMIT ?
-        """
         with self._conn() as c:
-            rows = c.execute(sql, (limit,)).fetchall()
+            closed = c.execute(
+                "SELECT id FROM trades WHERE result IN ('WIN', 'LOSS') ORDER BY id"
+            ).fetchall()
 
-        out = []
-        for r in rows:
-            total = r["total"] or 0
-            wins  = r["wins"] or 0
-            out.append({
-                "agent":        r["agent"],
-                "total_trades": total,
-                "wins":         wins,
-                "losses":       r["losses"] or 0,
-                "win_rate":     round(wins / total, 4) if total else 0.0,
-                "total_pnl":    round(float(r["total_pnl"] or 0.0), 2),
-            })
-        return out
+        stats: dict[str, dict] = {}
+        for row in closed:
+            attribution = self.get_trade_attribution(row["id"])
+            if attribution is None:
+                continue
+            direction = attribution["direction"]
+            result    = attribution["result"]
+            pnl       = float(attribution["pnl"] or 0.0)
+
+            for participant in attribution["agent_participation"]:
+                agent = participant.get("agent")
+                if agent is None or participant.get("vote") != direction:
+                    continue
+                bucket = stats.setdefault(
+                    agent, {"total": 0, "wins": 0, "losses": 0, "total_pnl": 0.0}
+                )
+                bucket["total"] += 1
+                if result == "WIN":
+                    bucket["wins"] += 1
+                elif result == "LOSS":
+                    bucket["losses"] += 1
+                bucket["total_pnl"] += pnl
+
+        out = [
+            {
+                "agent":        agent,
+                "total_trades": b["total"],
+                "wins":         b["wins"],
+                "losses":       b["losses"],
+                "win_rate":     round(b["wins"] / b["total"], 4) if b["total"] else 0.0,
+                "total_pnl":    round(b["total_pnl"], 2),
+            }
+            for agent, b in stats.items()
+        ]
+        out.sort(key=lambda r: r["wins"], reverse=True)
+        return out[:limit]
 
     def save_agent_message(
         self,

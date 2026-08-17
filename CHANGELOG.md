@@ -52,6 +52,46 @@ assumed). `EXECUTION_MODE` still selects exactly one engine per
 process, unchanged — concurrent LIVE+TRAINING runtime, the training
 scheduler, and dashboard visibility remain W14-2D-2 through W14-2D-9.
 Not pushed, no PR opened, not merged.
+## [Unreleased] — V16 Phase 4C Track A: Agent Performance Attribution Unification
+
+Post-Step-8-audit gap fix. `journal_v2.get_trade_attribution()` already
+reads agent attribution from either the `agent_decisions` signal_id
+join (Step 7C) or W14-2A's explicit `trades.extra_data.attribution.agent_attribution`
+list, explicit-wins-if-present. `journal_v2.get_agent_performance()`
+was never updated to match — it only ever ran the signal_id join, so
+every trade attributed through W14-2A's default-execution-loop path
+contributed zero rows to it. Reproduced live before fixing: 7 agents
+via `get_trade_attribution()`, 0 rows via `get_agent_performance()` for
+the identical trade. See `docs/architecture.md` §41 for the full
+root-cause writeup and a note on the parallel implementation this
+entry defers to.
+
+### Fixed
+- **`journal/journal_v2.py::get_agent_performance()`** (landed via PR #58,
+  commit `30f0f72`) — now aggregates from both attribution sources by
+  calling `get_trade_attribution()` per closed trade and reusing
+  whichever `agent_participation` it returns, so a trade is never
+  credited twice. Return shape, field names, rounding, ordering, and
+  `limit` semantics unchanged — every pre-existing test for this
+  method passes unmodified. Unblocks `agents/ceo_agent.py`'s
+  `DYNAMIC_AGENT_WEIGHTS_ENABLED` blend and
+  `knowledge_engine/agent_knowledge.py` (Step 8) from silently seeing
+  zero data for trades taken through the default (non-multi-symbol)
+  execution loop. Test coverage: `tests/test_agent_performance_attribution.py`
+  (8 tests).
+
+### Known follow-up (not in scope here, documented not fixed)
+- The two attribution sources use different agent-identifier strings
+  by design (join path: `save_agent_decision()`'s raw name, e.g.
+  `"CEO_AGENT"`; explicit path: `CEOAgent.WEIGHTS` keys, e.g. `"ceo"`).
+  Not unified — would be a second attribution format, out of scope.
+- `knowledge_engine/`'s own ingestion step remains unwired to any
+  scheduler (by design, per §36) — this fix makes its agent-performance
+  data source correct once ingestion does run, it does not wire
+  ingestion itself.
+- Recommendation→trade-outcome causal linkage and cross-symbol HMM
+  contamination remain open, separate, unaddressed gaps (see prior
+  Track A audit).
 
 ## [Unreleased] — V16 W14-2B: Bundle Manager Working-Tree Isolation Fix
 

@@ -301,6 +301,33 @@ class TestOrphanedExchangePosition:
         risk.set_manual_hold.assert_called_once()   # still held despite failed SL
         assert eng.get_orphan_hold()["sl_placed"] is False
 
+    def test_paper_mode_trade_manager_holds_safely_without_crashing(self):
+        """V16 fix(paper-mode-orphan-sl): sys["trade_manager"] is a
+        PaperExecutionEngine/_PaperAdapter when EXECUTION_MODE=paper — it
+        has no place_stop_loss() at all (not "rejected", just absent).
+        dp.get_position_info() still reads the REAL exchange account, so
+        this branch can fire in paper mode too. Must not raise, must skip
+        the doomed call, and must still hold trading exactly like the
+        "exchange rejected the SL" case.
+        """
+        from system_health.recovery_engine import RecoveryEngine
+        eng = RecoveryEngine()
+        dp = MagicMock()
+        dp.get_position_info.return_value = self._position()
+        dp.get_account_balance.return_value = 10_000.0
+        tm = MagicMock(spec=[])  # no place_stop_loss attribute at all
+        risk = MagicMock()
+        s = _sys(data_provider=dp, trade_manager=tm, risk_engine=risk)
+
+        result = eng.attempt_reconciliation_recovery(self._evt(), s)
+
+        assert result == "orphan_sl_failed_still_holding"
+        risk.set_manual_hold.assert_called_once()
+        assert eng.get_orphan_hold()["sl_placed"] is False
+        reason = eng.get_orphan_hold()["reason"]
+        assert "paper mode" in reason
+        assert "AUTO SL PLACEMENT FAILED" not in reason
+
     def test_does_not_reattempt_sl_once_already_held(self):
         from system_health.recovery_engine import RecoveryEngine
         eng = RecoveryEngine()
