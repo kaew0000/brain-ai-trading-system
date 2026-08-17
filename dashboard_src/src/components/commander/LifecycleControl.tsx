@@ -22,7 +22,7 @@
 import { useState } from 'react'
 import { useCommander, useAuth } from '@/stores'
 import { api } from '@/lib/api'
-import { lifecycleButtonSpec, lifecycleButtonInert } from '@/lib/lifecycleControl'
+import { lifecycleButtonSpec, lifecycleButtonInert, lifecycleButtonDisplay } from '@/lib/lifecycleControl'
 import { hasRole } from '@/lib/roles'
 import clsx from 'clsx'
 
@@ -31,6 +31,9 @@ const TONE_CLASS: Record<string, string> = {
   running:        'bg-accent-red/15 border-accent-red/40 text-accent-red hover:bg-accent-red/25',
   transitioning:  'bg-surface-2 border-border text-text-muted cursor-wait',
   failed:         'bg-accent-gold/15 border-accent-gold/40 text-accent-gold hover:bg-accent-gold/25',
+  // fix(lifecycle-control-unauth-visibility): distinct, clearly-clickable
+  // treatment for the unauthorized case — see lifecycleButtonDisplay().
+  login:          'bg-accent-blue/15 border-accent-blue/40 text-accent-blue hover:bg-accent-blue/25',
 }
 
 export default function LifecycleControl({ onRequireLogin }: { onRequireLogin: () => void }) {
@@ -43,6 +46,7 @@ export default function LifecycleControl({ onRequireLogin }: { onRequireLogin: (
   const lifecycleState = commanderState?.lifecycle_state
   const spec = lifecycleButtonSpec(lifecycleState)
   const authorized = hasRole(role, 'OPERATOR')
+  const display = lifecycleButtonDisplay(spec, authorized, pending)
 
   async function handleClick() {
     // V16 fix(lifecycle-control-login-lockout): check auth FIRST. If this
@@ -96,11 +100,10 @@ export default function LifecycleControl({ onRequireLogin }: { onRequireLogin: (
         title={!authorized ? 'Login as OPERATOR to control the bot' : undefined}
         className={clsx(
           'text-[11px] font-mono font-bold px-2.5 py-1 rounded border transition-colors disabled:opacity-60',
-          TONE_CLASS[spec.tone],
+          TONE_CLASS[display.tone],
         )}
       >
-        {pending ? '…' : spec.label}
-        {!authorized && !spec.disabled ? ' 🔒' : ''}
+        {display.label}
       </button>
     </div>
   )

@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## [Unreleased] — Track B: LifecycleControl Unauthorized-State Visibility Fix
+
+Reactive UI bugfix. An unauthenticated viewer's START/STOP/LOGIN
+control in the Command Center header rendered as a muted, `cursor-wait`
+"…" with no visible affordance that it was clickable — it was, and
+correctly opened the login modal, but nothing on screen invited the
+click. See `PATCH_NOTES.md` for full root-cause detail.
+
+### Added
+- `dashboard_src/src/lib/lifecycleControl.ts::lifecycleButtonDisplay()`
+  — new, additive pure function deciding the button's visible
+  label/tone; fully decoupled from `lifecycleButtonSpec()` while
+  unauthorized (always `{label:'LOGIN', tone:'login'}`), identical to
+  `spec` once authorized.
+- `dashboard_src/src/lib/tests/lifecycleButtonDisplay.test.ts` — 7 new
+  cases.
+
+### Changed
+- `dashboard_src/src/components/commander/LifecycleControl.tsx` —
+  button now renders from `lifecycleButtonDisplay()`; added a `login`
+  tone to `TONE_CLASS` (accent-blue, no `cursor-wait`).
+
 ## [Unreleased] — V16 W14-2D-1: Execution-Lane Data Model
 
 Every journal/dataset table had zero concept of which execution context

@@ -1,101 +1,87 @@
-# PATCH NOTES — Logging Subsystem Hotfix: Shared RotatingFileHandler
+# PATCH NOTES — Track B: LifecycleControl Unauthorized-State Visibility Fix
 
-Branch: `fix/logger-shared-file-handler`
-Base: `main` @ `90a2874` (rebased — `origin/main` advanced past the
-original `f7e9caf` base via PR #53 W14-1 and PR #54 W14-2A while this
-branch was in flight; rebased cleanly onto current `main` with a single
-conflict in `docs/architecture.md` — both branches appended a new
-numbered section after §36. Resolved by keeping W14-2A's entry as the
-canonical §37 and renumbering this hotfix's entry to §38. No other
-file conflicted — W14-1/W14-2A never touched `utils/logger.py`,
-`tests/test_logger.py`, `PATCH_NOTES.md`, or `MIGRATION.md`.)
+Branch: `fix/lifecycle-control-unauth-visibility`
+Base: `main` @ `a88bb5b`
 
 ## Scope note
 
-This is not a numbered phase — it's a hotfix for a production incident
-reported directly from a live/paper run's console output, not from a
-task brief. No existing documentation (architecture.md, CLAUDE.md)
-described this as planned work; it was discovered and fixed reactively.
+Not a numbered phase — reactive UI bugfix reported directly from a live
+production session (Command Center screenshot: `localhost:8000`,
+`OFFLINE`/`UNKNOWN` header, no visible control in the header bar other
+than a stray browser tooltip reading "Login as OPERATOR to control the
+bot"). Track B (`dashboard_src/`) only — zero Track A / `.py` files
+touched, confirmed via `git diff --stat`.
 
 ## Root cause
 
-`utils/logger.py::get_logger(name)` is idempotent **per logger name**
-(`if logger.handlers: return logger`), but every one of the ~83 distinct
-call sites in this codebase (`get_logger(__name__)` in `main.py`,
-`data/binance_provider.py`, `risk/risk_engine.py`, `events/event_bus.py`,
-etc.) passes a *different* name. Each of those ~83 first-time calls
-independently constructed its own `logging.handlers.RotatingFileHandler`
-pointed at the same `cfg.LOG_FILE` path (`logs/brain_bot.log`).
+`api/auth.py` enforces credentials on every `GET /api/*` route and
+every `/ws/*` stream once `API_AUTH_ENABLED=true` (this deployment: `1
+API key(s) configured`, per the reported startup log) — there is no
+anonymous tier below VIEWER by design. A freshly loaded dashboard has
+`useAuth().role === null`, so `GET /api/command/state` 401s and
+`useCommander().state` stays `undefined` forever until login.
 
-That left ~83 separate, simultaneously open OS file handles on one file,
-all owned by the same process. `RotatingFileHandler.doRollover()` closes
-*its own* stream, then calls `os.rename(source, dest)`. On Windows,
-`os.rename()` fails with `PermissionError: [WinError 32]` if *any other*
-handle still has the file open — and 82 other handlers always did. Once
-the file crossed `maxBytes` (10 MB), every logger's next `emit()` call
-re-triggered `shouldRollover() → True → doRollover() → raise`, and
-because the raise happens *before* `logging.FileHandler.emit()` actually
-writes the record, **every log line for the rest of the process's life
-was silently dropped from `brain_bot.log`** (visible only via the
-`--- Logging error ---` traceback printed to stderr).
+`lifecycleButtonSpec(undefined)` (`dashboard_src/src/lib/lifecycleControl.ts`)
+correctly returns its "unconfirmed state" default: `{ label: '…', tone:
+'transitioning', disabled: true }` — muted colors, `cursor-wait`. A
+prior fix (`fix/lifecycle-control-login-lockout`, already on `main`)
+correctly made this button *clickable* while unauthorized via
+`lifecycleButtonInert()`, so it still opens the login modal — but
+`LifecycleControl.tsx` kept sourcing the button's visible label/tone
+straight from `spec` regardless of auth state. Because `spec.disabled`
+is `true` in this default case, the old `!authorized && !spec.disabled
+? ' 🔒' : ''` suffix never rendered either. Net result: a real,
+correctly wired, clickable `<button>` with no visible affordance —
+label `…` in muted gray with a "wait" cursor — which reads as "loading,
+inert," not "click to log in." That is what the report describes as
+the start/stop/login button "not showing."
 
-Confirmed mechanically (not just by inference from the traceback):
-constructing N `RotatingFileHandler` instances on one path produces N
-distinct `id(handler.stream)` values; the fix collapses this to exactly
-1 by construction. (`WinError 32` itself can't be reproduced from this
-Linux environment — POSIX allows rename of an open file — so the fix
-was verified by proving the underlying mechanism, multiple concurrent
-handles on one path from a single process, is eliminated, not by
-reproducing the Windows error text itself.)
+This is a visual-affordance gap only. The click handler, the login
+modal, and the actual START/STOP command flow were already correct.
 
 ## Fix
 
-`utils/logger.py`: added a module-level, lock-guarded singleton
-(`_get_shared_file_handler()`) that lazily creates **one**
-`RotatingFileHandler` on first use and returns that same instance to
-every subsequent caller regardless of logger name. `get_logger()` now
-calls this shared accessor instead of constructing a fresh handler
-inline. Console handler behavior (per-name, colorized) is unchanged.
+`dashboard_src/src/lib/lifecycleControl.ts` — added (additive, no
+existing export touched) `lifecycleButtonDisplay(spec, authorized,
+pending)`: while unauthorized, always returns `{ label: 'LOGIN', tone:
+'login' }`, fully decoupled from `spec` (mirrors `handleClick()`'s
+existing posture, which never consults `spec.command` until after the
+authorized check). Once authorized, returns `spec`'s own label/tone
+unchanged — the authorized START/STOP/RESTART/pending flow is
+byte-for-byte identical to before this patch.
 
-No signature change, no new config, no behavior change for any of the
-83 call sites — they still just call `get_logger(__name__)`.
+`dashboard_src/src/components/commander/LifecycleControl.tsx` — added
+one new `login` entry to `TONE_CLASS` (`accent-blue`, clearly distinct
+from the muted "transitioning" style, no `cursor-wait`); button now
+renders `display.label` / `TONE_CLASS[display.tone]` from the new
+function instead of `spec.label` / `TONE_CLASS[spec.tone]` +
+manual 🔒-suffix logic. `lifecycleButtonSpec()` and
+`lifecycleButtonInert()` are untouched.
 
 ## Files changed
 
-- `utils/logger.py` — shared file handler singleton (the fix)
-- `tests/test_logger.py` — new regression tests (see below)
+- `dashboard_src/src/lib/lifecycleControl.ts` (+43 lines, additive export)
+- `dashboard_src/src/components/commander/LifecycleControl.tsx` (+7/-4 lines)
+- `dashboard_src/src/lib/tests/lifecycleButtonDisplay.test.ts` (new file, 7 cases)
 
-## Test results (post-rebase, against current `main` @ `90a2874`)
+## Tests executed
 
-- `pytest tests/test_logger.py -v` → 4 passed (new)
-- Full `pytest tests/ -q` → 2538 passed, 3 failed, 5 warnings
-- `pytest world/tests/ -q -m ""` → 565 passed (unchanged)
-- `ruff check . --exclude dashboard_src --exclude dashboard` → clean
-- `vulture . --exclude dashboard_src,dashboard,tests --min-confidence 80` → clean
-- `python3 -c "import main"` → clean
+- `npx vitest run` — before: 6 files / 66 passed. After: **7 files / 73
+  passed** (7 new, 0 modified, 0 removed — existing
+  `lifecycleControl.test.ts` untouched).
+- `npx tsc --noEmit` — clean before and after.
+- `npm run build` (`tsc && vite build`) — clean production build,
+  443 modules transformed, no errors.
+- Python quality gates (`pytest tests/`, `ruff`, `vulture`) not
+  re-run: zero `.py` files in this diff, and both `ruff` and `vulture`
+  already exclude `dashboard_src`/`dashboard` per the project's
+  standing quality-gate config.
 
-The 3 `tests/test_dashboard_serving.py` failures are **pre-existing on
-`main` itself**, unrelated to this change — confirmed by running the
-identical command on `origin/main` before rebasing: 2534 passed / 3
-failed, same 3 tests. They fail in this sandbox because
-`dashboard_src/dist/index.html` doesn't exist (no `npm run build` was
-run here; W14-1's CI job builds it as a separate pre-test step). 2538
-− 2534 = the 4 new tests added here, cleanly. Nothing regressed.
+## Known follow-up (found during investigation, NOT in this bundle)
 
-Original baseline (captured before the rebase, against the
-then-current `main` @ `f7e9caf`, before W14-1/W14-2A existed): 2480
-passed / 565 passed / ruff clean / vulture clean / import clean — also
-matched exactly plus the 4 new tests.
-
-## Known follow-up work (explicitly out of scope for this hotfix)
-
-- The production log file (`logs/brain_bot.log`) from the affected
-  session is effectively empty for the run in question — this fix
-  prevents recurrence, it does not recover lost historical log data.
-- Not investigated here (separate reported issues, tracked
-  separately): the live-confirmation-vs-actual-mode banner mismatch,
-  and the startup reconciliation mismatch on a pre-existing exchange
-  position.
-- `CHANGELOG.md` remains stale (pre-existing, previously flagged gap;
-  not touched by this hotfix, consistent with how it's been handled in
-  prior phases).
+`monitor_open_trades` / `daily_report` are currently failing in this
+same production session with `sqlite3.OperationalError: no such
+column: execution_lane` against `brain_bot_v13.db`. This is a
+different, unrelated, backend/Track A issue — reported separately in
+the accompanying chat message, not included in this fix's diff or
+commit, per the one-phase-one-commit discipline.
