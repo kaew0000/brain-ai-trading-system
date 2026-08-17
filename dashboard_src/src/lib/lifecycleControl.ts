@@ -41,3 +41,36 @@ export function lifecycleButtonSpec(state: LifecycleState | undefined): Lifecycl
       return { label: '…', command: null, disabled: true, tone: 'transitioning' }
   }
 }
+
+/**
+ * V16 fix(lifecycle-control-login-lockout): what the <button disabled>
+ * attribute should actually be, as distinct from spec.disabled.
+ *
+ * Root cause this exists to fix: an unauthenticated viewer has no
+ * lifecycle_state at all (GET /api/command/state is 401'd, so
+ * useCommander's state stays undefined forever) — lifecycleButtonSpec()
+ * correctly reports that as disabled:true ("never guess a transition
+ * against an unconfirmed state"), which is the right call for the
+ * START/STOP *command* itself. But LifecycleControl.tsx's only path to
+ * opening the login modal is a click on this SAME button — so an
+ * unauthenticated user landed on a real HTML `disabled` button that can
+ * never fire a click event, with no other control anywhere in the UI
+ * that opens the login modal. Confirmed via a live session: the button
+ * renders (a real element, correctly positioned), but is inert no
+ * matter how precisely it's tapped, on any device or zoom level.
+ *
+ * The fix: while unauthorized, ignore spec.disabled entirely (that
+ * reasoning only applies once we're actually allowed to submit a
+ * command) — the button must stay clickable so onRequireLogin() can
+ * fire. Once authorized, defer to spec.disabled exactly as before;
+ * this changes nothing about the "no optimistic UI" / "never guess a
+ * transition" guarantees for an authenticated operator.
+ */
+export function lifecycleButtonInert(
+  spec: Pick<LifecycleButtonSpec, 'disabled'>,
+  authorized: boolean,
+  pending: boolean,
+): boolean {
+  if (!authorized) return pending
+  return spec.disabled || pending
+}

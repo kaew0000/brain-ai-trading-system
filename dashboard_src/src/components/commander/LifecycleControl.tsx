@@ -22,7 +22,7 @@
 import { useState } from 'react'
 import { useCommander, useAuth } from '@/stores'
 import { api } from '@/lib/api'
-import { lifecycleButtonSpec } from '@/lib/lifecycleControl'
+import { lifecycleButtonSpec, lifecycleButtonInert } from '@/lib/lifecycleControl'
 import { hasRole } from '@/lib/roles'
 import clsx from 'clsx'
 
@@ -45,11 +45,18 @@ export default function LifecycleControl({ onRequireLogin }: { onRequireLogin: (
   const authorized = hasRole(role, 'OPERATOR')
 
   async function handleClick() {
-    if (!spec.command) return
+    // V16 fix(lifecycle-control-login-lockout): check auth FIRST. If this
+    // were ordered the old way (command check first), an unauthenticated
+    // viewer — whose lifecycle_state is always undefined, since GET
+    // /api/command/state 401s — would hit `!spec.command` (true for the
+    // unconfirmed-state case) and return before ever reaching the
+    // onRequireLogin() call below, with no other way to open the login
+    // modal anywhere in the UI.
     if (!authorized) {
       onRequireLogin()
       return
     }
+    if (!spec.command) return
     setPending(true)
     setLastError(null)
     try {
@@ -85,7 +92,7 @@ export default function LifecycleControl({ onRequireLogin }: { onRequireLogin: (
       <button
         type="button"
         onClick={handleClick}
-        disabled={spec.disabled || pending}
+        disabled={lifecycleButtonInert(spec, authorized, pending)}
         title={!authorized ? 'Login as OPERATOR to control the bot' : undefined}
         className={clsx(
           'text-[11px] font-mono font-bold px-2.5 py-1 rounded border transition-colors disabled:opacity-60',
