@@ -11,6 +11,7 @@ const MissionBoard  = lazy(() => import('@/pages/MissionBoard'))
 const Portfolio     = lazy(() => import('@/pages/Portfolio'))
 const Intelligence  = lazy(() => import('@/pages/Intelligence'))
 const Memory        = lazy(() => import('@/pages/Memory'))
+const TrainMonitor  = lazy(() => import('@/pages/TrainMonitor'))
 const TradeReplay   = lazy(() => import('@/pages/TradeReplay'))
 const Commander     = lazy(() => import('@/pages/Commander'))
 const SystemHealth  = lazy(() => import('@/pages/SystemHealth'))
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="portfolio"  element={<Portfolio />} />
             <Route path="intelligence" element={<Intelligence />} />
             <Route path="memory"     element={<Memory />} />
+            <Route path="train"      element={<TrainMonitor />} />
             <Route path="replay"     element={<TradeReplay />} />
             <Route path="commander"  element={<Commander />} />
             <Route path="health"     element={<SystemHealth />} />

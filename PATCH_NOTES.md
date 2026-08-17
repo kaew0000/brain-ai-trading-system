@@ -1,87 +1,125 @@
-# PATCH NOTES — Track B: LifecycleControl Unauthorized-State Visibility Fix
+# PATCH NOTES — Track B: Train Monitor Dashboard Tab
 
-Branch: `fix/lifecycle-control-unauth-visibility`
-Base: `main` @ `a88bb5b`
+Branch: `feat/dashboard-train-monitor-tab`
+Base: `main` @ `ece01c9` (rebased — `origin/main` advanced past this
+branch's original `a88bb5b` base via PR #64 while this branch was in
+flight; rebased cleanly onto current `main` with conflicts in
+`CHANGELOG.md`, `MIGRATION.md`, `PATCH_NOTES.md` only — all three are
+per-phase snapshot/append docs that both phases touched independently.
+Resolved by stacking this phase's `CHANGELOG.md` entry above PR #64's
+(both kept, newest first, same pattern already established there), and
+keeping this phase's own `PATCH_NOTES.md`/`MIGRATION.md` content in
+full — same convention every prior phase in this repo has used;
+neither file is cumulative. No other file conflicted — PR #64 never
+touched `pages/`, `lib/trainMonitor.ts`, `types/api.ts`, `App.tsx`, or
+`components/layout/Layout.tsx`.)
 
 ## Scope note
 
-Not a numbered phase — reactive UI bugfix reported directly from a live
-production session (Command Center screenshot: `localhost:8000`,
-`OFFLINE`/`UNKNOWN` header, no visible control in the header bar other
-than a stray browser tooltip reading "Login as OPERATOR to control the
-bot"). Track B (`dashboard_src/`) only — zero Track A / `.py` files
-touched, confirmed via `git diff --stat`.
+Requested directly ("add a Train Monitor tab to check training results
+and confirm the system is still training normally"). Track B
+(`dashboard_src/`) only — zero Track A / `.py` files touched, zero new
+backend routes. Everything this page shows was already served by
+existing, already-implemented endpoints; two of the three data sources
+were already being polled globally and simply never had anywhere to
+be seen.
 
-## Root cause
+## What already existed (inspected before writing anything)
 
-`api/auth.py` enforces credentials on every `GET /api/*` route and
-every `/ws/*` stream once `API_AUTH_ENABLED=true` (this deployment: `1
-API key(s) configured`, per the reported startup log) — there is no
-anonymous tier below VIEWER by design. A freshly loaded dashboard has
-`useAuth().role === null`, so `GET /api/command/state` 401s and
-`useCommander().state` stays `undefined` forever until login.
+- `GET /api/ml/status`, `GET /api/ml/performance` — already implemented
+  (`api/app.py`), already polled every 15s by `useMLData()`
+  (`hooks/useData.ts`, called from `useAllData()`), already stored in
+  the global `useML()` Zustand slice. `SystemHealth.tsx` already shows
+  a compact summary panel from this same data.
+- `GET /api/ml/models` — already implemented, already wired as
+  `api.mlModels()` in `lib/api.ts` — but **not called from any page**.
+  This is the model-version history (win rate / profit factor / max
+  drawdown / training rows per version, per model type) — i.e. the
+  actual "training results" half of the request, and it existed but
+  was invisible.
 
-`lifecycleButtonSpec(undefined)` (`dashboard_src/src/lib/lifecycleControl.ts`)
-correctly returns its "unconfirmed state" default: `{ label: '…', tone:
-'transitioning', disabled: true }` — muted colors, `cursor-wait`. A
-prior fix (`fix/lifecycle-control-login-lockout`, already on `main`)
-correctly made this button *clickable* while unauthorized via
-`lifecycleButtonInert()`, so it still opens the login modal — but
-`LifecycleControl.tsx` kept sourcing the button's visible label/tone
-straight from `spec` regardless of auth state. Because `spec.disabled`
-is `true` in this default case, the old `!authorized && !spec.disabled
-? ' 🔒' : ''` suffix never rendered either. Net result: a real,
-correctly wired, clickable `<button>` with no visible affordance —
-label `…` in muted gray with a "wait" cursor — which reads as "loading,
-inert," not "click to log in." That is what the report describes as
-the start/stop/login button "not showing."
+Nothing here duplicates `SystemHealth.tsx`'s existing compact ML
+panel; that stays untouched. This tab is the dedicated, full view:
+per-model-type version history (previously nowhere in the UI),
+current-active-model detail, and full last-prediction detail.
 
-This is a visual-affordance gap only. The click handler, the login
-modal, and the actual START/STOP command flow were already correct.
+## What's new
 
-## Fix
+- `dashboard_src/src/pages/TrainMonitor.tsx` — new page/tab:
+  - Top row: ACTIVE/NONE per model type (meta_label, calibrator,
+    outcome_predictor — from the already-live `useML().status`),
+    dataset total/labelled row counts, and a session-local growth
+    counter (see below).
+  - "Model Training History" panel — tab-selectable per model type,
+    table of every recorded training run (version, created, algorithm,
+    rows, win rate, profit factor, max drawdown, active/retired,
+    notes) — from `api.mlModels()`, polled locally every 20s (same
+    page-local `useEffect`+`setInterval` pattern already used by
+    `TradeReplay.tsx`/`DebateRoom.tsx`/`Memory.tsx`).
+  - "Currently Active" panel — the active model's own metrics for
+    whichever type is selected, from the already-live
+    `useML().performance`.
+  - "Last Prediction" panel — full detail (action, label, raw vs.
+    calibrated confidence, outcome probability) with a live relative
+    timestamp (`timeAgo()`, already existed in `components/common`).
+- `dashboard_src/src/lib/trainMonitor.ts` — new, additive:
+  `computeRowsGrowth(firstObserved, current)`, a small pure function
+  for "dataset rows added since this tab was opened." Returns `null`
+  until a baseline exists (distinct from a real `0`, which means "no
+  growth yet" and must stay visible as such) — see its own tests.
+- `dashboard_src/src/lib/tests/trainMonitor.test.ts` — 5 new cases.
+- `dashboard_src/src/types/api.ts` — added `MLModelsData` (mirrors
+  `GET /api/ml/models`'s actual response shape exactly). No existing
+  type touched.
+- `App.tsx` / `Layout.tsx` — new route (`/train`) and nav entry
+  ("Train Monitor", short `TRN`), placed next to "AI Memory" in the
+  sidebar. No existing route or nav entry changed.
 
-`dashboard_src/src/lib/lifecycleControl.ts` — added (additive, no
-existing export touched) `lifecycleButtonDisplay(spec, authorized,
-pending)`: while unauthorized, always returns `{ label: 'LOGIN', tone:
-'login' }`, fully decoupled from `spec` (mirrors `handleClick()`'s
-existing posture, which never consults `spec.command` until after the
-authorized check). Once authorized, returns `spec`'s own label/tone
-unchanged — the authorized START/STOP/RESTART/pending flow is
-byte-for-byte identical to before this patch.
+## Why no invented "training is healthy" verdict
 
-`dashboard_src/src/components/commander/LifecycleControl.tsx` — added
-one new `login` entry to `TONE_CLASS` (`accent-blue`, clearly distinct
-from the muted "transitioning" style, no `cursor-wait`); button now
-renders `display.label` / `TONE_CLASS[display.tone]` from the new
-function instead of `spec.label` / `TONE_CLASS[spec.tone]` +
-manual 🔒-suffix logic. `lifecycleButtonSpec()` and
-`lifecycleButtonInert()` are untouched.
+The system's own watchdog (`system_health.watchdog`) tracks
+ALIVE/STALE/DEAD per subsystem using its own known heartbeat
+intervals — `main_loop`, `monitor_loop`, `trade_manager`, etc. There
+is no equivalent registered heartbeat for ML training, and this page
+doesn't know the real cadence well enough to safely invent one (would
+violate "never invent APIs/behavior that doesn't exist" — a wrong
+threshold is worse than no threshold). Instead this page shows the
+real, honest signals and lets the operator judge them: last-prediction
+raw timestamp + relative age, and dataset-row growth **observed by
+this page itself, over however long it's actually been open** — never
+a guessed "stuck" verdict.
 
 ## Files changed
 
-- `dashboard_src/src/lib/lifecycleControl.ts` (+43 lines, additive export)
-- `dashboard_src/src/components/commander/LifecycleControl.tsx` (+7/-4 lines)
-- `dashboard_src/src/lib/tests/lifecycleButtonDisplay.test.ts` (new file, 7 cases)
+- `dashboard_src/src/pages/TrainMonitor.tsx` (new)
+- `dashboard_src/src/lib/trainMonitor.ts` (new)
+- `dashboard_src/src/lib/tests/trainMonitor.test.ts` (new, 5 cases)
+- `dashboard_src/src/types/api.ts` (+4 lines, additive type)
+- `dashboard_src/src/App.tsx` (+2 lines: lazy import + route)
+- `dashboard_src/src/components/layout/Layout.tsx` (+1 line: nav entry)
 
 ## Tests executed
 
-- `npx vitest run` — before: 6 files / 66 passed. After: **7 files / 73
-  passed** (7 new, 0 modified, 0 removed — existing
-  `lifecycleControl.test.ts` untouched).
+- `npx vitest run` — before: 6 files / 66 passed. After: **7 files /
+  71 passed** (5 new, 0 modified, 0 removed).
 - `npx tsc --noEmit` — clean before and after.
-- `npm run build` (`tsc && vite build`) — clean production build,
-  443 modules transformed, no errors.
-- Python quality gates (`pytest tests/`, `ruff`, `vulture`) not
-  re-run: zero `.py` files in this diff, and both `ruff` and `vulture`
-  already exclude `dashboard_src`/`dashboard` per the project's
-  standing quality-gate config.
+- `npm run build` (`tsc && vite build`) — clean, 444 modules
+  transformed, new `TrainMonitor-*.js` chunk (~7.3 kB) code-splits
+  correctly as its own lazy route, same as every other page.
+- Re-verified after the rebase onto `ece01c9` (see Branch/Base above):
+  `tsc --noEmit`, `vitest run` (71 passed), and `npm run build` all
+  re-run clean against the new base, plus an independent second-clone
+  bundle-import verification.
+- Python quality gates not re-run: zero `.py` files in this diff;
+  `ruff`/`vulture` already exclude `dashboard_src`.
 
-## Known follow-up (found during investigation, NOT in this bundle)
+## Known follow-up (not in this bundle)
 
-`monitor_open_trades` / `daily_report` are currently failing in this
-same production session with `sqlite3.OperationalError: no such
-column: execution_lane` against `brain_bot_v13.db`. This is a
-different, unrelated, backend/Track A issue — reported separately in
-the accompanying chat message, not included in this fix's diff or
-commit, per the one-phase-one-commit discipline.
+`/ws/ml` (`api/app.py`) is documented as pushing ML advisor status
+"at 2s intervals" but its handler only ever sends one `init` frame and
+then blocks on `ws.receive_text()` — no periodic broadcast loop calls
+it. This page (and `SystemHealth.tsx`) work around it correctly via
+the 15s HTTP poll already in `useMLData()`, so nothing here is
+functionally broken by it, but the docstring doesn't match the
+implementation. Flagging, not fixing — unrelated to this phase and
+outside Track B's own files (`api/app.py` is Track A).

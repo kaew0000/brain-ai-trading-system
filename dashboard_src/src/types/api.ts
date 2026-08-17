@@ -30,6 +30,10 @@ export interface JournalData { symbol:string; performance:JournalPerformance; da
 export interface MLStatus { meta_label_active:boolean; calibrator_active:boolean; outcome_predictor_active:boolean; last_prediction:{timestamp:string;original_action:string;label:string;outcome_probability:number;raw_confidence:number;calibrated_confidence:number}|null; timestamp:string }
 export interface ModelInfo { id:number; created_at:string; model_type:string; version:string; active:number; algorithm:string; training_rows:number; win_rate:number; profit_factor:number; max_drawdown:number; notes:string }
 export interface MLPerformance { active_models:{meta_label:ModelInfo|null;confidence_calibrator:ModelInfo|null;outcome_predictor:ModelInfo|null}; dataset:{total_rows:number;labelled_rows:number}; timestamp:string }
+// V16 — Train Monitor tab. Mirrors GET /api/ml/models exactly (api/app.py
+// ml_models()): one version-history list per model type, newest first
+// (ml/model_registry.py::list_models() → ORDER BY id DESC).
+export interface MLModelsData { meta_label:ModelInfo[]; confidence_calibrator:ModelInfo[]; outcome_predictor:ModelInfo[]; timestamp:string }
 export interface PaperMetricsValues { total_trades:number; wins:number; losses:number; win_rate:number; profit_factor:number; sharpe_ratio:number; expectancy:number; max_drawdown:number; max_drawdown_pct:number; total_pnl:number; avg_pnl:number; avg_win:number; avg_loss:number; avg_rr:number; best_trade:number; worst_trade:number; account?:{balance:number;equity:number;day_pnl:number;day_pnl_pct:number;total_pnl:number;win_rate:number} }
 export interface PaperMetrics { enabled:boolean; metrics:PaperMetricsValues|null; reason:string|null }
 export interface Signal { id:number; timestamp:string; action:string; confidence:number; regime:string; entry_price:number }
