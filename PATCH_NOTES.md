@@ -1,125 +1,135 @@
-# PATCH NOTES — Track B: Train Monitor Dashboard Tab
+# PATCH NOTES — V16 Phase 4C: Automatic Migration Runner
 
-Branch: `feat/dashboard-train-monitor-tab`
-Base: `main` @ `ece01c9` (rebased — `origin/main` advanced past this
-branch's original `a88bb5b` base via PR #64 while this branch was in
-flight; rebased cleanly onto current `main` with conflicts in
-`CHANGELOG.md`, `MIGRATION.md`, `PATCH_NOTES.md` only — all three are
-per-phase snapshot/append docs that both phases touched independently.
-Resolved by stacking this phase's `CHANGELOG.md` entry above PR #64's
-(both kept, newest first, same pattern already established there), and
-keeping this phase's own `PATCH_NOTES.md`/`MIGRATION.md` content in
-full — same convention every prior phase in this repo has used;
-neither file is cumulative. No other file conflicted — PR #64 never
-touched `pages/`, `lib/trainMonitor.ts`, `types/api.ts`, `App.tsx`, or
-`components/layout/Layout.tsx`.)
+Branch: `feature/db-migration-auto-runner`
+Base: `main` @ `8920cd7` (merge of PR #65, Train Monitor Dashboard Tab)
 
 ## Scope note
 
-Requested directly ("add a Train Monitor tab to check training results
-and confirm the system is still training normally"). Track B
-(`dashboard_src/`) only — zero Track A / `.py` files touched, zero new
-backend routes. Everything this page shows was already served by
-existing, already-implemented endpoints; two of the three data sources
-were already being polled globally and simply never had anywhere to
-be seen.
+Requested directly: "ระบบมีปัญหาเมื่อรันใช้งานจริง ... ตรวจสอบและแก้ไขปัญหาด้าน
+database ของระบบ ให้อัพเกรด database ให้ใช้งานกับระบบได้ครบทุกส่วนของระบบล่าสุด"
+(production system has problems; inspect and fix database issues; upgrade
+the database so it works with every part of the latest system).
 
-## What already existed (inspected before writing anything)
+Track A only (`.py`). Zero `dashboard_src/` changes. Additive only — no
+existing writer, table, or migration script modified.
 
-- `GET /api/ml/status`, `GET /api/ml/performance` — already implemented
-  (`api/app.py`), already polled every 15s by `useMLData()`
-  (`hooks/useData.ts`, called from `useAllData()`), already stored in
-  the global `useML()` Zustand slice. `SystemHealth.tsx` already shows
-  a compact summary panel from this same data.
-- `GET /api/ml/models` — already implemented, already wired as
-  `api.mlModels()` in `lib/api.ts` — but **not called from any page**.
-  This is the model-version history (win rate / profit factor / max
-  drawdown / training rows per version, per model type) — i.e. the
-  actual "training results" half of the request, and it existed but
-  was invisible.
+A second, unrelated symptom was also reported in the same message
+("refresh the dashboard and it forces a re-login"). Inspected
+(`dashboard_src/src/lib/api.ts`, `dashboard_src/src/stores/index.ts`,
+`api/auth.py`) and confirmed this is a deliberate design choice — the
+bearer JWT is held in memory only, never `localStorage`/`sessionStorage`,
+specifically so a page reload can't be used to exfiltrate a stolen
+session token via XSS. It is unrelated to the database and is **not**
+addressed by this phase; tracked separately, pending owner decision on
+priority.
 
-Nothing here duplicates `SystemHealth.tsx`'s existing compact ML
-panel; that stays untouched. This tab is the dedicated, full view:
-per-model-type version history (previously nowhere in the UI),
-current-active-model detail, and full last-prediction detail.
+## Root cause (inspected before writing anything)
 
-## What's new
+`database/db.py::_apply_schema()` only ever runs `CREATE TABLE IF NOT
+EXISTS ...`, which is a no-op against a table that already exists. The
+W14-2D-1 phase added a `execution_lane TEXT NOT NULL CHECK(...)` column
+to `trades` / `signals` / `agent_decisions` / `feature_rows` /
+`ml_predictions` / `order_timeline_history`, and shipped a correct,
+idempotent migration for it
+(`database/migrations/migration_001_execution_lane_backfill.py`) — but
+**nothing in the codebase ever called it**. Confirmed by grep: the only
+references to that module, outside itself, were its own tests. Its own
+package docstring even says so explicitly: "Nothing in database/db.py
+invokes these automatically — an operator ... runs them explicitly."
 
-- `dashboard_src/src/pages/TrainMonitor.tsx` — new page/tab:
-  - Top row: ACTIVE/NONE per model type (meta_label, calibrator,
-    outcome_predictor — from the already-live `useML().status`),
-    dataset total/labelled row counts, and a session-local growth
-    counter (see below).
-  - "Model Training History" panel — tab-selectable per model type,
-    table of every recorded training run (version, created, algorithm,
-    rows, win rate, profit factor, max drawdown, active/retired,
-    notes) — from `api.mlModels()`, polled locally every 20s (same
-    page-local `useEffect`+`setInterval` pattern already used by
-    `TradeReplay.tsx`/`DebateRoom.tsx`/`Memory.tsx`).
-  - "Currently Active" panel — the active model's own metrics for
-    whichever type is selected, from the already-live
-    `useML().performance`.
-  - "Last Prediction" panel — full detail (action, label, raw vs.
-    calibrated confidence, outcome probability) with a live relative
-    timestamp (`timeAgo()`, already existed in `components/common`).
-- `dashboard_src/src/lib/trainMonitor.ts` — new, additive:
-  `computeRowsGrowth(firstObserved, current)`, a small pure function
-  for "dataset rows added since this tab was opened." Returns `null`
-  until a baseline exists (distinct from a real `0`, which means "no
-  growth yet" and must stay visible as such) — see its own tests.
-- `dashboard_src/src/lib/tests/trainMonitor.test.ts` — 5 new cases.
-- `dashboard_src/src/types/api.ts` — added `MLModelsData` (mirrors
-  `GET /api/ml/models`'s actual response shape exactly). No existing
-  type touched.
-- `App.tsx` / `Layout.tsx` — new route (`/train`) and nav entry
-  ("Train Monitor", short `TRN`), placed next to "AI Memory" in the
-  sidebar. No existing route or nav entry changed.
+Effect on an operator who pulls new code and restarts against an
+existing database file created before W14-2D-1: the file is silently
+left on the old schema, and the first write from `TradeJournalV2` (e.g.
+`save_trade()`, whose `INSERT` statement includes `execution_lane` with
+no fallback) raises
+`sqlite3.OperationalError: no such column: execution_lane`. This matches
+the previously-known issue with `monitor_open_trades()` /
+`daily_report()` in `main.py`.
 
-## Why no invented "training is healthy" verdict
+## What changed
 
-The system's own watchdog (`system_health.watchdog`) tracks
-ALIVE/STALE/DEAD per subsystem using its own known heartbeat
-intervals — `main_loop`, `monitor_loop`, `trade_manager`, etc. There
-is no equivalent registered heartbeat for ML training, and this page
-doesn't know the real cadence well enough to safely invent one (would
-violate "never invent APIs/behavior that doesn't exist" — a wrong
-threshold is worse than no threshold). Instead this page shows the
-real, honest signals and lets the operator judge them: last-prediction
-raw timestamp + relative age, and dataset-row growth **observed by
-this page itself, over however long it's actually been open** — never
-a guessed "stuck" verdict.
+### Added
+- `database/migrations/runner.py` — new, small, ordered registry module.
+  `run_pending_migrations(db_path=None)` runs every registered migration,
+  in order, against `db_path` (defaults to `database.db.get_db_path()`).
+  Currently registers exactly one migration
+  (`001_execution_lane_backfill`) — future migrations are added by
+  importing them and appending one `(id, migrate)` tuple to
+  `_MIGRATIONS`; nothing else in this module or its call site needs to
+  change.
+  - Idempotent as a whole (relies on `migration_001`'s own idempotency,
+    already covered by `tests/test_execution_lane_contract.py`) — safe
+    to call on every process boot.
+  - Raises on the first migration that fails; never continues startup
+    past a migration whose outcome is unknown. This is intentional:
+    starting live trading against a database in an unknown schema state
+    is worse than refusing to start.
+  - Standalone CLI: `python -m database.migrations.runner [db_path]` —
+    lets an operator apply pending migrations against a real production
+    file by hand, without booting the whole system, either as an
+    immediate fix before redeploying or as a diagnostic.
+- `tests/test_migration_runner.py` — 7 new tests covering the registry
+  itself (non-empty, well-formed), `run_pending_migrations()` against a
+  simulated legacy pre-W14-2D-1 file, idempotency across repeated calls
+  (simulating repeated boots), a brand-new/empty file (no-op, not an
+  error), default `db_path` resolution via `database.db.get_db_path()`,
+  and failure propagation (a broken migration raises and halts before
+  any later migration runs — never swallowed).
+  - Deliberately does **not** re-test `migration_001`'s own internal
+    correctness (rebuild-with-backfill, CHECK/NOT NULL enforcement) —
+    already covered by
+    `tests/test_execution_lane_contract.py::TestHistoricalMigrationBackfill`.
+    Duplicating those assertions here would be two tests guarding the
+    same behavior.
 
-## Files changed
+### Changed
+- `main.py::build_system()` — new step `[0/9] Database Schema
+  Migrations …` calls `run_pending_migrations()` before any other
+  component in this function opens a connection to the database file
+  (the `TradeJournal()`/`TradeJournalV2()` construction at `[6/9]` was
+  previously the earliest that happened). One new import
+  (`from database.migrations.runner import run_pending_migrations`), one
+  new call, zero lines removed, zero existing steps renumbered or
+  reordered.
 
-- `dashboard_src/src/pages/TrainMonitor.tsx` (new)
-- `dashboard_src/src/lib/trainMonitor.ts` (new)
-- `dashboard_src/src/lib/tests/trainMonitor.test.ts` (new, 5 cases)
-- `dashboard_src/src/types/api.ts` (+4 lines, additive type)
-- `dashboard_src/src/App.tsx` (+2 lines: lazy import + route)
-- `dashboard_src/src/components/layout/Layout.tsx` (+1 line: nav entry)
+## Verification
 
-## Tests executed
+- `pytest tests/`: 2590 passed (2583 baseline + 7 new), 45 deselected
+  (integration marker), same 3 pre-existing failures as baseline
+  (`tests/test_dashboard_serving.py` — require a `dashboard_src/dist/`
+  build not present in this environment; unrelated to this phase, fail
+  identically before this branch existed).
+- `ruff check . --exclude dashboard_src --exclude dashboard`: clean,
+  before and after.
+- `vulture . --exclude dashboard_src,dashboard,tests --min-confidence 80`:
+  clean, no hits on either new file.
+- `python3 -c "import main"`: OK, before and after.
+- Manual end-to-end sanity check against a simulated legacy database
+  file (old `trades` schema, no `execution_lane`): first call migrates
+  and backfills the existing row to `LIVE`; second call is a clean
+  `already_migrated` no-op. Matches the automated test coverage above.
+- Independent second-clone verification: see delivery message.
 
-- `npx vitest run` — before: 6 files / 66 passed. After: **7 files /
-  71 passed** (5 new, 0 modified, 0 removed).
-- `npx tsc --noEmit` — clean before and after.
-- `npm run build` (`tsc && vite build`) — clean, 444 modules
-  transformed, new `TrainMonitor-*.js` chunk (~7.3 kB) code-splits
-  correctly as its own lazy route, same as every other page.
-- Re-verified after the rebase onto `ece01c9` (see Branch/Base above):
-  `tsc --noEmit`, `vitest run` (71 passed), and `npm run build` all
-  re-run clean against the new base, plus an independent second-clone
-  bundle-import verification.
-- Python quality gates not re-run: zero `.py` files in this diff;
-  `ruff`/`vulture` already exclude `dashboard_src`.
+## What this does not fix
 
-## Known follow-up (not in this bundle)
-
-`/ws/ml` (`api/app.py`) is documented as pushing ML advisor status
-"at 2s intervals" but its handler only ever sends one `init` frame and
-then blocks on `ws.receive_text()` — no periodic broadcast loop calls
-it. This page (and `SystemHealth.tsx`) work around it correctly via
-the 15s HTTP poll already in `useMLData()`, so nothing here is
-functionally broken by it, but the docstring doesn't match the
-implementation. Flagging, not fixing — unrelated to this phase and
-outside Track B's own files (`api/app.py` is Track A).
+- The dashboard refresh/re-login issue — separate, frontend+backend
+  session-persistence design, not a database problem. See Scope note
+  above.
+- `analytics/trade_journal.py` (legacy `TradeJournal` V1) still opens
+  its own raw `sqlite3.connect()`, bypassing `database/db.py`'s WAL /
+  busy-timeout / write-lock protections. Still instantiated in
+  `main.py` and used for one read path
+  (`monitor_open_trades()`'s `journal.get_open_trades()` call in the
+  legacy single-symbol loop). Flagged during this phase's inspection,
+  left untouched — out of scope for a database-migration phase, and
+  fixing it means deciding whether to retire V1 entirely or route it
+  through `database/db.py`, which needs an explicit decision, not a
+  silent change.
+- `world/readers/base.py::SQLiteSource` also opens a raw connection
+  with no `busy_timeout` set. Same category, lower severity (read-only,
+  well-isolated). Also flagged, not fixed here.
+- Does not add a formal schema-version table (e.g. `PRAGMA
+  user_version` tracking) — `_MIGRATIONS`'s ordered-list-plus-per-table
+  idempotency-check approach was kept because it matches the existing,
+  already-tested pattern in `migration_001` exactly; a version-table
+  approach would be a bigger, separate design decision.

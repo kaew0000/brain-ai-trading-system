@@ -55,6 +55,7 @@ from execution.execution_factory import build_execution_engine
 from execution.trade_lifecycle import CloseSource
 from analytics.trade_journal import TradeJournal, TradeRecord
 from journal.journal_v2 import TradeJournalV2
+from database.migrations.runner import run_pending_migrations
 from journal.trade_attribution import agent_attribution_from_ceo_decision
 from risk.risk_engine import RiskEngine
 from utils.logger import get_logger
@@ -307,6 +308,21 @@ def build_system() -> dict:
     logger.info("=" * 62)
     logger.info(" Brain Bot BTCUSDT Futures v2 – System Bootstrap")
     logger.info("=" * 62)
+
+    # V16 Phase 4C: Automatic Migration Runner. Must run before ANY
+    # component below opens a connection to the database file (the
+    # TradeJournal()/TradeJournalV2() construction a few steps down is
+    # the earliest that previously happened) — otherwise a writer could
+    # observe (or even initialize, via CREATE TABLE IF NOT EXISTS) a
+    # pre-migration schema. Idempotent: on an already-migrated database
+    # this is a fast no-op every boot. Raises on real failure — startup
+    # must not proceed against a database in an unknown schema state.
+    # See database/migrations/runner.py's module docstring for the
+    # root-cause writeup (existing production database files created
+    # before W14-2D-1 never received the execution_lane column because
+    # nothing previously called migration_001 automatically).
+    logger.info("[0/9] Database Schema Migrations …")
+    run_pending_migrations()
 
     logger.info("[1/9] Data Layer …")
     data_provider = BinanceDataProvider()

@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C: Automatic Migration Runner
+
+Existing production database files created before W14-2D-1 never
+received the `execution_lane` column that phase added, because
+`database/db.py::_apply_schema()`'s `CREATE TABLE IF NOT EXISTS` is a
+no-op against tables that already exist, and nothing ever called the
+migration that was written for exactly this case
+(`migration_001_execution_lane_backfill.py`). First write from
+`TradeJournalV2` against such a file raised
+`sqlite3.OperationalError: no such column: execution_lane` — matches
+the known `monitor_open_trades()` / `daily_report()` failures. See
+`PATCH_NOTES.md` for the full root-cause writeup.
+
+### Added
+- `database/migrations/runner.py` — ordered migration registry;
+  `run_pending_migrations()` runs every registered migration, in
+  order, idempotently, against `database.db.get_db_path()` by default.
+  Raises on real failure rather than starting live trading against a
+  database in an unknown schema state. CLI:
+  `python -m database.migrations.runner [db_path]`.
+- `tests/test_migration_runner.py` — 7 new tests (registry shape,
+  legacy-file migration, idempotency across repeated boots, fresh-file
+  no-op, default path resolution, failure propagation).
+
+### Changed
+- `main.py::build_system()` — new `[0/9]` step calls
+  `run_pending_migrations()` before any component opens the database
+  file. No existing step renumbered, reordered, or modified.
+
+### Not in scope for this phase
+- Dashboard refresh forcing re-login — separate, unrelated root cause
+  (in-memory-only bearer JWT by design, not a database issue).
+- Legacy `TradeJournal` V1 (`analytics/trade_journal.py`) and
+  `world/readers/base.py::SQLiteSource` both still use raw
+  `sqlite3.connect()`, bypassing `database/db.py`'s WAL/lock
+  protections — flagged, not fixed this phase.
+
 ## [Unreleased] — Track B: Train Monitor Dashboard Tab
 
 New "Train Monitor" tab (`/train`) for checking ML training results
