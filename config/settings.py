@@ -457,6 +457,43 @@ class Settings(BaseSettings):
         default=30.0, alias="ORDER_RECONCILIATION_DEDUP_SECONDS"
     )
 
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-1 WS Ingestion ────────────────
+    # Off by default — same posture as ORDER_RECONCILIATION_ENABLED above.
+    # False = byte-identical to before this phase: no WebSocket connection
+    # is opened, api/app.py's lifespan() starts no new supervised task, and
+    # nothing in decision/execution is touched (HFT-1 does not wire into
+    # ConfidenceEngine at all — that is a later, separately-approved phase).
+    HFT_WS_ENABLED: bool = Field(default=False, alias="HFT_WS_ENABLED")
+    # Binance USDT-M Futures combined-stream base URL. Kept separate from
+    # BINANCE_TESTNET_BASE_URL/BINANCE_PROD_BASE_URL (REST) since the WS
+    # host differs from the REST host.
+    HFT_WS_BASE_URL: str = Field(
+        default="wss://fstream.binance.com/stream", alias="HFT_WS_BASE_URL"
+    )
+    HFT_WS_TESTNET_BASE_URL: str = Field(
+        default="wss://stream.binancefuture.com/stream", alias="HFT_WS_TESTNET_BASE_URL"
+    )
+    # Depth-diff update speed Binance publishes at: "100ms" or "250ms".
+    HFT_WS_DEPTH_SPEED: str = Field(default="100ms", alias="HFT_WS_DEPTH_SPEED")
+    # REST depth-snapshot levels fetched for initial sync/resync (see
+    # data/local_order_book.py's Binance-sequencing docstring).
+    HFT_WS_SNAPSHOT_LIMIT: int = Field(default=1000, alias="HFT_WS_SNAPSHOT_LIMIT")
+    # Local order-book state older than this is treated as invalid
+    # (feature_confidence=0 once HFT-2/HFT-3 consume this — see design
+    # review §10). Deliberately generous for HFT-1: this module only
+    # reconstructs the book, it does not yet score anything.
+    HFT_WS_DATA_AGE_LIMIT_MS: int = Field(default=5000, alias="HFT_WS_DATA_AGE_LIMIT_MS")
+    # Reconnect backoff (matches the shape of utils/retry.py's
+    # retry_api_call: exponential with a cap), applied by the supervised
+    # run loop in data/binance_ws_client.py.
+    HFT_WS_RECONNECT_DELAY_SECONDS: float = Field(default=2.0, alias="HFT_WS_RECONNECT_DELAY_SECONDS")
+    HFT_WS_RECONNECT_MAX_DELAY_SECONDS: float = Field(default=30.0, alias="HFT_WS_RECONNECT_MAX_DELAY_SECONDS")
+    # Rolling in-memory trade buffer per symbol, seconds. HFT-1 only stores
+    # raw parsed aggTrade events for this window — computing
+    # aggressive_buy_volume/CVD/trade_intensity FROM this buffer is HFT-2,
+    # not implemented here.
+    HFT_WS_TRADE_BUFFER_SECONDS: int = Field(default=60, alias="HFT_WS_TRADE_BUFFER_SECONDS")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -494,6 +531,12 @@ class Settings(BaseSettings):
     @property
     def base_url(self) -> str:
         return self.BINANCE_TESTNET_BASE_URL if self.BINANCE_TESTNET else self.BINANCE_PROD_BASE_URL
+
+    @property
+    def hft_ws_url(self) -> str:
+        """V16 Phase 4C Track B (HFT-1): mirrors `base_url`'s
+        testnet/mainnet selection, for the WebSocket host instead of REST."""
+        return self.HFT_WS_TESTNET_BASE_URL if self.BINANCE_TESTNET else self.HFT_WS_BASE_URL
 
 
 settings = Settings()
