@@ -69,8 +69,14 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 }
 
 # ── Action thresholds ─────────────────────────────────────────────────────────
-TRADE_THRESHOLD = 75     # confidence >= 75 → enter trade
-WAIT_THRESHOLD  = 50     # confidence >= 50 → wait (no entry, no skip)
+# W14-1 Item 13: now sourced from settings.CONFIDENCE_TRADE_THRESHOLD /
+# CONFIDENCE_WAIT_THRESHOLD (config/settings.py) instead of being hardcoded
+# here — see that setting's doc comment for why this is a risk-policy knob,
+# not a cosmetic one. These module constants remain as the settings
+# defaults (75/50) so any code that still imports them directly (none does
+# today, per repo-wide grep) sees the same historical value.
+TRADE_THRESHOLD = 75     # default; live value read from settings at call time
+WAIT_THRESHOLD  = 50     # default; live value read from settings at call time
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -214,9 +220,9 @@ class ConfidenceEngine:
             return result
 
         # ── Action ────────────────────────────────────────────────────────────
-        if result.confidence >= TRADE_THRESHOLD:
+        if result.confidence >= settings.CONFIDENCE_TRADE_THRESHOLD:
             result.action = direction   # "LONG" or "SHORT"
-        elif result.confidence >= WAIT_THRESHOLD:
+        elif result.confidence >= settings.CONFIDENCE_WAIT_THRESHOLD:
             result.action = "WAIT"
         else:
             result.action = "SKIP"
@@ -269,9 +275,9 @@ class ConfidenceEngine:
 
         if result.blocked:
             result.action = "BLOCKED"
-        elif result.confidence >= TRADE_THRESHOLD:
+        elif result.confidence >= settings.CONFIDENCE_TRADE_THRESHOLD:
             result.action = result.direction or "SKIP"
-        elif result.confidence >= WAIT_THRESHOLD:
+        elif result.confidence >= settings.CONFIDENCE_WAIT_THRESHOLD:
             result.action = "WAIT"
         else:
             result.action = "SKIP"

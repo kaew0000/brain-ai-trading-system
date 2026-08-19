@@ -66,8 +66,26 @@ class Settings(BaseSettings):
     VOLATILITY_RISK_FLOOR: float = Field(default=0.5)
 
     # ── Decision Thresholds ───────────────────────────────
+    # Legacy v1 pipeline (decision/brain_decision_engine.py) — 0-9 raw
+    # integer score scale. Unrelated to CONFIDENCE_TRADE_THRESHOLD below
+    # despite the similar name; kept as-is for backward compat.
     TRADE_THRESHOLD: int = Field(default=7)
     WAIT_THRESHOLD: int = Field(default=5)
+
+    # ── Confidence Engine Thresholds (decision/confidence_engine.py) ──────
+    # 0-100 weighted confidence scale ("confluence score" in operator
+    # terms — smc+volume+oi+funding+regime buckets summed). Was a
+    # hardcoded module constant (TRADE_THRESHOLD=75) until this setting
+    # was added; defaults preserve that exact prior behavior. Lowering
+    # CONFIDENCE_TRADE_THRESHOLD admits lower-confluence setups as real
+    # trade entries — a risk-policy change, not just a "find more
+    # candidates" change: it directly affects which signals the
+    # execution layer is willing to act on with real capital, especially
+    # combined with SCANNER_ENABLED/SCHEDULER_ENABLED/
+    # CEO_MULTI_SYMBOL_ENABLED (more symbols evaluated × lower bar to
+    # pass = materially higher trade frequency).
+    CONFIDENCE_TRADE_THRESHOLD: int = Field(default=75, alias="CONFIDENCE_TRADE_THRESHOLD")
+    CONFIDENCE_WAIT_THRESHOLD: int = Field(default=50, alias="CONFIDENCE_WAIT_THRESHOLD")
 
     # ── SMC ───────────────────────────────────────────────
     SWING_HL_COUNT: int = Field(default=10)
