@@ -714,6 +714,11 @@ async def config():
         "loop_interval_s":         settings.LOOP_INTERVAL,
         "trade_threshold":         settings.TRADE_THRESHOLD,
         "wait_threshold":          settings.WAIT_THRESHOLD,
+        # W14-1 Item 13: the actual 0-100 confluence gate execution acts on
+        # (decision/confidence_engine.py) — distinct from the legacy 0-9
+        # trade_threshold/wait_threshold pair above.
+        "confidence_trade_threshold": settings.CONFIDENCE_TRADE_THRESHOLD,
+        "confidence_wait_threshold":  settings.CONFIDENCE_WAIT_THRESHOLD,
         "risk_per_trade_min":      settings.RISK_PER_TRADE_MIN,
         "risk_per_trade_max":      settings.RISK_PER_TRADE_MAX,
         "max_daily_loss":          settings.MAX_DAILY_LOSS,
