@@ -58,6 +58,7 @@ async function login(apiKey: string): Promise<{ role: string; expiresAt: number 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ api_key: apiKey }),
+      credentials: 'include', // V16 Phase 4C — must receive the httpOnly refresh cookie
       signal: controller.signal,
     })
     clearTimeout(tid)
@@ -80,12 +81,99 @@ async function login(apiKey: string): Promise<{ role: string; expiresAt: number 
   }
 }
 
+/** V16 Phase 4C — Dashboard Session Persistence.
+ *
+ *  Root cause this fixes: _authToken above is deliberately in-memory
+ *  only (see this module's docstring above for why — never
+ *  localStorage/sessionStorage), so a page refresh always wiped it
+ *  and forced the operator to re-enter their API key, every time, even
+ *  seconds after they'd just logged in. That in-memory design is
+ *  unchanged by this fix.
+ *
+ *  What changed: login() above now also receives an httpOnly
+ *  refresh-token cookie (set by the backend — this module never reads
+ *  or writes it directly, the browser handles that automatically on
+ *  every same-origin request). This function silently exchanges that
+ *  cookie for a fresh Bearer token via POST /api/auth/session. Call it
+ *  once when the app mounts (see components/layout/Layout.tsx) —
+ *  before the operator does anything — so an existing session picks
+ *  back up automatically instead of showing the LOGIN button.
+ *
+ *  Because the cookie is httpOnly, this code (and any XSS payload
+ *  that might end up running in this page) still cannot read the
+ *  underlying credential value — only the browser can attach it to a
+ *  request. That's what keeps this from reopening the exact risk the
+ *  in-memory-only Bearer token design above was written to avoid.
+ *
+ *  Resolves true if a session was restored (role/expiresAt are now
+ *  populated exactly as after login()) or false if there was nothing
+ *  to restore (first-ever visit, cookie expired/revoked, or auth
+ *  disabled server-side). False is the ordinary, expected outcome for
+ *  most page loads — never throws for it, only a genuine network
+ *  failure propagates as a rejected promise... actually not even
+ *  that: network failures also resolve false, so callers never need
+ *  a try/catch around this. */
+async function restoreSession(): Promise<boolean> {
+  const controller = new AbortController()
+  const tid = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const r = await fetch(`${BASE}/api/auth/session`, {
+      method: 'POST',
+      credentials: 'include',
+      signal: controller.signal,
+    })
+    clearTimeout(tid)
+    if (!r.ok) return false // 401 no/expired/revoked cookie, or 400 auth disabled — both mean "not logged in"
+    const body = await r.json().catch(() => null)
+    const data = body?.data ?? {}
+    if (!data.token) return false
+    _authToken = data.token
+    _authRole = data.role ?? null
+    _authExpiresAt = data.expires_at ?? null
+    // V16 dashboard-auth-fix parity: a restored session is exactly as
+    // "logged in" as one from login() above — it needs the same
+    // proactive-rotation scheduling (or this session would silently die
+    // at JWT_EXPIRY_MINUTES with nothing ever refreshing it, the exact
+    // bug that fix closed) and the same 'login' notification (or
+    // ManagedWS's onAuthChange listener below never learns a token now
+    // exists and every /ws/* channel stays disconnected for the rest of
+    // the session, since it only (re)connects on an authenticated
+    // transition).
+    _scheduleRotate()
+    _notifyAuthChange('login')
+    return true
+  } catch {
+    clearTimeout(tid)
+    return false // network error on a silent background restore — fail closed to "not logged in", never surface as a hard error
+  }
+}
+
+/** Ends the session. Revokes the refresh-token cookie server-side via
+ *  POST /api/auth/logout (V16 Phase 4C) — clearing local state alone,
+ *  which is all this did before that phase, left the cookie itself
+ *  still valid and replayable. Local state is cleared first,
+ *  synchronously, so the UI reflects "logged out" immediately; the
+ *  revoke call is fire-and-forget best-effort after that — if it
+ *  never reaches the server (offline, server restarting), the cookie
+ *  simply expires on its own after JWT_REFRESH_EXPIRY_DAYS. */
 function logout(): void {
   _clearRotateTimer()
+  const hadSession = _authToken !== null
   _authToken = null
   _authRole = null
   _authExpiresAt = null
   _notifyAuthChange('logout')
+  if (!hadSession) return
+  // Promise.resolve(...) wraps the fetch() call defensively — a test
+  // double or non-standard fetch shim that doesn't return a real
+  // Promise (e.g. a bare vi.fn() with no configured resolved value)
+  // would otherwise throw synchronously on .catch() here and take the
+  // rest of logout()'s already-completed local cleanup down with it,
+  // even though local state is fully cleared by this point regardless
+  // of what fetch() does or doesn't return.
+  Promise.resolve(fetch(`${BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' })).catch(() => {
+    // best-effort — local state above is already cleared regardless
+  })
 }
 
 function authSnapshot(): { authenticated: boolean; role: string | null; expiresAt: number | null } {
@@ -262,6 +350,8 @@ export const api = {
   login,
   logout,
   authSnapshot,
+  // V16 Phase 4C — Dashboard Session Persistence.
+  restoreSession,
   sendCommand:    (cmd: string, params?: Record<string, unknown>) =>
     post('/api/command', { command: cmd, params }),
   chat:           (message: string) => post('/api/chat', { message }),

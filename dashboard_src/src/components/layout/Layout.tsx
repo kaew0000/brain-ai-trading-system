@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { useUI, useDecision, useHealth, useCommander } from '@/stores'
+import { useUI, useDecision, useHealth, useCommander, useAuth } from '@/stores'
 import { StatusDot, ActionBadge } from '@/components/common'
 import LifecycleControl from '@/components/commander/LifecycleControl'
 import LoginModal from '@/components/auth/LoginModal'
@@ -49,6 +49,16 @@ export default function Layout(){
   const lifecycleState=commanderState?.lifecycle_state
   const isLive=lifecycleState==='RUNNING'
   const [showLogin,setShowLogin]=useState(false)
+
+  // V16 Phase 4C — Dashboard Session Persistence. Runs once when the
+  // app shell mounts, before the operator does anything. Silently
+  // tries to restore an existing session from the httpOnly refresh
+  // cookie set by a previous login() — see stores/index.ts's
+  // restoreSession() and lib/api.ts's own docstring for the full
+  // root-cause writeup. No-op (leaves the LOGIN button showing,
+  // exactly as before this phase) if there's nothing to restore.
+  const restoreSession=useAuth(s=>s.restoreSession)
+  useEffect(()=>{restoreSession()},[restoreSession])
 
   return(
     <div className="flex h-screen overflow-hidden bg-surface bg-grid bg-grid">

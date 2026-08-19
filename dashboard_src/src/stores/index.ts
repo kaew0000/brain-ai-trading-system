@@ -181,6 +181,7 @@ interface AuthState {
   loggingIn: boolean
   login: (apiKey: string) => Promise<boolean>
   logout: () => void
+  restoreSession: () => Promise<void>
 }
 export const useAuth = create<AuthState>(set => ({
   role: null,
@@ -202,6 +203,22 @@ export const useAuth = create<AuthState>(set => ({
   logout: () => {
     api.logout()
     set({ role: null, expiresAt: null, error: null })
+  },
+  // V16 Phase 4C — Dashboard Session Persistence. Call once on app
+  // mount (see components/layout/Layout.tsx). Silently tries to
+  // restore an existing session from the httpOnly refresh cookie —
+  // never surfaces an error on failure, since "no existing session"
+  // is the ordinary, expected outcome (first-ever visit, expired
+  // cookie, never logged in on this browser), not a failed login
+  // attempt. State simply stays at its unauthenticated default when
+  // there's nothing to restore — same LOGIN-button UI as today, no
+  // changes needed there.
+  restoreSession: async () => {
+    const restored = await api.restoreSession()
+    if (restored) {
+      const { role, expiresAt } = api.authSnapshot()
+      set({ role, expiresAt, error: null })
+    }
   },
 }))
 

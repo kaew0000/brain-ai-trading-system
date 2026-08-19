@@ -30,8 +30,9 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
       >
         <div className="text-sm font-mono font-bold text-text-primary">Operator Login</div>
         <p className="text-[11px] text-text-muted">
-          Required to START/STOP the bot. Your API key is exchanged for a
-          session token — it is never stored on this device.
+          Required to START/STOP the bot. Your API key itself is never
+          stored — only a secure, revocable session, so refreshing this
+          page won't log you out.
         </p>
         <input
           autoFocus

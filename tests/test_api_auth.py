@@ -26,6 +26,8 @@ def auth_client():
     orig_keys    = dict(settings.API_KEYS)
     orig_secret  = settings.JWT_SECRET
     orig_expiry  = settings.JWT_EXPIRY_MINUTES
+    orig_refresh_expiry = settings.JWT_REFRESH_EXPIRY_DAYS
+    orig_cookie_secure  = settings.COOKIE_SECURE
 
     settings.API_AUTH_ENABLED = True
     settings.API_KEYS = {
@@ -35,7 +37,14 @@ def auth_client():
     }
     settings.JWT_SECRET = "test-secret-do-not-use-in-prod"
     settings.JWT_EXPIRY_MINUTES = 60
+    settings.JWT_REFRESH_EXPIRY_DAYS = 7
+    # TestClient talks to "http://testserver" (plain http) — a Secure
+    # cookie would be silently dropped by the client's cookie jar and
+    # every refresh-cookie test below would fail for an environment
+    # reason unrelated to what they're actually checking.
+    settings.COOKIE_SECURE = False
     auth_module._revoked_jti.clear()
+    auth_module._revoked_refresh_jti.clear()
 
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
@@ -44,7 +53,10 @@ def auth_client():
     settings.API_KEYS = orig_keys
     settings.JWT_SECRET = orig_secret
     settings.JWT_EXPIRY_MINUTES = orig_expiry
+    settings.JWT_REFRESH_EXPIRY_DAYS = orig_refresh_expiry
+    settings.COOKIE_SECURE = orig_cookie_secure
     auth_module._revoked_jti.clear()
+    auth_module._revoked_refresh_jti.clear()
 
 
 # ── API key auth ──────────────────────────────────────────────────────────
@@ -143,6 +155,115 @@ class TestBearerTokens:
     def test_rotate_without_token_rejected(self, auth_client):
         r = auth_client.post("/api/auth/rotate")
         assert r.status_code == 401
+
+
+# ── V16 Phase 4C — Dashboard Session Persistence (refresh-token cookie) ────
+#
+# Root cause: the bearer JWT above is deliberately browser-memory-only
+# (dashboard_src/src/lib/api.ts), so a page refresh always wiped it and
+# forced the operator to re-enter their API key. This section covers the
+# separate, longer-lived refresh token delivered as an httpOnly cookie —
+# see api/auth.py's own "Refresh tokens" section docstring for the full
+# design. TestClient behaves like a real browser's cookie jar across
+# requests made on the same client instance, which is what lets these
+# tests exercise the real login -> refresh -> logout flow end to end.
+
+class TestRefreshTokenSessionPersistence:
+    def test_login_sets_an_httponly_refresh_cookie(self, auth_client):
+        r = auth_client.post("/api/auth/token", json={"api_key": "test-viewer-key"})
+        assert r.status_code == 200
+        assert "refresh_token" not in r.json()["data"]       # never in the JSON body
+        assert "refresh_expires_at" not in r.json()["data"]
+        assert "brainbot_refresh" in auth_client.cookies
+
+    def test_session_endpoint_restores_a_session_from_the_cookie_alone(self, auth_client):
+        auth_client.post("/api/auth/token", json={"api_key": "test-operator-key"})
+
+        # A fresh request with no Authorization header at all — only the
+        # cookie the previous call set — must still succeed. This is the
+        # exact call the dashboard makes on page load after a refresh.
+        r = auth_client.post("/api/auth/session")
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["role"] == "OPERATOR"
+        assert "token" in data
+        assert "refresh_token" not in data   # rotated cookie, never in the body either
+
+    def test_session_endpoint_issues_a_usable_bearer_token(self, auth_client):
+        auth_client.post("/api/auth/token", json={"api_key": "test-operator-key"})
+        new_token = auth_client.post("/api/auth/session").json()["data"]["token"]
+
+        r = auth_client.post(
+            "/api/command", json={"command": "show risk"},
+            headers={"Authorization": f"Bearer {new_token}"},
+        )
+        assert r.status_code == 200
+
+    def test_session_endpoint_without_any_cookie_is_rejected(self, auth_client):
+        r = auth_client.post("/api/auth/session")
+        assert r.status_code == 401
+
+    def test_session_endpoint_rejects_a_bearer_token_used_as_the_cookie(self, auth_client):
+        tok = auth_client.post("/api/auth/token", json={"api_key": "test-viewer-key"}).json()["data"]["token"]
+        auth_client.cookies.set("brainbot_refresh", tok)
+
+        r = auth_client.post("/api/auth/session")
+        assert r.status_code == 401
+
+    def test_refresh_token_cannot_be_used_as_a_bearer_token(self, auth_client):
+        auth_client.post("/api/auth/token", json={"api_key": "test-viewer-key"})
+        refresh_value = auth_client.cookies["brainbot_refresh"]
+
+        r = auth_client.get("/api/config", headers={"Authorization": f"Bearer {refresh_value}"})
+        assert r.status_code == 401
+
+    def test_session_endpoint_rotates_the_refresh_cookie_on_every_use(self, auth_client):
+        auth_client.post("/api/auth/token", json={"api_key": "test-viewer-key"})
+        first_cookie = auth_client.cookies["brainbot_refresh"]
+
+        auth_client.post("/api/auth/session")
+        second_cookie = auth_client.cookies["brainbot_refresh"]
+
+        assert second_cookie != first_cookie
+
+    def test_a_rotated_away_refresh_cookie_cannot_be_replayed(self, auth_client):
+        auth_client.post("/api/auth/token", json={"api_key": "test-viewer-key"})
+        old_cookie = auth_client.cookies["brainbot_refresh"]
+        auth_client.post("/api/auth/session")   # rotates — old_cookie is now revoked
+
+        auth_client.cookies.set("brainbot_refresh", old_cookie)
+        r = auth_client.post("/api/auth/session")
+        assert r.status_code == 401
+
+    def test_logout_clears_the_cookie_and_ends_the_session(self, auth_client):
+        auth_client.post("/api/auth/token", json={"api_key": "test-viewer-key"})
+
+        r = auth_client.post("/api/auth/logout")
+        assert r.status_code == 200
+
+        r2 = auth_client.post("/api/auth/session")
+        assert r2.status_code == 401
+
+    def test_logout_also_revokes_the_presented_bearer_token(self, auth_client):
+        tok = auth_client.post("/api/auth/token", json={"api_key": "test-viewer-key"}).json()["data"]["token"]
+
+        auth_client.post("/api/auth/logout", headers={"Authorization": f"Bearer {tok}"})
+
+        r = auth_client.get("/api/config", headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 401
+
+    def test_logout_with_no_session_at_all_still_succeeds(self, auth_client):
+        r = auth_client.post("/api/auth/logout")
+        assert r.status_code == 200
+
+    def test_session_endpoint_public_when_auth_disabled_returns_400_not_500(self, auth_client):
+        from config.settings import settings as s
+        s.API_AUTH_ENABLED = False
+        try:
+            r = auth_client.post("/api/auth/session")
+            assert r.status_code == 400
+        finally:
+            s.API_AUTH_ENABLED = True
 
 
 # ── WebSocket auth ───────────────────────────────────────────────────────────

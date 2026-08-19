@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C: Dashboard Session Persistence
+
+Root cause: the dashboard's session Bearer JWT is held in browser JS
+memory only, by deliberate design (never localStorage/sessionStorage,
+to stop XSS-based theft of a long-lived session — see
+dashboard_src/src/lib/api.ts's own docstring). A page refresh always
+wiped it, and nothing existed to restore a session afterward, forcing
+the operator to re-enter their API key on every refresh. See
+PATCH_NOTES.md for the full writeup. Delivered as a companion to, but
+independent from, a separate database-migration phase/bundle
+(unrelated root cause, merged as PR #66). Rebased onto current `main`
+after two more rounds of upstream merges during this phase (PR #67-69);
+PR #67 (WS auth + proactive token rotation) touches the same file —
+see PATCH_NOTES.md's "`main` moved twice" section for how the two were
+integrated.
+
+### Added
+- `api/auth.py` — a separate, longer-lived refresh token, delivered
+  ONLY as an httpOnly cookie (unreadable by page JS, XSS included).
+  Rotates on every use (single-use per silent re-auth). `typ` claim
+  cross-checked both directions so a bearer token and a refresh token
+  can never be used as each other.
+- `POST /api/auth/session` — silently exchanges the refresh cookie for
+  a fresh bearer token; the dashboard calls this once on page load.
+- `POST /api/auth/logout` — now actually revokes the session
+  server-side (cookie + bearer token), not just local frontend state.
+- `config/settings.py` / `.env.example` — `JWT_REFRESH_EXPIRY_DAYS`
+  (default 7), `COOKIE_SECURE` (default true; false only for local
+  http:// dev).
+- `dashboard_src/src/lib/api.ts::restoreSession()` — called once on app
+  mount (`Layout.tsx`); never throws, resolves false when there's
+  nothing to restore (the ordinary case). Integrated with PR #67's
+  proactive-rotation/WS-reconnect system (`_scheduleRotate()`,
+  `_notifyAuthChange('login')`) so a restored session behaves exactly
+  like a freshly logged-in one.
+- 12 new backend tests (`tests/test_api_auth.py::TestRefreshTokenSessionPersistence`),
+  11 new frontend tests (10 in `src/lib/tests/api.test.ts`, 1 added to
+  PR #67's own `api.auth.test.ts` proving the WS-reconnect integration).
+
+### Changed
+- `dashboard_src/src/lib/api.ts` — `login()`/`logout()` now use
+  `credentials: 'include'`; `logout()` also revokes server-side.
+- `dashboard_src/src/components/auth/LoginModal.tsx` — copy updated to
+  match: the API key itself is still never stored, the session now is
+  (securely, revocably).
+
+### Removed
+- `api/auth.py::issue_token_for_api_key()` — superseded by
+  `issue_login_session()`. Confirmed zero other callers/test references
+  before removing.
+
+### Not in scope for this phase
+- The database schema-migration issue (separate phase/bundle).
+- Refresh-token reuse-detection/breach-alerting, CSRF tokens on the two
+  new endpoints (reasoned through — SameSite=Lax + no credentialed CORS
+  already covers the realistic attack surface), split-origin deployment
+  support. See PATCH_NOTES.md's "What this does not do".
+
 ## [Unreleased] — V16 Phase 4C: Automatic Migration Runner
 
 Existing production database files created before W14-2D-1 never

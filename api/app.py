@@ -66,7 +66,9 @@ from learning.application.recommendation_context import build_recommendation_set
 from learning.application.recommendation_metrics import get_recommendation_metrics
 from api.auth import (
     Role, AuthError, authenticate_request, enforce_ws_role,
-    issue_token_for_api_key, rotate_token, log_unauthorized,
+    issue_login_session, rotate_token, log_unauthorized,
+    refresh_session, revoke_refresh_cookie, revoke_bearer_from_header,
+    REFRESH_COOKIE_NAME,
 )
 from events.event_bus import get_event_bus
 from journal.journal_v2 import TradeJournalV2
@@ -454,6 +456,13 @@ _AUTH_PUBLIC_PATHS = {
     "/", "/dashboard", "/agents", "/debate", "/missions", "/portfolio",
     "/intelligence", "/memory", "/replay", "/commander", "/health", "/world",
     "/api/health", "/api/auth/token",
+    # V16 Phase 4C — both must be reachable with NO bearer token (that's
+    # the whole point: /session re-authenticates FROM the refresh cookie
+    # alone, and /logout must be able to end a session even if the
+    # caller's bearer token already expired). Each still requires its
+    # own valid refresh cookie internally — see their handlers below —
+    # this only exempts them from the blanket bearer/API-key check.
+    "/api/auth/session", "/api/auth/logout",
 }
 # (METHOD, path) pairs that require OPERATOR rather than VIEWER. Everything
 # else under /api/ defaults to VIEWER. WebSocket routes are handled
@@ -559,6 +568,38 @@ def _journal() -> TradeJournalV2:
 
 def _ok(data: dict | list, status: int = 200) -> JSONResponse:
     return JSONResponse(content={"ok": True, "data": data}, status_code=status)
+
+
+def _set_refresh_cookie(response: JSONResponse, token: str, expires_at: int) -> None:
+    """V16 Phase 4C. path="/api/auth" — the cookie is only ever needed
+    by the two handlers below, so it's never attached to (or exposed
+    on) any other request. secure follows settings.COOKIE_SECURE (see
+    config/settings.py — must be false for local http:// dev, browsers
+    silently refuse to persist a Secure cookie over plain HTTP)."""
+    max_age = max(0, int(expires_at - datetime.now(timezone.utc).timestamp()))
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=token,
+        max_age=max_age,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        path="/api/auth",
+    )
+
+
+def _respond_with_session(result: dict) -> JSONResponse:
+    """Shared by /api/auth/token and /api/auth/session: both return the
+    same {token, role, expires_at, jti, refresh_token, refresh_expires_at}
+    shape from api/auth.py — split it into the bearer token (JSON body,
+    as always) and the refresh token (httpOnly cookie ONLY, stripped
+    from the body before it's ever serialized)."""
+    refresh_token = result.pop("refresh_token")
+    refresh_expires_at = result.pop("refresh_expires_at")
+    resp = _ok(result)
+    _set_refresh_cookie(resp, refresh_token, refresh_expires_at)
+    return resp
+
 
 
 def _uptime_s() -> int:
@@ -676,12 +717,69 @@ async def auth_token(body: dict):
     process (reverse proxy rate limiting, etc.); this app doesn't add its
     own rate limiting here to avoid inventing a second, uncoordinated
     limiter on top of one you may already run at the proxy layer.
+
+    V16 Phase 4C: also sets an httpOnly refresh-token cookie (see
+    _set_refresh_cookie / api/auth.py's refresh-token section) so the
+    dashboard can silently re-authenticate via POST /api/auth/session
+    after a page refresh, without the operator re-entering their API
+    key. The refresh token itself never appears in this JSON body.
     """
-    result = issue_token_for_api_key((body or {}).get("api_key", ""))
+    result = issue_login_session((body or {}).get("api_key", ""))
     if result is None:
         log_unauthorized("/api/auth/token", "POST", "-", "invalid API key")
         raise HTTPException(status_code=401, detail="invalid API key")
-    return _ok(result)
+    return _respond_with_session(result)
+
+
+@app.post("/api/auth/session")
+async def auth_session(request: Request):
+    """
+    V16 Phase 4C — Dashboard Session Persistence. Silently exchanges the
+    httpOnly refresh-token cookie (set by POST /api/auth/token) for a
+    fresh bearer token — no API key re-entry. The dashboard calls this
+    once on page load; this is what stops a refresh from forcing the
+    operator to log in again. Root cause and full design:
+    api/auth.py's refresh-token section.
+
+    Returns the same shape as POST /api/auth/token. 401 if there is no
+    valid refresh cookie (never logged in this browser, cookie expired,
+    revoked, or API_AUTH_ENABLED is false) — the frontend treats a 401
+    here exactly like "not logged in" and shows the LOGIN button, same
+    as before this phase existed.
+    """
+    if not settings.API_AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="API_AUTH_ENABLED is false")
+    raw = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not raw:
+        raise HTTPException(status_code=401, detail="no session")
+    try:
+        result = refresh_session(raw)
+    except AuthError as exc:
+        log_unauthorized("/api/auth/session", "POST", "-", exc.reason)
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason)
+    return _respond_with_session(result)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    """
+    V16 Phase 4C — Explicit logout. Revokes the refresh-token cookie
+    server-side (a copied cookie value can't be replayed after this —
+    simply clearing it client-side, which is all logout did before this
+    phase, does not achieve that) and clears it. Also revokes the
+    caller's current bearer token if one is presented, so logout ends
+    the session rather than only discarding the frontend's in-memory
+    copy of a token that would otherwise remain valid until its own
+    expiry regardless.
+
+    Always returns 200 — logout is idempotent and never fails just
+    because there was nothing valid left to revoke.
+    """
+    revoke_refresh_cookie(request.cookies.get(REFRESH_COOKIE_NAME))
+    revoke_bearer_from_header(request.headers.get("authorization"))
+    resp = _ok({"logged_out": True})
+    resp.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/auth")
+    return resp
 
 
 @app.post("/api/auth/rotate")
