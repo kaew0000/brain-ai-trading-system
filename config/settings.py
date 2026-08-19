@@ -494,6 +494,23 @@ class Settings(BaseSettings):
     # not implemented here.
     HFT_WS_TRADE_BUFFER_SECONDS: int = Field(default=60, alias="HFT_WS_TRADE_BUFFER_SECONDS")
 
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-2 Microstructure Features ────
+    # Feature computation only (depth_imbalance, aggressive buy/sell,
+    # CVD/CVD-slope, trade_intensity) — no HFT_FLOW_SCORE, no
+    # ConfidenceEngine wiring; those are HFT-3/HFT-4, separately approved.
+    # Number of top-of-book price levels summed for depth_imbalance. Must
+    # be <= the max_levels a BinanceWSClient/LocalOrderBook was built with.
+    HFT_FLOW_DEPTH_LEVELS: int = Field(default=10, alias="HFT_FLOW_DEPTH_LEVELS")
+    # Rolling window used for aggressive_buy/sell_volume, delta, and
+    # trade_intensity. Deliberately shorter than HFT_WS_TRADE_BUFFER_SECONDS
+    # (the WS client's raw retention window) so this is a sub-window of it,
+    # not a mismatched/overlapping period.
+    HFT_FLOW_TRADE_WINDOW_SECONDS: int = Field(default=10, alias="HFT_FLOW_TRADE_WINDOW_SECONDS")
+    # EMA smoothing factor applied to the periodic delta measurement to
+    # produce cvd_slope (design review §5: "slope = short EMA of delta").
+    # Higher = more reactive/less smoothed.
+    HFT_FLOW_CVD_EMA_ALPHA: float = Field(default=0.3, alias="HFT_FLOW_CVD_EMA_ALPHA")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
