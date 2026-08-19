@@ -5,7 +5,7 @@
  * when data is reference-identical or semantically unchanged.
  */
 import { create } from 'zustand'
-import { api } from '@/lib/api'
+import { api, onAuthChange } from '@/lib/api'
 import type {
   DecisionData, SystemHealthData, MissionsData, AgentsData, TelemetryData,
   IntelligenceData, FuturesData, RegimeData, JournalData, SignalsData,
@@ -204,3 +204,22 @@ export const useAuth = create<AuthState>(set => ({
     set({ role: null, expiresAt: null, error: null })
   },
 }))
+
+// V16 dashboard-auth-fix — lib/api.ts now rotates the session token
+// proactively in the background (see api.ts's onAuthChange docstring).
+// login()/logout() above already update this store directly for the
+// user-initiated paths; this only needs to cover the two paths that
+// happen with no direct caller in this file:
+//   'rotate'        keep expiresAt truthful after a background refresh.
+//   'rotate_failed' the session died silently (server restart, network
+//                    outage through the whole refresh margin) — without
+//                    this, the UI would keep showing "signed in" while
+//                    every request now fails, letting an operator believe
+//                    a START/STOP click will go through when it can't.
+onAuthChange(({ reason, role, expiresAt }) => {
+  if (reason === 'rotate') {
+    useAuth.setState({ expiresAt })
+  } else if (reason === 'rotate_failed') {
+    useAuth.setState({ role, expiresAt, error: 'Session expired — sign in again to resume control.' })
+  }
+})
