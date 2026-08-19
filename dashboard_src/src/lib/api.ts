@@ -71,6 +71,8 @@ async function login(apiKey: string): Promise<{ role: string; expiresAt: number 
     _authToken = data.token
     _authRole = data.role ?? null
     _authExpiresAt = data.expires_at ?? null
+    _scheduleRotate()
+    _notifyAuthChange('login')
     return { role: _authRole as string, expiresAt: _authExpiresAt as number }
   } catch (err) {
     clearTimeout(tid)
@@ -79,13 +81,109 @@ async function login(apiKey: string): Promise<{ role: string; expiresAt: number 
 }
 
 function logout(): void {
+  _clearRotateTimer()
   _authToken = null
   _authRole = null
   _authExpiresAt = null
+  _notifyAuthChange('logout')
 }
 
 function authSnapshot(): { authenticated: boolean; role: string | null; expiresAt: number | null } {
   return { authenticated: _authToken !== null, role: _authRole, expiresAt: _authExpiresAt }
+}
+
+// ── Auth-change notifications (V16 dashboard-auth-fix) ──────────────────────
+//
+// Two independent bugs used to share one symptom: an unbroken stream of
+// `UNAUTHORIZED ... token expired` / `... missing credentials` WARNINGs in
+// the backend log (api/auth.py's log_unauthorized()) — self-inflicted by
+// this dashboard, not real intrusion attempts.
+//   1. ManagedWS (below) never carried a token at all, so every /ws/*
+//      handshake was rejected from the moment the page loaded, forever,
+//      login or not.
+//   2. Once a Bearer token's JWT_EXPIRY_MINUTES elapsed, nothing ever
+//      refreshed it, so every subsequent GET/POST kept sending the same
+//      dead token forever.
+// This pub/sub is the shared trigger both fixes hang off: ManagedWS
+// reconnects/disconnects on authenticated transitions, and useAuth
+// (stores/index.ts) reflects a forced expiry so the UI stops claiming
+// "signed in" once the session is actually dead.
+export type AuthChangeReason = 'login' | 'logout' | 'rotate' | 'rotate_failed'
+export interface AuthChangeEvent {
+  authenticated: boolean
+  role: string | null
+  expiresAt: number | null
+  reason: AuthChangeReason
+}
+const _authListeners = new Set<(e: AuthChangeEvent) => void>()
+
+function _notifyAuthChange(reason: AuthChangeReason): void {
+  const evt: AuthChangeEvent = {
+    authenticated: _authToken !== null,
+    role: _authRole,
+    expiresAt: _authExpiresAt,
+    reason,
+  }
+  _authListeners.forEach(h => h(evt))
+}
+
+/** Subscribe to auth state transitions (login/logout/rotate/forced
+ *  expiry). Returns an unsubscribe function. */
+export function onAuthChange(h: (e: AuthChangeEvent) => void): () => void {
+  _authListeners.add(h)
+  return () => _authListeners.delete(h)
+}
+
+// ── Proactive token rotation ─────────────────────────────────────────────────
+//
+// POST /api/auth/rotate (api/app.py — already implemented, not new) trades
+// the current Bearer token for a fresh one. It must run BEFORE
+// JWT_EXPIRY_MINUTES elapses: api/auth.py's rotate_token() decodes the
+// presented token first, so an already-expired token can't be rotated —
+// only re-issued via login(), and the raw API key is deliberately never
+// kept around client-side to do that automatically (see module docstring
+// above). ROTATE_MARGIN_S is how long before expiry we swap it out.
+const ROTATE_MARGIN_S = 60
+let _rotateTimer: ReturnType<typeof setTimeout> | null = null
+
+function _clearRotateTimer(): void {
+  if (_rotateTimer !== null) {
+    clearTimeout(_rotateTimer)
+    _rotateTimer = null
+  }
+}
+
+function _scheduleRotate(): void {
+  _clearRotateTimer()
+  if (!_authToken || !_authExpiresAt) return
+  const delayS = Math.max(_authExpiresAt - Math.floor(Date.now() / 1000) - ROTATE_MARGIN_S, 1)
+  _rotateTimer = setTimeout(_rotate, delayS * 1000)
+}
+
+async function _rotate(): Promise<void> {
+  if (!_authToken) return
+  try {
+    const r = await fetch(`${BASE}/api/auth/rotate`, { method: 'POST', headers: authHeaders() })
+    const body = await r.json().catch(() => null)
+    if (!r.ok || !body?.data?.token) {
+      throw new Error(body?.error || body?.detail || `rotate failed (HTTP ${r.status})`)
+    }
+    _authToken = body.data.token
+    _authExpiresAt = body.data.expires_at ?? null
+    _scheduleRotate()
+    _notifyAuthChange('rotate')
+  } catch {
+    // Couldn't refresh in time (server restart cleared the ephemeral
+    // JWT_SECRET, network blip through the whole margin, etc.) — go to a
+    // clean logged-out state instead of continuing to send a token that
+    // will now just fail with "token expired" on every request forever
+    // (the exact bug this fix replaces).
+    _authToken = null
+    _authRole = null
+    _authExpiresAt = null
+    _clearRotateTimer()
+    _notifyAuthChange('rotate_failed')
+  }
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -182,14 +280,13 @@ function withJitter(ms: number): number {
 export class ManagedWS {
   private ws:       WebSocket | null = null
   private handlers  = new Set<WsHandler>()
-  private url:      string
+  private path:     string
   private stopped   = false
   private delay     = WS_DELAY_MIN
   private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(path: string) {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    this.url = `${proto}://${window.location.host}${path}`
+    this.path = path
   }
 
   connect(): void {
@@ -198,8 +295,19 @@ export class ManagedWS {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+    // V16 dashboard-auth-fix: every /ws/* route needs the same credentials
+    // as /api/* (api/app.py's enforce_ws_role() sets at least a VIEWER
+    // floor on every channel). Browsers can't set a custom header on the
+    // WS handshake, so api/auth.py's _ws_credentials() accepts the bearer
+    // token as ?token=... instead (see that function's docstring). With no
+    // token yet, don't even attempt the handshake — that's the
+    // "missing credentials" WARNING loop this replaces. The onAuthChange
+    // listener below calls reconnect() the moment a token appears.
+    if (!_authToken) return
     try {
-      this.ws = new WebSocket(this.url)
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const url = `${proto}://${window.location.host}${this.path}?token=${encodeURIComponent(_authToken)}`
+      this.ws = new WebSocket(url)
 
       this.ws.onopen = () => {
         // Reset backoff on successful connection
@@ -282,4 +390,23 @@ export const wsSignals  = new ManagedWS('/ws/signals')
 // every other channel above already gets; no new WebSocket client code.
 export const wsWorld     = new ManagedWS('/ws/world')
 
-;[wsEvents, wsDecision, wsAgents, wsMissions, wsML, wsSignals, wsWorld].forEach(w => w.connect())
+const _wsChannels = [wsEvents, wsDecision, wsAgents, wsMissions, wsML, wsSignals, wsWorld]
+// No-ops per-channel until a token exists — see ManagedWS.connect().
+_wsChannels.forEach(w => w.connect())
+
+// V16 dashboard-auth-fix: open every channel the moment a session starts
+// (they've been sitting idle with no token, per connect() above), and
+// close them the moment it ends. Guarded on the authenticated boolean
+// actually transitioning — a routine background rotate() also fires
+// onAuthChange while staying authenticated the whole time, and an already
+// -open WS doesn't need to be torn down for that (api/auth.py only checks
+// credentials once, at the handshake, not per-frame).
+let _wsAuthenticated = false
+onAuthChange(({ authenticated }) => {
+  if (authenticated && !_wsAuthenticated) {
+    _wsChannels.forEach(w => w.reconnect())
+  } else if (!authenticated && _wsAuthenticated) {
+    _wsChannels.forEach(w => w.disconnect())
+  }
+  _wsAuthenticated = authenticated
+})
