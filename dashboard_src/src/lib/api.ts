@@ -247,6 +247,12 @@ export const api = {
   mlStatus:       () => get('/api/ml/status'),
   mlModels:       () => get('/api/ml/models'),
   mlPerformance:  () => get('/api/ml/performance'),
+  // V16 Track W14-1 Item 12 — PortfolioManager's decision-cycle log (Train
+  // Monitor's "what did the scanner/CEO consider this cycle" panel). This is
+  // NOT real account state — see PortfolioHistoryEntry's doc comment in
+  // types/api.ts. Reuses the existing, already-live /api/portfolio/history
+  // route (api/portfolio_api.py); no backend change.
+  portfolioHistory: (l = 30) => get(`/api/portfolio/history?limit=${l}`),
   forwardTest:    () => get('/api/forward_test'),
   commandState:   () => get('/api/command/state'),
   // V16 Track W14-1 Item 4/5 — real account/position telemetry, replaces

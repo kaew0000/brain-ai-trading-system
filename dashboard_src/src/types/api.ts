@@ -34,6 +34,37 @@ export interface MLPerformance { active_models:{meta_label:ModelInfo|null;confid
 // ml_models()): one version-history list per model type, newest first
 // (ml/model_registry.py::list_models() → ORDER BY id DESC).
 export interface MLModelsData { meta_label:ModelInfo[]; confidence_calibrator:ModelInfo[]; outcome_predictor:ModelInfo[]; timestamp:string }
+
+// ── V16 Track W14-1 Item 12: Train Monitor — scanner decision log ──────────
+// One entry of GET /api/portfolio/history. This is PortfolioManager's
+// decision-cycle log (which candidates it evaluated/selected this cycle),
+// NOT the real executed account state — that's api.accountState() /
+// GET /api/account/state. api/portfolio_serializers.py deliberately marks
+// every payload here `live:false` for exactly this reason; PortfolioHistoryEntry
+// mirrors serialize_history_entry()'s condensed shape field-for-field, no
+// new backend endpoint required.
+export interface PortfolioHistoryEntry {
+  decided_at: string
+  timestamp: string
+  blocked: boolean
+  block_reason: string | null
+  selected_count: number
+  rejected_count: number
+  replacement_count: number
+  total_capital_allocated: number
+  total_risk_allocated: number
+  diversification_score: number
+  portfolio_score: number
+  symbols: string[]
+}
+export interface PortfolioHistoryPage {
+  entries: PortfolioHistoryEntry[]
+  pagination: { limit:number; offset:number; returned:number; total:number|null; has_more:boolean }
+  source: string
+  live: boolean
+  as_of: string | null
+  note: string | null
+}
 export interface PaperMetricsValues { total_trades:number; wins:number; losses:number; win_rate:number; profit_factor:number; sharpe_ratio:number; expectancy:number; max_drawdown:number; max_drawdown_pct:number; total_pnl:number; avg_pnl:number; avg_win:number; avg_loss:number; avg_rr:number; best_trade:number; worst_trade:number; account?:{balance:number;equity:number;day_pnl:number;day_pnl_pct:number;total_pnl:number;win_rate:number} }
 export interface PaperMetrics { enabled:boolean; metrics:PaperMetricsValues|null; reason:string|null }
 export interface Signal { id:number; timestamp:string; action:string; confidence:number; regime:string; entry_price:number }

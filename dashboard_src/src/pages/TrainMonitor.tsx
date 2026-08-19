@@ -30,9 +30,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useML } from '@/stores'
 import { Panel, StatCard, DataTable, Empty, Loading, ConfBar, fmtPct, timeAgo } from '@/components/common'
+import { MiniChart } from '@/components/common/MiniChart'
 import { api } from '@/lib/api'
 import { computeRowsGrowth } from '@/lib/trainMonitor'
-import type { MLModelsData, ModelInfo, MLStatus } from '@/types/api'
+import type { MLModelsData, ModelInfo, MLStatus, PortfolioHistoryEntry } from '@/types/api'
 import clsx from 'clsx'
 
 const MODEL_TYPES = [
@@ -56,6 +57,30 @@ export default function TrainMonitor() {
         if (!cancelled) setModels(data as unknown as MLModelsData)
       } catch { /* keep last-known-good, same posture as every other poll in this app */ }
       if (!cancelled) setLoading(false)
+    }
+    load()
+    const id = setInterval(load, 20000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  // V16 Track W14-1 Item 12 — scanner/CEO decision-cycle log. Explicitly
+  // NOT real account state (see PortfolioHistoryEntry doc comment in
+  // types/api.ts and the warning banner rendered below it) — surfaces
+  // multi-symbol scanning activity (SCANNER_ENABLED/SCHEDULER_ENABLED/
+  // CEO_MULTI_SYMBOL_ENABLED) for training visibility without risking it
+  // being mistaken for the live portfolio shown elsewhere (Commander /
+  // api.accountState()).
+  const [portfolioHistory, setPortfolioHistory] = useState<PortfolioHistoryEntry[]>([])
+  const [portfolioHistoryLoading, setPortfolioHistoryLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const page = await api.portfolioHistory(30)
+        if (!cancelled) setPortfolioHistory((page as any)?.entries ?? [])
+      } catch { /* keep last-known-good */ }
+      if (!cancelled) setPortfolioHistoryLoading(false)
     }
     load()
     const id = setInterval(load, 20000)
@@ -172,6 +197,53 @@ export default function TrainMonitor() {
                 </div>
               </div>
             )}
+          </Panel>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-3 min-h-0">
+        <div className="col-span-12 xl:col-span-8 flex flex-col min-h-0">
+          <Panel
+            title="Scanner Decision Log — Not Real Positions"
+            icon="⚠"
+            accent="text-accent-gold"
+            className="h-full"
+            noPad
+          >
+            <div className="px-3 pt-2 pb-1 text-[10px] text-accent-gold/90 border-b border-border bg-accent-gold/5">
+              แสดง decision cycle ของ scanner/CEO (เหรียญที่ประเมิน/เลือกต่อรอบ)
+              ไม่ใช่พอร์ตเงินจริงที่กำลังถือ — ดูสถานะบัญชีจริงที่หน้า Commander
+            </div>
+            <div className="p-3 overflow-auto h-full">
+              {portfolioHistoryLoading ? <Loading /> : portfolioHistory.length === 0
+                ? <Empty text="No decision cycles persisted yet" />
+                : <DataTable
+                    cols={[
+                      { key: 'timestamp', label: 'Cycle', render: (r: PortfolioHistoryEntry) => <span className="text-text-muted">{timeAgo(r.timestamp)}</span> },
+                      { key: 'symbols', label: 'Symbols', render: (r: PortfolioHistoryEntry) => <span className="text-text-secondary">{r.symbols.length ? r.symbols.join(', ') : '—'}</span> },
+                      { key: 'selected_count', label: 'Selected', right: true },
+                      { key: 'rejected_count', label: 'Rejected', right: true },
+                      { key: 'blocked', label: 'Blocked', render: (r: PortfolioHistoryEntry) => r.blocked ? <span className="badge-red" title={r.block_reason ?? undefined}>BLOCKED</span> : <span className="text-text-muted text-[10px]">—</span> },
+                      { key: 'portfolio_score', label: 'Score', right: true, render: (r: PortfolioHistoryEntry) => <span className="font-mono">{r.portfolio_score.toFixed(1)}</span> },
+                    ]}
+                    rows={portfolioHistory}
+                    rowKey={(r: PortfolioHistoryEntry, i) => r.decided_at ?? String(i)}
+                  />}
+            </div>
+          </Panel>
+        </div>
+
+        <div className="col-span-12 xl:col-span-4 flex flex-col min-h-0">
+          <Panel title="Decision History Trend" icon="◈" accent="text-accent-blue" className="flex-1">
+            {portfolioHistoryLoading ? <Loading /> : portfolioHistory.length < 2
+              ? <Empty text="Not enough decision cycles yet for a trend" />
+              : <MiniChart
+                  series={[
+                    { label: 'Selected symbols/cycle', color: '#60a5fa', values: [...portfolioHistory].reverse().map(r => r.selected_count) },
+                    { label: 'Portfolio score', color: '#c084fc', values: [...portfolioHistory].reverse().map(r => r.portfolio_score) },
+                  ]}
+                  height={160}
+                />}
           </Panel>
         </div>
       </div>
