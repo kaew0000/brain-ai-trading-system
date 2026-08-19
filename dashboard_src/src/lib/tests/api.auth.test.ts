@@ -92,6 +92,23 @@ describe('module WS singletons react to login/logout', () => {
     expect(wsEvents.readyState).toBe('CONNECTING')
   })
 
+  // V16 Phase 4C — Dashboard Session Persistence. restoreSession() is a
+  // second, separate path into the exact same "now authenticated" state
+  // login() reaches (silently, from an httpOnly refresh cookie on page
+  // load, rather than an API key typed into the login form) — it needs
+  // to trigger the same onAuthChange('login') this describe block exists
+  // to cover, or a session restored after a page refresh would leave
+  // every /ws/* channel sitting disconnected for the rest of that
+  // session, with nothing here to catch a regression of that.
+  it('reconnect the instant restoreSession() succeeds', async () => {
+    ;(globalThis.fetch as any).mockResolvedValueOnce(authOk('tok-restored', NOW_S + 3600))
+
+    const restored = await api.restoreSession()
+
+    expect(restored).toBe(true)
+    expect(wsEvents.readyState).toBe('CONNECTING')
+  })
+
   it('disconnect on logout', async () => {
     ;(globalThis.fetch as any).mockResolvedValueOnce(authOk('tok-xyz', NOW_S + 3600))
     await api.login('some-api-key')

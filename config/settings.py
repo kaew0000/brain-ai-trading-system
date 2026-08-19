@@ -151,6 +151,22 @@ class Settings(BaseSettings):
     # secret and logs a critical warning (tokens won't survive a restart).
     JWT_SECRET: str = Field(default="", alias="JWT_SECRET")
     JWT_EXPIRY_MINUTES: int = Field(default=60, alias="JWT_EXPIRY_MINUTES")
+    # V16 Phase 4C: Session Persistence. The bearer JWT above stays
+    # short-lived and browser-memory-only (see dashboard_src/src/lib/
+    # api.ts's own docstring) — that design is unchanged. This is a
+    # SEPARATE, longer-lived refresh token, delivered only as an
+    # httpOnly cookie (never readable by page JS, so a page refresh
+    # doesn't lose it the way the in-memory bearer token does, and an
+    # XSS bug still can't read or exfiltrate it the way it could a
+    # bearer token sitting in localStorage/sessionStorage). See
+    # api/auth.py's refresh-token section for the full design.
+    JWT_REFRESH_EXPIRY_DAYS: int = Field(default=7, alias="JWT_REFRESH_EXPIRY_DAYS")
+    # Whether the refresh-token cookie is marked Secure (HTTPS-only).
+    # Defaults to True — browsers silently refuse to persist a Secure
+    # cookie set over plain HTTP, so this MUST be set to false in .env
+    # for local/dev deployments served over http:// (e.g.
+    # http://localhost:8000). Leave true for any real deployment.
+    COOKIE_SECURE: bool = Field(default=True, alias="COOKIE_SECURE")
 
     # ── Ensemble Decision Engine — Phase 4B proper (architecture.md §28) ───
     # Off by default: CEOAgent.WEIGHTS stays static until explicitly opted

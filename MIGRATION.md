@@ -1,84 +1,77 @@
-# MIGRATION — V16 Phase 4C: Automatic Migration Runner
+# MIGRATION — V16 Phase 4C: Dashboard Session Persistence
 
 ## Do you need to do anything?
 
-**Recommended: yes, once, right now — don't wait for a redeploy.**
-This phase makes future migrations apply automatically on every boot,
-but the *existing* production database file on your machine won't get
-today's fix until the process restarts on this new code. If you want
-the schema fixed immediately, without waiting to redeploy, run this by
-hand first:
+**One new setting to check, nothing to run.** Unlike the companion
+database-migration phase, there's no data to migrate — this only
+changes how the dashboard's session works.
+
+Add to `.env` (or confirm the defaults already suit you):
 
 ```
-python -m database.migrations.runner /path/to/your/brain_bot_v13.db
+JWT_REFRESH_EXPIRY_DAYS=7
+COOKIE_SECURE=true
 ```
 
-(Path is whatever `DATABASE_PATH` resolves to in your `.env` — default
-is `brain_bot_v13.db` in the working directory. If unset, falls back to
-`JOURNAL_DB_PATH`, default `brain_bot_journal.db` — check which one
-your deployment actually uses before running this.)
+- `JWT_REFRESH_EXPIRY_DAYS` — how many days the dashboard stays signed
+  in across page refreshes/browser restarts before the operator needs
+  to re-enter their API key again. Default 7; raise or lower to taste.
+- `COOKIE_SECURE` — **leave `true` for any real deployment.** Only set
+  to `false` if you're running the dashboard locally over plain
+  `http://` (e.g. `http://localhost:8000`) for dev/testing — browsers
+  silently refuse to persist a `Secure` cookie over a non-HTTPS
+  connection, which would silently break session persistence (the
+  operator would still be forced to log in on every refresh, exactly
+  the bug this phase fixes) with no visible error. If your dashboard is
+  served over `https://`, or through a reverse proxy that terminates
+  TLS, leave this `true`.
 
-Either way — manually now, or automatically on next boot once this
-branch is merged and deployed — this is **safe to run against your real
-production file**: idempotent, wraps each table rebuild in its own
-transaction with rollback on error, and only ever adds the
-`execution_lane` column + backfills existing rows to `'LIVE'` (approved
-classification: all historical data predates the dual-lane concept and
-was real money — see `docs/architecture.md`'s W14-2D-1 section). It
-never touches `result`, `pnl`, or any other existing column's values.
-
-**Back up the database file first anyway** — standard practice before
-any schema change to a live-money production database, independent of
-how well-tested the migration is.
-
-No new environment variables. No code outside `main.py` and
-`database/migrations/` touched.
+No database changes. No new dependencies (`PyJWT` was already a
+dependency, used for the existing bearer token). Rebuild the dashboard
+(`npm run build` in `dashboard_src/`) and restart the API process to
+pick this up — same as any other Track A + Track B change.
 
 ## What actually changed, mechanically
 
-Before: `database/migrations/migration_001_execution_lane_backfill.py`
-existed and was correct, but nothing ever called it. An operator's
-existing database file silently stayed on the pre-W14-2D-1 schema after
-pulling new code, and the first write to `trades` / `signals` /
-`agent_decisions` / `feature_rows` / `ml_predictions` /
-`order_timeline_history` raised `sqlite3.OperationalError: no such
-column: execution_lane`.
+Before: the dashboard's session token lived only in browser JS memory,
+by design (to keep it safe from XSS-based theft — never in
+`localStorage`/`sessionStorage`). A page refresh always cleared it, and
+nothing existed to restore a session afterward, so every refresh forced
+a fresh login with the operator's API key.
 
-After: `main.py::build_system()` calls
-`database.migrations.runner.run_pending_migrations()` as its very first
-step, before any other component opens the database file. On an
-unmigrated file, this transparently applies `migration_001` (and any
-future migration added to the registry) before the trading engine,
-journal, or API server ever touch it. On an already-migrated file, it's
-a fast no-op every boot — nothing to remember, nothing to run by hand
-going forward.
+After: login also sets a **separate**, longer-lived refresh token as an
+`httpOnly` cookie — a credential page JavaScript can never read, XSS
+included, so this doesn't reopen the risk the original in-memory design
+was avoiding. On page load, the dashboard silently exchanges that
+cookie for a fresh session token via a new endpoint
+(`POST /api/auth/session`) — no login form, no API key re-entry. The
+refresh cookie itself rotates (is replaced) every time it's used, so a
+copied/leaked cookie value only works once. Logging out now actually
+ends the session server-side (revokes both the cookie and the current
+session token) instead of only clearing local browser state.
 
 ## Rollback
 
-Revert `main.py`'s one new import line and the `[0/9]` block in
-`build_system()`. Delete `database/migrations/runner.py` and
-`tests/test_migration_runner.py`. `migration_001_execution_lane_backfill.py`
-itself is untouched and unaffected either way — this phase only adds a
-caller for it.
+Revert the changes to `api/auth.py`, `api/app.py`,
+`dashboard_src/src/lib/api.ts`, `dashboard_src/src/stores/index.ts`,
+`dashboard_src/src/components/layout/Layout.tsx`, and
+`dashboard_src/src/components/auth/LoginModal.tsx`. Remove
+`JWT_REFRESH_EXPIRY_DAYS` / `COOKIE_SECURE` from `config/settings.py`
+and `.env` (harmless to leave them — unused settings, nothing reads
+them if the rest is reverted). Rebuild the dashboard and restart.
 
-Rolling back does **not** un-migrate a database file that already had
-`migration_001` applied (by this phase's automatic runner, or by hand)
-— that migration is itself one-way by design (adds a NOT NULL column
-and backfills it; there is no stored "old" value to restore). This
-matches `migration_001`'s own pre-existing behavior, unchanged by this
-phase.
+Any refresh-token cookies already issued to browsers become simply
+unrecognized after a rollback (the endpoint that reads them,
+`POST /api/auth/session`, no longer exists) — browsers hold onto the
+cookie until it expires naturally (`JWT_REFRESH_EXPIRY_DAYS`) or the
+user clears cookies; it has no effect once nothing reads it. No manual
+cleanup needed.
 
 ## What this does not fix
 
-- The dashboard refresh/re-login issue — unrelated, separate root
-  cause (frontend + `api/auth.py` session design), not touched here.
-  See `PATCH_NOTES.md`'s Scope note.
-- Legacy `TradeJournal` V1's raw `sqlite3.connect()` usage
-  (`analytics/trade_journal.py`) and `world/readers/base.py`'s
-  `SQLiteSource` — both flagged during this phase's inspection as
-  bypassing `database/db.py`'s WAL/lock protections, both left
-  untouched. See `PATCH_NOTES.md`'s "What this does not fix" for the
-  full detail and why.
-- Does not change what any migration actually does to the schema —
-  purely wires up automatic invocation of migrations that already
-  existed (or will exist in the future).
+- The separate database-migration issue — see the companion
+  `feature/db-migration-auto-runner` phase's own `MIGRATION.md`.
+- See `PATCH_NOTES.md`'s "What this does not do" for the reasoned-through
+  scope boundaries (reuse-detection/breach-alerting, CSRF tokens,
+  split-origin deployment) — none of these are gaps that were missed,
+  they're documented, deliberate stopping points for this phase.

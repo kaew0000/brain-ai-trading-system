@@ -159,17 +159,36 @@ def issue_token(role: Role, subject: str = "dashboard") -> dict:
     now = int(time.time())
     exp = now + settings.JWT_EXPIRY_MINUTES * 60
     jti = uuid.uuid4().hex
-    payload = {"sub": subject, "role": role.name, "iat": now, "exp": exp, "jti": jti}
+    # "typ": "access" — V16 Phase 4C. Distinguishes this from a refresh
+    # token below (same secret signs both). See _decode_bearer()'s typ
+    # check and the refresh-token section's own docstring.
+    payload = {"sub": subject, "role": role.name, "typ": "access", "iat": now, "exp": exp, "jti": jti}
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
     return {"token": token, "role": role.name, "expires_at": exp, "jti": jti}
 
 
-def issue_token_for_api_key(raw_key: str) -> dict | None:
-    """POST /api/auth/token — exchange an API key for a short-lived bearer token."""
+def issue_login_session(raw_key: str) -> dict | None:
+    """POST /api/auth/token — exchange an API key for a full login
+    session: a short-lived bearer token AND a longer-lived refresh
+    token (V16 Phase 4C). Supersedes the old issue_token_for_api_key()
+    helper, which did only the bearer half and had exactly one caller
+    (api/app.py's auth_token() handler, updated in this phase) — folded
+    in here rather than kept alongside it to avoid two near-identical
+    "exchange a key for a token" entry points.
+
+    Returns None if raw_key doesn't match any configured API key.
+    Otherwise:
+        {
+          "token": ..., "role": ..., "expires_at": ..., "jti": ...,       # unchanged shape — JSON body, as before this phase
+          "refresh_token": ..., "refresh_expires_at": ...,                 # NEW — api/app.py MUST set this as an
+        }                                                                  # httpOnly cookie only, never in the JSON body.
+    """
     role = _lookup_api_key(raw_key)
     if role is None:
         return None
-    return issue_token(role)
+    access = issue_token(role)
+    refresh = issue_refresh_token(role)
+    return {**access, "refresh_token": refresh["token"], "refresh_expires_at": refresh["expires_at"]}
 
 
 def revoke_token(jti: str, exp: float) -> None:
@@ -183,6 +202,17 @@ def _decode_bearer(token: str) -> AuthContext:
         raise AuthError(401, "token expired")
     except jwt.InvalidTokenError:
         raise AuthError(401, "invalid token")
+
+    # V16 Phase 4C: a refresh token is signed with the same secret as a
+    # bearer token but must never work as one — it's meant to live only
+    # in the httpOnly cookie, exchanged for a bearer token via POST
+    # /api/auth/session, never presented directly as `Authorization:
+    # Bearer`. Tokens issued before this phase carry no "typ" claim at
+    # all; those are accepted (missing == legacy access token) since
+    # they're already short-lived and age out naturally within one
+    # JWT_EXPIRY_MINUTES window of this deploy.
+    if payload.get("typ") == "refresh":
+        raise AuthError(401, "refresh tokens cannot be used as a bearer token")
 
     _cleanup_revoked()
     jti = payload.get("jti")
@@ -210,6 +240,147 @@ def rotate_token(bearer_token: str) -> dict:
         except jwt.InvalidTokenError:
             pass
     return issue_token(ctx.role, subject=ctx.principal)
+
+
+# ── Refresh tokens (V16 Phase 4C — Dashboard Session Persistence) ────────
+#
+# Root cause this section fixes: the bearer JWT above is deliberately
+# held in browser memory only (see dashboard_src/src/lib/api.ts's own
+# docstring) — never localStorage/sessionStorage, so an XSS bug can't
+# exfiltrate a long-lived stolen session. That's correct and unchanged.
+# But it also means a page refresh wipes the token, forcing the
+# operator to re-enter their API key every time — the dashboard was
+# never actually meant to require that.
+#
+# A refresh token is a separate, longer-lived credential, delivered
+# ONLY as an httpOnly cookie (api/app.py sets/reads it — this module
+# never touches Request/Response/cookies directly, it only ever
+# receives or returns raw token strings). httpOnly means page JS
+# cannot read it under any circumstances, XSS included — so it doesn't
+# reintroduce the exact risk the in-memory-only design was avoiding.
+# POST /api/auth/session exchanges a valid refresh cookie for a fresh
+# bearer token with no API key re-entry; the dashboard calls this once
+# on load, silently, before falling back to showing the LOGIN button.
+#
+# Same in-memory revocation-registry pattern as _revoked_jti above —
+# doesn't survive a process restart. That's an accepted characteristic
+# of this whole file already (JWT_SECRET itself is ephemeral-per-process
+# when left unset), not a new trade-off introduced here.
+
+REFRESH_COOKIE_NAME = "brainbot_refresh"
+
+_revoked_refresh_jti: dict[str, float] = {}
+
+
+def _cleanup_revoked_refresh() -> None:
+    now = time.time()
+    for j in [j for j, exp in _revoked_refresh_jti.items() if exp < now]:
+        _revoked_refresh_jti.pop(j, None)
+
+
+def issue_refresh_token(role: Role, subject: str = "dashboard") -> dict:
+    now = int(time.time())
+    exp = now + settings.JWT_REFRESH_EXPIRY_DAYS * 86400
+    jti = uuid.uuid4().hex
+    payload = {"sub": subject, "role": role.name, "typ": "refresh", "iat": now, "exp": exp, "jti": jti}
+    token = jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
+    return {"token": token, "expires_at": exp, "jti": jti}
+
+
+def revoke_refresh_token(jti: str, exp: float) -> None:
+    _revoked_refresh_jti[jti] = exp
+
+
+def _decode_refresh(token: str) -> AuthContext:
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise AuthError(401, "refresh token expired")
+    except jwt.InvalidTokenError:
+        raise AuthError(401, "invalid refresh token")
+
+    if payload.get("typ") != "refresh":
+        # Mirror image of _decode_bearer's own check — a bearer token
+        # must not work here either. Unlike that check, this one is
+        # strict with no legacy exemption: nothing issued before this
+        # phase could ever have typ == "refresh".
+        raise AuthError(401, "not a refresh token")
+
+    _cleanup_revoked_refresh()
+    jti = payload.get("jti")
+    if jti and jti in _revoked_refresh_jti:
+        raise AuthError(401, "refresh token revoked")
+
+    try:
+        role = Role.from_str(payload.get("role", ""))
+    except ValueError:
+        raise AuthError(401, "refresh token has an invalid role claim")
+
+    return AuthContext(principal=payload.get("sub", "unknown"), role=role, method="refresh", jti=jti)
+
+
+def refresh_session(refresh_token: str) -> dict:
+    """POST /api/auth/session — exchange a valid refresh-token cookie for
+    a fresh bearer token, no API key re-entry. Raises AuthError if the
+    refresh token is missing/expired/revoked/malformed — the caller
+    (api/app.py) turns that into a 401, which the frontend treats
+    exactly like "never logged in" (show the LOGIN button).
+
+    Rotates the refresh token on every use: the presented one is
+    revoked and a new one issued alongside the new bearer token, so a
+    given refresh-token cookie value is only ever valid for a single
+    silent re-auth. This limits how long a leaked/stolen cookie value
+    stays useful without requiring full reuse-detection/breach
+    alerting (out of scope for this phase — see PATCH_NOTES.md).
+
+    Returns the same shape as issue_login_session() above.
+    """
+    ctx = _decode_refresh(refresh_token)  # raises AuthError on any problem
+    if ctx.jti:
+        revoke_refresh_token(ctx.jti, time.time() + 1)
+    access = issue_token(ctx.role, subject=ctx.principal)
+    new_refresh = issue_refresh_token(ctx.role, subject=ctx.principal)
+    return {**access, "refresh_token": new_refresh["token"], "refresh_expires_at": new_refresh["expires_at"]}
+
+
+def revoke_refresh_cookie(raw_token: str | None) -> None:
+    """POST /api/auth/logout — best-effort revoke of a refresh-token
+    cookie value. Always safe to call, including with None/garbage: a
+    missing or already-invalid cookie is a no-op, never an error —
+    logout must never fail because the cookie was already gone."""
+    if not raw_token:
+        return
+    try:
+        payload = jwt.decode(
+            raw_token, settings.JWT_SECRET, algorithms=["HS256"],
+            options={"verify_exp": False},
+        )
+    except jwt.InvalidTokenError:
+        return
+    jti = payload.get("jti")
+    if jti:
+        revoke_refresh_token(jti, payload.get("exp", time.time() + 1))
+
+
+def revoke_bearer_from_header(auth_header: str | None) -> None:
+    """POST /api/auth/logout — same idea as revoke_refresh_cookie() for
+    the caller's current bearer token (if any), so logout actually ends
+    that token's validity too instead of just discarding the
+    frontend's in-memory copy of a token that otherwise remains valid
+    until its own (short) expiry either way."""
+    token = _extract_bearer(auth_header)
+    if not token:
+        return
+    try:
+        payload = jwt.decode(
+            token, settings.JWT_SECRET, algorithms=["HS256"],
+            options={"verify_exp": False},
+        )
+    except jwt.InvalidTokenError:
+        return
+    jti = payload.get("jti")
+    if jti:
+        revoke_token(jti, payload.get("exp", time.time() + 1))
 
 
 # ── Shared resolution (HTTP + WS) ────────────────────────────────────────
