@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## [Unreleased] — V16 Phase 4C: Symbol-Aware SMC/OI Regime Strategy Adapter
+
+Root cause: `execution/strategy.py`'s `SMC_OI_Regime_Strategy.generate_signal()`
+calls `data_provider.get_all_market_data()`, which has no symbol
+argument and always reflects the single globally-configured symbol —
+the only thing that made this strategy unsafe to select for
+`ExecutionScheduler`'s multi-symbol path (see `docs/architecture.md`
+§25's "Scope boundary"). `data/binance_provider.py`'s
+`get_market_data_for(symbol)` already returns an identical-shape dict
+per arbitrary symbol; the rest of the pipeline it drives was already
+symbol-agnostic. See `PATCH_NOTES.md` for the full writeup, including
+one correction made to the original phase brief (`RegimeEngine.classify()`
+needs an explicit `symbol=` to activate its per-symbol HMM cache — a
+literal copy of the legacy call site would have silently pooled every
+symbol onto one shared model).
+
+### Added
+- `execution/smc_oi_regime_multi.py` — `SMCOIRegimeMultiAdapter`, a new
+  symbol-aware `SignalProvider` wrapping the same
+  `BrainDecisionEngine`/`RegimeEngine`/`SMCEngine`/`VolumeEngine`
+  pipeline `SMC_OI_Regime_Strategy` uses, but per-symbol.
+- `execution/strategy_registry.py` — new `"smc_oi_regime_multi"` entry
+  (`STRATEGY_NAME=smc_oi_regime_multi` to opt in). Safe for
+  `ExecutionScheduler`'s multi-symbol path, unlike the existing
+  `"smc_oi_regime"`.
+- 21 new tests (`tests/test_smc_oi_regime_multi.py`).
+
+### Changed
+- Nothing existing modified. `"smc_oi_regime"` /
+  `SMC_OI_Regime_Strategy` / `STRATEGY_NAME`'s default
+  (`"portfolio_signal_provider"`) are all unchanged.
+
 ## [Unreleased] — V16 Phase 4C: Dashboard Session Persistence
 
 Root cause: the dashboard's session Bearer JWT is held in browser JS

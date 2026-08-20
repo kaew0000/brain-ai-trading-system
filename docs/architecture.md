@@ -4191,3 +4191,90 @@ changes what data would feed it if enabled, not whether it's enabled),
 the knowledge-engine architecture, recommendation→outcome causal
 linkage, cross-symbol HMM behavior, or `get_ensemble_learning_dataset()`.
 W14-2D not implemented.
+
+## 42. Symbol-Aware SMC/OI Regime Strategy Adapter — V16 Phase 4C (2026-08-20)
+
+Closes the gap §25 documented as a "Scope boundary": `"smc_oi_regime"`
+(`SMCOIRegimeStrategyAdapter` wrapping `SMC_OI_Regime_Strategy`) reads
+one global `data_provider` with no `symbol` parameter, so it was
+registered for plugin-system completeness but explicitly marked unsafe
+for `ExecutionScheduler`'s multi-symbol path.
+
+### Root cause
+
+`execution/strategy.py`'s `SMC_OI_Regime_Strategy.generate_signal()`
+calls `self.data_provider.get_all_market_data()` — no symbol argument,
+always reflects the single globally-configured symbol
+(`config/settings.py`'s `SYMBOL`). Confirmed by reading the method
+directly: this is the *only* blocker. The pipeline it drives
+(`regime_engine.classify` → `smc_engine.analyze_mtf` →
+`volume_engine.analyze` → `decision_engine.decide`) consumes only the
+OHLCV/market dict passed to it, never `self.data_provider`.
+`data/binance_provider.py`'s `get_market_data_for(symbol)` (§ Phase 2F)
+already returns an identical-shape dict for an arbitrary symbol.
+
+### New module
+
+| File | Purpose |
+|---|---|
+| `execution/smc_oi_regime_multi.py` | `SMCOIRegimeMultiAdapter` — calls `get_market_data_for(symbol)` instead of `get_all_market_data()`, re-implements `generate_signal()`'s orchestration inline (does not modify or call through `SMC_OI_Regime_Strategy`, which stays single-symbol/global for any code depending on that exact contract). Never raises — matches `PortfolioSignalProvider.get_signal()`'s contract. |
+
+### Changes to existing modules
+
+| File | Change |
+|---|---|
+| `execution/strategy_registry.py` | `+"smc_oi_regime_multi"` registration (factory + module docstring section). `"smc_oi_regime"` / `SMCOIRegimeStrategyAdapter` byte-for-byte unchanged. |
+
+Neither `execution/strategy.py`, `data/binance_provider.py`,
+`execution/portfolio_signal_provider.py`, nor
+`execution/execution_orchestrator.py` were modified.
+`config/settings.py`'s `STRATEGY_NAME` default is unchanged
+(`"portfolio_signal_provider"`).
+
+### Correction to the pipeline as re-implemented, vs. a literal copy
+
+`generate_signal()` calls `regime_engine.classify(ohlcv["h1"])` with no
+`symbol=`. `RegimeEngine.classify()` has held a per-symbol-keyed HMM
+model cache since Phase 4B Step 3A specifically so multi-symbol callers
+can give each symbol an independently-fit model — passing `symbol=` is
+what activates it; omitting it pools every symbol onto one shared model
+(`regime/regime_engine.py`'s own docstring, and
+`execution/portfolio_signal_provider.py`'s module docstring, both
+document this; `tests/test_portfolio_signal_provider.py::
+TestSharedEngineInjection::test_injected_regime_engine_is_used` asserts
+`PortfolioSignalProvider` passes it). Since this module exists
+specifically to make the pipeline safe for multi-symbol use,
+`SMCOIRegimeMultiAdapter` passes `symbol=symbol` to `classify()` —
+deviating from the literal single-symbol call site it otherwise
+mirrors, to avoid reproducing the exact cross-symbol state-pooling bug
+this module exists to fix.
+
+### Testing
+
+21 new tests (`tests/test_smc_oi_regime_multi.py`) — registration/
+factory (mirrors `test_strategy_registry.py`'s pattern), happy path
+(LONG/SHORT → `ExecutionSignal`), no-signal path (SKIP/WAIT, and the
+`VOLATILE`+`confidence>0.75` skip short-circuiting before
+`decision_engine.decide()` is ever called), missing-entry-price path,
+symbol threaded to both `data_provider.get_market_data_for()` and
+`regime_engine.classify()` (regression guard for the correction above),
+safety guards (incomplete OHLCV, provider/engine exceptions caught not
+raised, one bad symbol doesn't affect another), and
+`decision_engine.decide()`'s exact call-kwarg shape.
+
+**Verified: `pytest tests/ -q` → 2623 passed, 3 failed** (2602 + 21 new;
+the 3 failures are pre-existing, unrelated `dashboard_src/dist` build-gap
+failures, present identically on `main` before this branch — see §
+Testing note in `PATCH_NOTES.md`). `ruff check .` → clean.
+`vulture` content-normalized diff vs. `main` → empty (0 new findings).
+
+### Next up
+
+- `STRATEGY_NAME=smc_oi_regime_multi` is available to opt into but not
+  the live default — switching `ExecutionScheduler`'s live strategy
+  selection is a separate decision for the project owner, not part of
+  this phase.
+- Everything §25's own "Next up" list carried forward and this phase
+  didn't touch (Ensemble Decision Engine extensions, Multi-Agent
+  Framework enhancements, Quant Research Pipeline scoping, AI
+  Self-Improvement human-approval gate) remains open.
