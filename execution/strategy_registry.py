@@ -37,6 +37,16 @@ main.py constructed directly before this phase):
     over — matches this project's existing convention (see
     commander/control_state.py's "Honesty about paper_mode_forced").
 
+"smc_oi_regime_multi" (V16 Phase 4C):
+    Wraps execution/smc_oi_regime_multi.py's SMCOIRegimeMultiAdapter.
+    Same decision pipeline as "smc_oi_regime"
+    (BrainDecisionEngine/RegimeEngine/SMCEngine/VolumeEngine) but calls
+    data_provider.get_market_data_for(symbol) per-call instead of the
+    single-symbol get_all_market_data() — IS safe to select for
+    ExecutionScheduler's multi-symbol path, unlike "smc_oi_regime".
+    Does not replace or modify "smc_oi_regime" / SMC_OI_Regime_Strategy;
+    both remain registered.
+
 Adding a new strategy
 ----------------------
 Call register_strategy(name, factory, description=...) with a
@@ -249,5 +259,33 @@ register_strategy(
         "single globally-configured symbol regardless of the `symbol` "
         "argument. Do not select for ExecutionScheduler; kept for "
         "plugin-system completeness / future single-symbol standalone use."
+    ),
+)
+
+
+# ── Built-in strategy: smc_oi_regime_multi (symbol-aware, V16 Phase 4C) ────
+
+def _build_smc_oi_regime_multi_adapter(**kwargs):
+    from execution.smc_oi_regime_multi import SMCOIRegimeMultiAdapter
+
+    required = ("decision_engine", "regime_engine", "smc_engine", "volume_engine", "data_provider")
+    missing = [k for k in required if kwargs.get(k) is None]
+    if missing:
+        raise ValueError(
+            f"'smc_oi_regime_multi' strategy requires {missing} — note this "
+            f"strategy is symbol-aware and safe for ExecutionScheduler's "
+            f"multi-symbol path (see class docstring)."
+        )
+    return SMCOIRegimeMultiAdapter(**{k: kwargs[k] for k in required})
+
+
+register_strategy(
+    "smc_oi_regime_multi",
+    _build_smc_oi_regime_multi_adapter,
+    description=(
+        "Symbol-aware BrainDecisionEngine adapter (execution/"
+        "smc_oi_regime_multi.py) — calls data_provider.get_market_data_for"
+        "(symbol) per call, unlike 'smc_oi_regime'. IS safe to select for "
+        "ExecutionScheduler's multi-symbol path."
     ),
 )
