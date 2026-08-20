@@ -111,3 +111,54 @@ def test_engine_reuses_same_microstructure_state_across_analyse_calls():
     t2 = t1 + [TradeEvent(price=100.0, qty=3.0, is_buyer_maker=False, trade_time_ms=1500)]
     r2 = engine.analyse(_market_data(), ws_snapshot=_snapshot(recent_trades=t2))
     assert r2.hft_flow.cvd == pytest.approx(r1.hft_flow.cvd + 3.0)
+
+
+def test_hft_flow_score_and_state_populated_when_ws_snapshot_passed():
+    """V16 Phase 4C Track B, HFT-3: FuturesIntelEngine.analyse() must fill
+    in hft_flow.score/.state (via HFTFlowScorer), not leave them at their
+    HFT-2 defaults, when a ws_snapshot is provided and feature_confidence
+    is positive."""
+    engine = FuturesIntelEngine()
+    snap = _snapshot(
+        best_bid=100.0, best_ask=100.5,
+        recent_trades=[TradeEvent(100.0, 5.0, False, __import__("time").time() * 1000)],
+    )
+    # Bias the book so depth_imbalance is unambiguously positive.
+    snap = SymbolWSSnapshot(
+        symbol=snap.symbol, best_bid=snap.best_bid, best_ask=snap.best_ask,
+        bid_levels=[(100.0, 9.0)], ask_levels=[(100.5, 1.0)],
+        recent_trades=snap.recent_trades, book_valid=True, sequence_valid=True,
+        stream_connected=True, data_age_ms=10,
+    )
+    result = engine.analyse(_market_data(), ws_snapshot=snap)
+    assert result.hft_flow.score != 0.0
+    assert result.hft_flow.score > 0   # positive book imbalance -> positive score
+
+
+def test_hft_flow_score_stays_zero_when_feature_confidence_zero():
+    """Backward-compat / safety check: an invalid book (e.g. sequence_valid
+    False) must still force score=0.0/state=NEUTRAL through the full
+    FuturesIntelEngine.analyse() call path, not just at the scorer's own
+    unit-test level."""
+    engine = FuturesIntelEngine()
+    snap = SymbolWSSnapshot(
+        symbol="BTCUSDT", best_bid=100.0, best_ask=100.5,
+        bid_levels=[(100.0, 100.0)], ask_levels=[(100.5, 1.0)],   # extreme imbalance
+        recent_trades=[], book_valid=True, sequence_valid=False, stream_connected=True,
+        data_age_ms=10,
+    )
+    result = engine.analyse(_market_data(), ws_snapshot=snap)
+    assert result.hft_flow.score == 0.0
+    assert result.hft_flow.state == "NEUTRAL"
+
+
+def test_score_still_zero_when_ws_snapshot_omitted():
+    """Re-confirms HFT-1/HFT-2's backward-compat guarantee still holds
+    after HFT-3's scorer wiring: omitting ws_snapshot entirely must leave
+    hft_flow (including score/state) at its all-default, fully-inert
+    state — identical to before HFT-3 existed."""
+    engine = FuturesIntelEngine()
+    result = engine.analyse(_market_data())
+    assert result.hft_flow.score == 0.0
+    assert result.hft_flow.state == "NEUTRAL"
+    assert result.hft_flow.feature_confidence == 0.0

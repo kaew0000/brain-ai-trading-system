@@ -511,6 +511,48 @@ class Settings(BaseSettings):
     # Higher = more reactive/less smoothed.
     HFT_FLOW_CVD_EMA_ALPHA: float = Field(default=0.3, alias="HFT_FLOW_CVD_EMA_ALPHA")
 
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-3 Flow Score ──────────────────
+    # Combines HFT-2's raw features (depth_imbalance, delta, cvd_slope,
+    # trade_intensity) into HFT_FLOW_SCORE (-100..+100) + a 5-state enum.
+    # Still NOT wired into decision/confidence_engine.py — that is a later,
+    # separately-approved phase (see the design review's roadmap: HFT-4 is
+    # shadow-mode telemetry with explicitly NO trading impact; decision
+    # integration comes after that).
+    #
+    # CALIBRATION CAVEAT (documented, not hidden): the *_NORMALIZER values
+    # below convert raw volume units (delta, cvd_slope) into a [-1, 1]
+    # range. Per the design review §17, no historical order-book/trade-flow
+    # data exists yet to calibrate these against real per-symbol volume
+    # distributions — these are placeholder defaults that MUST be reviewed
+    # against real recorded data (HFT-5's replay dataset, once it exists)
+    # before this score is trusted for anything beyond shadow-mode
+    # observation. depth_imbalance needs no normalizer (already [-1, 1] by
+    # construction in MicrostructureEngine).
+    HFT_FLOW_DELTA_NORMALIZER: float = Field(default=10.0, alias="HFT_FLOW_DELTA_NORMALIZER")
+    HFT_FLOW_CVD_SLOPE_NORMALIZER: float = Field(default=5.0, alias="HFT_FLOW_CVD_SLOPE_NORMALIZER")
+
+    # Combination weights (design review §6's MVP model: depth_imbalance +
+    # delta + cvd_slope as directional inputs; trade_intensity as a
+    # magnitude multiplier, not a 4th directional term — see
+    # HFT_FLOW_INTENSITY_REFERENCE below). Need not sum to 1.0 — the
+    # scorer normalizes by their sum, mirroring
+    # ConfidenceEngine._normalise_weights()'s own convention.
+    HFT_FLOW_WEIGHT_DEPTH_IMBALANCE: float = Field(default=0.30, alias="HFT_FLOW_WEIGHT_DEPTH_IMBALANCE")
+    HFT_FLOW_WEIGHT_DELTA: float = Field(default=0.35, alias="HFT_FLOW_WEIGHT_DELTA")
+    HFT_FLOW_WEIGHT_CVD_SLOPE: float = Field(default=0.35, alias="HFT_FLOW_WEIGHT_CVD_SLOPE")
+
+    # trade_intensity acts as a magnitude DAMPENER, not a directional
+    # input (design review §6): a quiet/thin market's directional reading
+    # is trusted less, but never fully zeroed (the floor below prevents
+    # that) — it should never be able to flip or invent a direction.
+    HFT_FLOW_INTENSITY_REFERENCE: float = Field(default=2.0, alias="HFT_FLOW_INTENSITY_REFERENCE")
+    HFT_FLOW_MIN_INTENSITY_MULTIPLIER: float = Field(default=0.3, alias="HFT_FLOW_MIN_INTENSITY_MULTIPLIER")
+
+    # State classification thresholds — matches the -100..+100 scale and
+    # 5-state enum specified for this phase. Symmetric for buy/sell sides.
+    HFT_FLOW_STRONG_THRESHOLD: float = Field(default=70.0, alias="HFT_FLOW_STRONG_THRESHOLD")
+    HFT_FLOW_MODERATE_THRESHOLD: float = Field(default=30.0, alias="HFT_FLOW_MODERATE_THRESHOLD")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

@@ -32,8 +32,12 @@ Currently implemented
 - hft_flow             : depth_imbalance, aggressive buy/sell volume, CVD +
                           CVD-slope, trade_intensity, spread/mid_price
                           (V16 Phase 4C Track B, HFT-2 — see
-                          features/microstructure_engine.py; score/state
-                          are NOT computed here, that is HFT-3)
+                          features/microstructure_engine.py), PLUS score
+                          (-100..+100) and a 5-state classification
+                          (HFT-3 — see features/hft_flow_scorer.py).
+                          Still NOT consumed by ConfidenceEngine or any
+                          decision/execution path — that is a separate,
+                          later, separately-approved phase.
 
 Output: FuturesIntelResult
 --------------------------
@@ -66,6 +70,7 @@ from dataclasses import dataclass, field, asdict
 from typing import TYPE_CHECKING
 
 from features.microstructure_engine import HFTFlowSignal, MicrostructureEngine
+from features.hft_flow_scorer import HFTFlowScorer
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -206,6 +211,7 @@ class FuturesIntelEngine:
 
     def __init__(self) -> None:
         self._microstructure = MicrostructureEngine()
+        self._hft_flow_scorer = HFTFlowScorer()
         logger.info("FuturesIntelEngine ready")
 
     # ── Public ────────────────────────────────────────────────────────────────
@@ -227,9 +233,14 @@ class FuturesIntelEngine:
         # sources gathered on the same cycle, not a dependency of one on
         # the other.
         if ws_snapshot is not None:
-            result.hft_flow = self._microstructure.compute(
+            raw_features = self._microstructure.compute(
                 symbol=getattr(ws_snapshot, "symbol", ""), snapshot=ws_snapshot
             )
+            # V16 Phase 4C Track B, HFT-3: fills in .score/.state on top of
+            # HFT-2's raw features. Still not consumed anywhere in the
+            # decision/execution path — see this module's docstring and
+            # features/hft_flow_scorer.py's own scope-discipline note.
+            result.hft_flow = self._hft_flow_scorer.score(raw_features)
 
         if not market_data:
             logger.warning("FuturesIntelEngine: empty market_data")
