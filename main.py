@@ -814,6 +814,7 @@ def run_trading_cycle(sys: dict) -> None:
                         regime_result  = regime_live,
                         ohlcv_h4       = ohlcv.get("h4"),
                         ohlcv_h1       = ohlcv["h1"],
+                        ws_snapshot    = _get_hft_ws_snapshot(settings.SYMBOL),
                     )
                     # Attach live position info so dashboard shows real uPnL.
                     # Normalized to the direction/quantity/entry_price shape
@@ -909,7 +910,32 @@ def run_trading_cycle(sys: dict) -> None:
             regime_result  = regime,
             ohlcv_h4       = ohlcv.get("h4"),
             ohlcv_h1       = ohlcv["h1"],
+            ws_snapshot    = _get_hft_ws_snapshot(settings.SYMBOL),
         )
+
+        # V16 Phase 4C Track B, HFT-4: shadow-mode telemetry only — this
+        # log line is the "complete telemetry" the design review's HFT-4
+        # acceptance criteria calls for (score, state, and every
+        # feature_confidence/validity field), observed here purely for
+        # review. It has no effect on `direction`, `decision`, or anything
+        # below this point — market_ctx["futures"]["hft_flow"] is not read
+        # again anywhere else in this function. Wrapped defensively so a
+        # logging/formatting issue here can never interrupt the cycle.
+        if settings.HFT_WS_ENABLED:
+            try:
+                _hft_flow = market_ctx.get("futures", {}).get("hft_flow", {})
+                if _hft_flow.get("feature_confidence", 0.0) > 0.0:
+                    logger.info(
+                        f"HFT_SHADOW | {settings.SYMBOL} | "
+                        f"score={_hft_flow.get('score')} state={_hft_flow.get('state')} "
+                        f"depth_imbalance={_hft_flow.get('depth_imbalance')} "
+                        f"delta={_hft_flow.get('delta')} cvd={_hft_flow.get('cvd')} "
+                        f"cvd_slope={_hft_flow.get('cvd_slope')} "
+                        f"trade_intensity={_hft_flow.get('trade_intensity')} "
+                        f"data_age_ms={_hft_flow.get('data_age_ms')}"
+                    )
+            except Exception as exc:
+                logger.debug(f"HFT-4 shadow telemetry logging skipped (non-fatal): {exc}")
 
         # ── 7. Direction from MTF consensus ───────────────────────────────────
         direction = market_ctx.get("mtf_direction", "")
@@ -1734,6 +1760,40 @@ def _normalize_open_position(raw_pos: dict | None, journal=None, trade_client=No
         "unrealizedProfit": raw_pos.get("unrealizedProfit"),
         "side":             raw_pos.get("side"),
     }
+
+
+def _get_hft_ws_snapshot(symbol: str):
+    """V16 Phase 4C Track B, HFT-4 (shadow mode): best-effort fetch of the
+    current WS-derived microstructure snapshot for `symbol`, for telemetry
+    purposes only — see intelligence/market_context_builder.py's module
+    docstring for the full shadow-mode scope note (this value flows into
+    market_context["futures"]["hft_flow"], observable via /api/signals and
+    the dashboard, but is not read by ConfidenceEngine/DecisionEngine/CEO).
+
+    Returns None (never raises) when: settings.HFT_WS_ENABLED is False (the
+    default — this function then does nothing, not even importing
+    api.app.get_hft_ws_client, matching HFT-1's "don't touch the network
+    unless the flag is on" discipline), the api server module isn't
+    importable yet (mirrors the existing `import api.app as _api_module`
+    try/except pattern used throughout this file for dashboard state
+    updates), or the WS client hasn't produced a usable snapshot yet (e.g.
+    still mid-connect). Every failure path here is non-fatal and logged at
+    debug level, not warning/error — a missing HFT snapshot is an expected,
+    ordinary condition (startup, reconnect, flag off), not an operational
+    problem, and must never affect or interrupt the trading cycle it's
+    called from.
+    """
+    if not settings.HFT_WS_ENABLED:
+        return None
+    try:
+        import api.app as _api_module
+        client = _api_module.get_hft_ws_client()
+        if client is None:
+            return None
+        return client.get_snapshot(symbol)
+    except Exception as exc:
+        logger.debug(f"HFT-4 shadow snapshot unavailable for {symbol} (non-fatal): {exc}")
+        return None
 
 
 def _publish_decision(bus: EventBus, decision, explanation, ctx: dict) -> None:
