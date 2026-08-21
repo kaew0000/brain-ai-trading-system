@@ -121,9 +121,22 @@ def test_extreme_hft_flow_produces_identical_confidence_result():
     result_with = ce.score(market_context=ctx_with, direction=direction,
                             entry_price=67000.0, stop_loss=66000.0, take_profit=69000.0)
 
+    # The decision-relevant outputs must be identical regardless of the
+    # extreme HFT flow reading — this is the actual "no trading impact"
+    # claim (updated for HFT-5: with the default weight of 0.0, breakdown
+    # legitimately GAINS a diagnostic "hft_flow": 0 entry whenever real WS
+    # data is present, per design — that's intended visibility, not a
+    # trading-relevant difference, so it's checked separately below rather
+    # than folded into a blanket dict-equality assertion).
     assert result_without.action == result_with.action
     assert result_without.confidence == result_with.confidence
-    assert result_without.breakdown == result_with.breakdown
+    assert "hft_flow" not in result_without.breakdown
+    assert result_with.breakdown.get("hft_flow") == 0
+    # Every other category's points must be byte-identical too.
+    shared_keys = set(result_without.breakdown) & set(result_with.breakdown)
+    assert shared_keys == set(result_without.breakdown)   # nothing else differs
+    for key in shared_keys:
+        assert result_without.breakdown[key] == result_with.breakdown[key]
 
 
 def test_extreme_bearish_hft_flow_also_produces_identical_result():

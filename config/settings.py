@@ -553,6 +553,40 @@ class Settings(BaseSettings):
     HFT_FLOW_STRONG_THRESHOLD: float = Field(default=70.0, alias="HFT_FLOW_STRONG_THRESHOLD")
     HFT_FLOW_MODERATE_THRESHOLD: float = Field(default=30.0, alias="HFT_FLOW_MODERATE_THRESHOLD")
 
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-5 Confidence Integration ──────
+    # First phase where hft_flow can actually influence a trading decision
+    # (via decision/confidence_engine.py) — deliberately double-gated so
+    # the shipped defaults are byte-identical to before this phase:
+    #   1. DEFAULT_WEIGHTS["hft_flow"] = 0.0 in confidence_engine.py itself
+    #      (not a settings field — matches that module's existing pattern
+    #      of a hardcoded module-level weights dict). At weight 0, the
+    #      additive term contributes exactly nothing regardless of score.
+    #   2. HFT_FLOW_CONTRADICTION_ENABLED below, off by default — the
+    #      separate reduce/block contradiction path (design review
+    #      Section 9's Hybrid Model C) does not run at all unless this is
+    #      explicitly turned on, independent of the weight above.
+    # A person enabling HFT flow for paper-lane validation sets a non-zero
+    # weight via ConfidenceEngine.update_weights() and/or turns this flag
+    # on — ConfidenceEngine itself has no notion of execution_lane, so lane
+    # scoping (paper-only) is an operational choice made by whoever
+    # configures the paper-trading profile, not something this engine can
+    # enforce internally.
+    HFT_FLOW_CONTRADICTION_ENABLED: bool = Field(default=False, alias="HFT_FLOW_CONTRADICTION_ENABLED")
+    # Two-tier structure, mirroring ConfidenceEngine._check_blocks()'s
+    # existing reduce-vs-hard-block pattern (design review Section 9):
+    # opposing-direction hft_flow magnitude >= REDUCE_THRESHOLD subtracts
+    # HFT_FLOW_CONTRADICTION_PENALTY_POINTS from the final confidence;
+    # magnitude >= BLOCK_THRESHOLD (a further, more extreme boundary)
+    # forces action=BLOCKED outright, added as one more entry alongside
+    # the existing FUTURES_BLOCK_LONG/SHORT and FUNDING_BLOCK_LONG/SHORT
+    # reasons already returned by _check_blocks(). Defaults reuse HFT-3's
+    # own STRONG threshold for the reduce tier (a strongly-opposing flow
+    # reading), with BLOCK_THRESHOLD set near saturation so only the most
+    # extreme, near-maximal disagreement escalates all the way to a block.
+    HFT_FLOW_CONTRADICTION_REDUCE_THRESHOLD: float = Field(default=70.0, alias="HFT_FLOW_CONTRADICTION_REDUCE_THRESHOLD")
+    HFT_FLOW_CONTRADICTION_BLOCK_THRESHOLD: float = Field(default=90.0, alias="HFT_FLOW_CONTRADICTION_BLOCK_THRESHOLD")
+    HFT_FLOW_CONTRADICTION_PENALTY_POINTS: int = Field(default=15, alias="HFT_FLOW_CONTRADICTION_PENALTY_POINTS")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
