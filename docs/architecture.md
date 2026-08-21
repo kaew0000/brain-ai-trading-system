@@ -4278,3 +4278,75 @@ Testing note in `PATCH_NOTES.md`). `ruff check .` → clean.
   didn't touch (Ensemble Decision Engine extensions, Multi-Agent
   Framework enhancements, Quant Research Pipeline scoping, AI
   Self-Improvement human-approval gate) remains open.
+
+## 43. Fix: Live Account Balance Reads 0.00 USDT — Diagnostics (2026-08-21)
+
+The live bot has never opened a single order. A 10MB production log
+(`logs/brain_bot.log.1`) shows the AI pipeline correctly generating
+LONG/SHORT decisions at 60–77% confidence, repeatedly over 30+ hours,
+and `execution/trade_manager.py` correctly and safely refusing every
+one of them (`Invalid qty=0.0`, 411 occurrences) because
+`balance=0.00`. `risk_pct × 0.00 = 0`, quantity always rounds below
+Binance's `minQty`. `trade_manager.py` is working exactly as designed
+— confirmed by reading `execute_trade()`'s rounding/refusal logic
+directly. The bug is entirely upstream, in how balance is obtained.
+
+### Root cause
+
+`data/binance_provider.py`'s `get_account_balance()` loops over
+`trade_client.balance(recvWindow=5000)`'s response for an
+`"asset" == "USDT"` entry. If none is found, it silently
+`return 0.0` — no log line at any level. The one existing log line on
+the success path was `logger.debug(...)`, and the production log is
+INFO level, so this code path was invisible in `logs/brain_bot.log`
+whether it was succeeding or silently failing. There was no way to
+tell, from the log alone, whether the account is genuinely empty, the
+API call is going to the wrong account/network, or the response shape
+differs from what the parser expects.
+
+### Five candidate causes (undetermined — see "Scope boundary" below)
+
+1. Futures wallet genuinely holds 0.00 USDT (funds elsewhere, or fully
+   committed as isolated margin on an existing untracked position).
+2. API key lacks Futures trading/read permission.
+3. Wrong environment (testnet keys vs. live base URL, or vice versa).
+   Partially ruled out by code inspection: `BinanceDataProvider.__init__`
+   already raises a `RuntimeError` at startup on an `EXECUTION_MODE` /
+   `BINANCE_TESTNET` mismatch (`BUG-V16-BP-05`), and the bot evidently
+   started and ran 30+ hours — so a *gross* mismatch didn't occur, but
+   a keys-valid-but-wrong-account variant (cause 5) isn't covered by
+   that guard.
+4. Binance Multi-Assets Mode changes the `balance()` response shape.
+5. Sub-account / master-account key mismatch.
+
+### What changed
+
+- `data/binance_provider.py`, `get_account_balance()`: the silent
+  `return 0.0` fallback now logs a `WARNING` including the asset names
+  actually returned (never balance figures — none were found on this
+  path). The success-path log promoted `DEBUG` → `INFO`. No
+  control-flow change.
+- `scripts/diagnose_balance.py` (new — first file in a new `scripts/`
+  directory): standalone operator script. Prints resolved environment
+  (`EXECUTION_MODE`, `BINANCE_TESTNET`, `base_url`, active API key
+  alias, whether it's set — never key material) and the full raw
+  `trade_client.balance()` response, with analysis pointing at which
+  of the 5 candidate causes it's consistent with. Manual-run only;
+  never called from the trading loop; never logs to
+  `logs/brain_bot.log`.
+- `tests/test_balance_zero_diagnostics.py` (new): 3 tests pinning the
+  new WARNING-on-empty-match and INFO-on-success behavior.
+
+### Scope boundary
+
+This sandbox has no network path to Binance's API (egress allowlist is
+GitHub/PyPI/npm only), so `trade_client.balance()` cannot be called
+here — none of the 5 candidate causes above could be confirmed or
+ruled out this phase. Per the originating phase brief's own
+instruction, work stops after making the failure observable (the
+logging fix) and building the diagnostic tool, rather than guessing at
+which of five semantically-different fixes applies. **Next up**: Kaew
+runs `scripts/diagnose_balance.py` against the live-configured account
+and reports the raw response; the actual Step-3 fix (which may not be
+a code change at all, if it turns out to be cause 2 or 5) gets scoped
+as its own follow-up phase once that's known.

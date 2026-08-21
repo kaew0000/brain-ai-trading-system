@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## [Unreleased] — Fix: Live Account Balance Reads 0.00 USDT (Blocks Every Trade)
+
+Root cause: `data/binance_provider.py`'s `get_account_balance()`
+silently `return 0.0` with no log line at any level whenever
+`trade_client.balance()`'s response contained no `"USDT"` entry —
+indistinguishable in `logs/brain_bot.log` from a genuinely empty
+account. This was the cause of every live order the bot ever attempted
+being skipped by `execution/trade_manager.py`'s `minQty` guard (411
+occurrences of `Invalid qty=0.0` in a single 10MB production log,
+covering 30+ hours of correctly-generated 60–77%-confidence LONG/SHORT
+decisions). `trade_manager.py`'s rounding/refusal logic itself was
+confirmed correct and untouched — the bug is entirely upstream, in how
+balance is obtained. See `PATCH_NOTES.md` for the full writeup,
+including why this phase deliberately stops short of identifying
+*which* of 5 candidate causes it is (no Binance network path from this
+sandbox — requires Kaew to run the new diagnostic script against the
+live account).
+
+### Added
+- `scripts/diagnose_balance.py` — standalone operator script (first
+  file in a new `scripts/` directory). Prints resolved environment
+  (`EXECUTION_MODE`, `BINANCE_TESTNET`, `base_url`, active API key
+  alias) and the full raw `trade_client.balance()` response, with
+  analysis pointing at which of 5 candidate root causes it matches.
+- 3 new tests (`tests/test_balance_zero_diagnostics.py`).
+
+### Changed
+- `data/binance_provider.py`'s `get_account_balance()`: the silent
+  zero-balance fallback now logs a `WARNING` (asset names only, never
+  balance figures). The success-path log promoted from `DEBUG` to
+  `INFO`. No control-flow change — same return values, same exceptions.
+
 ## [Unreleased] — V16 Phase 4C: Symbol-Aware SMC/OI Regime Strategy Adapter
 
 Root cause: `execution/strategy.py`'s `SMC_OI_Regime_Strategy.generate_signal()`

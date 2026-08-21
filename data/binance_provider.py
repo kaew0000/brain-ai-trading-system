@@ -404,8 +404,26 @@ class BinanceDataProvider:
             for asset in raw:
                 if asset.get("asset") == "USDT":
                     bal = float(asset.get("availableBalance", 0.0))
-                    logger.debug(f"Balance: {bal:.2f} USDT")
+                    logger.info(f"Balance: {bal:.2f} USDT")
                     return bal
+            # fix/live-balance-zero-diagnostics: this branch used to
+            # silently `return 0.0` with no log line at any level, which
+            # is indistinguishable from a genuinely empty account and was
+            # never visible in an INFO-level production log. Every real
+            # order this bot has ever attempted was skipped downstream by
+            # trade_manager.py's minQty guard because of exactly this path
+            # (see PATCH_NOTES.md for the production log evidence). Logging
+            # asset *names* only (never balance figures — none were found
+            # anyway) so the response shape is diagnosable from
+            # logs/brain_bot.log without needing DEBUG enabled. See
+            # scripts/diagnose_balance.py for a standalone deep-dive.
+            seen = [a.get("asset") for a in raw] if isinstance(raw, list) else type(raw).__name__
+            logger.warning(
+                f"get_account_balance: no 'USDT' entry in trade_client.balance() "
+                f"response — returning 0.0. Assets seen: {seen}. If this persists, "
+                f"run scripts/diagnose_balance.py to check BINANCE_TESTNET, API key "
+                f"permissions, and Multi-Assets Mode."
+            )
             return 0.0
         except CircuitBreakerOpen as exc:
             logger.warning(f"get_account_balance skipped — trade circuit open: {exc}")

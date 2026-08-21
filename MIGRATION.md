@@ -1,48 +1,44 @@
-# MIGRATION — V16 Phase 4C: Symbol-Aware SMC/OI Regime Strategy Adapter
+# MIGRATION — Fix: Live Account Balance Reads 0.00 USDT
 
 ## Do you need to do anything?
 
-**No — this phase is purely additive.** No settings changed, no schema
-changed, no existing behavior changed. `config/settings.py`'s
-`STRATEGY_NAME` default stays `"portfolio_signal_provider"`; the live
-bot's behavior is identical before and after this bundle is imported
-unless you deliberately opt in below.
+**Yes — one action required to actually diagnose the live problem.**
+This bundle does not (and cannot, from this sandbox) fix the root
+cause; it makes it observable and gives you a tool to find it.
 
-## Opting in (optional)
+## Step 1: Import this bundle, restart the bot
 
-A new strategy name, `"smc_oi_regime_multi"`, is now available wherever
-`STRATEGY_NAME` is read (`config/settings.py` / `.env`). It is safe to
-select for `ExecutionScheduler`'s multi-symbol path — unlike the
-existing `"smc_oi_regime"`, which is not and remains unchanged.
+No settings changed, no schema changed, no existing behavior changed
+for anything that was already working. `get_account_balance()` returns
+the exact same values it always did — the only change is that the
+previously-silent "no USDT entry found" path now logs a `WARNING`
+instead of nothing, and a successful read now logs at `INFO` instead
+of `DEBUG`. Safe to import and restart with zero behavior risk.
+
+## Step 2: Run the diagnostic script against your live-configured account
 
 ```
-STRATEGY_NAME=smc_oi_regime_multi
+python scripts/diagnose_balance.py
 ```
 
-Only set this if you specifically want `ExecutionScheduler` to run the
-`BrainDecisionEngine`/SMC-OI-regime pipeline per-symbol instead of the
-default `"portfolio_signal_provider"` pipeline. The two strategies use
-different decision logic (see `execution/strategy_registry.py`'s module
-docstring for both) and are not expected to produce identical signals
-for the same symbol/market conditions — this is a deliberate strategy
-choice, not a drop-in upgrade.
+Run this with the **same `.env`** the live bot uses (same
+`BINANCE_TESTNET`, same API keys). It prints:
+- Resolved `EXECUTION_MODE`, `BINANCE_TESTNET`, `base_url`, which API
+  key alias is active, and whether it's set (never the key itself).
+- The full raw `trade_client.balance()` response.
+- An analysis pointing at which of the 5 candidate causes (documented
+  in `PATCH_NOTES.md`) the response is consistent with.
 
-No database changes. No new dependencies. No frontend changes (Track A
-only this phase).
+## Step 3: Report back what it shows
 
-## Rollback
+Paste the script's output (redact nothing except you already don't
+need to — no key material is ever printed) so the actual fix can be
+scoped. The five candidate causes need different fixes — a parsing
+change, a `.env` value, or a Binance-side API key permission change
+that no code change can address — so this phase deliberately stops
+here rather than guessing.
 
-Revert `execution/strategy_registry.py` and delete
-`execution/smc_oi_regime_multi.py` and
-`tests/test_smc_oi_regime_multi.py`. If you set
-`STRATEGY_NAME=smc_oi_regime_multi` in `.env`, remove it (or set it back
-to `portfolio_signal_provider`) before rolling back the code, since an
-unrecognized `STRATEGY_NAME` will raise `KeyError: Unknown strategy` at
-`main.py`'s bootstrap.
+## New file: `scripts/`
 
-## What this does not fix
-
-See `PATCH_NOTES.md`'s "What this does not fix / does not do" for the
-full list of deliberate, reasoned-through scope boundaries (the
-pre-existing `dashboard_src/dist` build gap, the unchanged
-`"smc_oi_regime"` legacy adapter, the unchanged live default).
+This is the first file in a `scripts/` directory — none existed
+before this phase. Future one-off operator scripts should live here.
