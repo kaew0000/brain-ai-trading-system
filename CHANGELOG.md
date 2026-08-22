@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## [Unreleased] — Fix: ExecutionCoordinator Rejects Scanner-Discovered Symbols
+
+Root cause: `MarketScanner`/`OpportunityRanker` discover candidates
+across the full ~527-symbol Binance USDT-perpetual universe, but
+`ExecutionCoordinator.get_manager()` rejected any symbol outside
+`settings.symbol_list` (single symbol by default) with a `ValueError`
+— 37 occurrences across a 30-hour production log
+(`ZROUSDT`/`ESPUSDT`/`ARBUSDT`/`XLMUSDT`/`SUIUSDT`/`LINKUSDT`/`ENAUSDT`).
+Traced the full candidate-to-execution flow before fixing: confirmed no
+closer/safer choke point exists — `alloc.symbol` flows straight from
+the ranker's full universe to `ExecutionCoordinator`, which was always
+the only symbol-validation point. See PATCH_NOTES.md for the full
+writeup, including the explicit unboundedness decision (added a cap;
+`PORTFOLIO_MAX_POSITIONS` does not provide one, since it bounds
+concurrent positions, not cumulative distinct symbols over a
+long-running process).
+
+### Added
+- `ExecutionCoordinator.__init__`'s `allow_dynamic_symbols` (default
+  `False`) and `max_dynamic_symbols` (default `50`) parameters.
+- `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` / `EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS`
+  settings, matching `SCANNER_ENABLED`-style convention.
+- 13 new tests across `tests/test_execution_coordinator.py` (including
+  two concurrency/race tests) and `tests/test_execution_factory.py`.
+
+### Changed
+- `execution/execution_factory.py` wires the two new settings through
+  to `ExecutionCoordinator`. Default behavior unchanged for every
+  existing deployment.
+
 ## [Unreleased] — Fix: Dangling `signals_pre_w14_2d_1` FK Breaks Trade Journaling
 
 Root cause: `database/migrations/migration_001_execution_lane_backfill.py`

@@ -31,6 +31,12 @@ The returned object exposes:
   (symbol: added in V16 Phase 1, optional, only meaningful when
    ExecutionCoordinator is managing more than one symbol — see
    ExecutionCoordinator.execute_trade docstring)
+
+fix/execution-coordinator-symbol-mismatch: settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS
+(default False) controls whether the returned ExecutionCoordinator accepts
+a scanner/ranker-discovered symbol outside settings.symbol_list, instead
+of rejecting it — see execution/execution_coordinator.py's __init__
+docstring for the full design. Off by default: unchanged behavior.
 """
 
 from __future__ import annotations
@@ -72,7 +78,12 @@ def build_execution_engine(data_provider=None, paper_balance: float = 10_000.0):
                 f"EXECUTION_MODE={mode} requires a BinanceDataProvider instance"
             )
         from execution.execution_coordinator import ExecutionCoordinator
-        coordinator = ExecutionCoordinator(data_provider, symbols=settings.symbol_list)
+        coordinator = ExecutionCoordinator(
+            data_provider,
+            symbols=settings.symbol_list,
+            allow_dynamic_symbols=settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS,
+            max_dynamic_symbols=settings.EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS,
+        )
         mode_label = "Binance Testnet" if mode == "testnet" else "Binance LIVE ⚠️"
         logger.info(f"  → ExecutionCoordinator | {mode_label} | symbols={coordinator.symbols}")
         return coordinator

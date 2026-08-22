@@ -61,6 +61,33 @@ class TestExecutionFactory:
         with pytest.raises(RuntimeError, match="requires a BinanceDataProvider"):
             ef.build_execution_engine(data_provider=None)
 
+    def test_testnet_dynamic_symbol_settings_default_off(self, monkeypatch):
+        """fix/execution-coordinator-symbol-mismatch: with no explicit
+        opt-in, the coordinator build_execution_engine() returns must
+        have dynamic symbols OFF — same posture as every other
+        SCANNER_ENABLED-style flag in this project."""
+        from unittest.mock import MagicMock
+        ef = self._factory("testnet")
+        provider = MagicMock()
+        provider.client = MagicMock()
+        monkeypatch.setattr("config.settings.settings.SYMBOL", "BTCUSDT")
+        monkeypatch.setattr("config.settings.settings.SYMBOLS", None)
+        coordinator = ef.build_execution_engine(data_provider=provider)
+        assert coordinator._allow_dynamic_symbols is False
+
+    def test_testnet_wires_dynamic_symbol_settings_through_when_enabled(self, monkeypatch):
+        from unittest.mock import MagicMock
+        ef = self._factory("testnet")
+        provider = MagicMock()
+        provider.client = MagicMock()
+        monkeypatch.setattr("config.settings.settings.SYMBOL", "BTCUSDT")
+        monkeypatch.setattr("config.settings.settings.SYMBOLS", None)
+        monkeypatch.setattr("config.settings.settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS", True)
+        monkeypatch.setattr("config.settings.settings.EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS", 7)
+        coordinator = ef.build_execution_engine(data_provider=provider)
+        assert coordinator._allow_dynamic_symbols is True
+        assert coordinator._max_dynamic_symbols == 7
+
     def test_paper_starting_balance(self):
         ef = self._factory("paper")
         engine = ef.build_execution_engine(data_provider=None, paper_balance=5000.0)

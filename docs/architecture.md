@@ -4451,6 +4451,7 @@ finishing this phase, not Kaew's data.
 open, now joined by: confirm via `logs/brain_bot.log`'s `fk_repaired`
 line after the next real restart that this phase's repair actually
 ran against the live file as expected.
+
 ## 45. HFT Flow Trend Following — V16 Phase 4C Track B, HFT-1 through HFT-6 (2026-08-19 to 2026-08-22)
 
 **Problem.** Every derivatives-flow feature the bot had (`futures/futures_intel_engine.py`'s
@@ -4593,3 +4594,80 @@ throughout (confirmed present on unmodified `main` before this track
 started, unrelated to any of this work). World suite: 565/565, unchanged
 at every phase. ruff and vulture clean at every phase.
 
+## 46. Fix: ExecutionCoordinator Rejects Scanner-Discovered Symbols (2026-08-22)
+
+`MarketScanner` scans the full ~527-symbol Binance USDT-perpetual
+universe and `ExecutionScheduler` surfaces trade candidates from across
+it, but `ExecutionCoordinator` only knew about `settings.symbol_list`
+(single symbol, `['BTCUSDT']`, by default) — every scanner-discovered
+candidate on any other symbol failed at the execution step. 37
+occurrences across a 30-hour production log
+(`ZROUSDT`/`ESPUSDT`/`ARBUSDT`/`XLMUSDT`/`SUIUSDT`/`LINKUSDT`/`ENAUSDT`).
+
+### Root cause
+
+`execution/execution_coordinator.py`'s `get_manager()` already had a
+fully generic lazy-construct-and-cache-per-symbol pattern —
+`TradeManager(...)` construction works for any symbol string. The only
+blocker was the explicit membership check (`if symbol not in
+self._symbols: raise ValueError`) three lines above it — a deliberate
+V16 Phase 1 (Multi-Symbol Foundation) design choice, from before the
+Scanner/OpportunityRanker full-universe discovery phase existed.
+
+### Verified: the only choke point
+
+Traced the flow before writing code: `OpportunityRanker.rank()` →
+`PortfolioManager.decide()` → `ExecutionOrchestrator.execute()` →
+`_execute_allocation()` → `execution_engine.execute_trade(...,
+symbol=alloc.symbol)` — zero symbol filtering anywhere in between.
+`execution_orchestrator.py`'s `_NON_RECOVERABLE_MARKERS` already
+contains the literal string `"not configured on this coordinator"`
+(someone had already classified this exact failure as non-retryable) —
+confirmed this needs no change: still correct when the new flag is off,
+simply unused once a symbol is dynamically registered.
+
+### What changed
+
+- `ExecutionCoordinator.__init__`: new `allow_dynamic_symbols: bool =
+  False` and `max_dynamic_symbols: int = 50` params.
+- `get_manager()`: unconfigured symbol + flag off → raises exactly as
+  before (unchanged code path). Flag on → registers the symbol (inside
+  the existing `self._lock`, double-checked) and falls through to the
+  same unmodified construct-and-cache logic — no duplicated
+  `TradeManager(...)` line.
+- `config/settings.py`: `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` (default
+  False) / `EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS` (default 50),
+  matching `SCANNER_ENABLED`-style convention exactly.
+- `execution/execution_factory.py` wires both through.
+
+### Unboundedness decision (surfaced explicitly, not left implicit)
+
+Checked whether `PORTFOLIO_MAX_POSITIONS` (default 5) already bounds
+this: it doesn't — it bounds *concurrent* open positions, not the
+*cumulative distinct symbols* a long-running process could accumulate
+(`_symbols`/`_managers` are append-only, no eviction on position
+close). Checked `TradeManager.__init__`'s actual cost: cheap,
+no network call at construction (lazy, first `execute_trade()` only) —
+so the cap isn't primarily a resource safeguard. Decision: added an
+explicit cap anyway, because "which symbols can the live executor ever
+place a real order on" is a live-money scope-of-trading decision, not
+a pure implementation detail — matching this project's posture of an
+explicit, conservative-default dial for every new capability. Default
+50 (10× `PORTFOLIO_MAX_POSITIONS`, far short of the ~527-symbol
+universe). Beyond the cap: identical `ValueError` to today's, still
+caught by the unchanged `_NON_RECOVERABLE_MARKERS` classification.
+
+### Testing
+
+13 new tests (`tests/test_execution_coordinator.py`,
+`tests/test_execution_factory.py`) — flag-off regression guard, happy
+path, `health_check()`/`symbols` propagation, cap enforcement
+(including a re-fetch-doesn't-consume-budget case and a
+`max_dynamic_symbols=0` edge case), and two concurrency tests: 10
+threads racing to register the same new symbol (converges on one
+`TradeManager`, mirroring `tests/test_ceo_symbol_cache.py`'s existing
+race pattern) and 10 threads racing to register 10 different symbols
+against a cap of 3 (exactly 3 succeed, no overshoot).
+
+Default (`EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS=False`) leaves every
+existing deployment byte-for-byte unaffected — verified by test.

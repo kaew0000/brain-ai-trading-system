@@ -180,6 +180,161 @@ class TestExecutionCoordinatorManagerLifecycle:
                 ExecutionCoordinator(provider, symbols=[])
 
 
+class TestExecutionCoordinatorDynamicSymbols:
+    """fix/execution-coordinator-symbol-mismatch."""
+
+    def _make_coordinator(self, symbols=None, allow_dynamic_symbols=False, max_dynamic_symbols=50):
+        from execution.execution_coordinator import ExecutionCoordinator
+        provider, client = _make_mock_provider()
+        with patch("execution.execution_coordinator.settings") as ecs, \
+             patch("execution.trade_manager.settings") as tms:
+            ecs.symbol_list = symbols or ["BTCUSDT"]
+            _settings_patch(tms)
+            coordinator = ExecutionCoordinator(
+                provider, symbols=symbols,
+                allow_dynamic_symbols=allow_dynamic_symbols,
+                max_dynamic_symbols=max_dynamic_symbols,
+            )
+        return coordinator, client
+
+    def test_default_flag_off_still_raises(self):
+        """Regression guard: with allow_dynamic_symbols at its default
+        (False), behavior for an unconfigured symbol must be byte-for-byte
+        unchanged from before this phase — same ValueError, same message."""
+        coordinator, _ = self._make_coordinator(symbols=["BTCUSDT"])
+        with pytest.raises(ValueError, match="is not configured on this coordinator"):
+            coordinator.get_manager("ETHUSDT")
+        assert coordinator.symbols == ["BTCUSDT"]  # unchanged — nothing was registered
+
+    def test_dynamic_registration_succeeds_when_flag_on(self):
+        from execution.trade_manager import TradeManager
+        coordinator, _ = self._make_coordinator(symbols=["BTCUSDT"], allow_dynamic_symbols=True)
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            mgr = coordinator.get_manager("ETHUSDT")  # not in original ["BTCUSDT"]
+        assert isinstance(mgr, TradeManager)
+        assert mgr.symbol == "ETHUSDT"
+        assert "ETHUSDT" in coordinator.symbols
+
+    def test_dynamically_registered_symbol_is_cached_singleton(self):
+        coordinator, _ = self._make_coordinator(symbols=["BTCUSDT"], allow_dynamic_symbols=True)
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            mgr1 = coordinator.get_manager("ETHUSDT")
+            mgr2 = coordinator.get_manager("ETHUSDT")
+        assert mgr1 is mgr2
+
+    def test_dynamically_registered_symbol_appears_in_symbols_property(self):
+        coordinator, _ = self._make_coordinator(symbols=["BTCUSDT"], allow_dynamic_symbols=True)
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            coordinator.get_manager("ETHUSDT")
+        assert coordinator.symbols == ["BTCUSDT", "ETHUSDT"]
+        assert coordinator.default_symbol == "BTCUSDT"  # unchanged — dynamic registration never touches default
+
+    def test_dynamically_registered_symbol_appears_in_health_check(self):
+        """Brief's explicit ask: health_check() iterates self._symbols,
+        so a dynamically-added symbol should show up automatically."""
+        coordinator, _ = self._make_coordinator(symbols=["BTCUSDT"], allow_dynamic_symbols=True)
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            coordinator.get_manager("ETHUSDT")
+        health = coordinator.health_check()
+        assert set(health.keys()) == {"BTCUSDT", "ETHUSDT"}
+        assert health["ETHUSDT"]["manager_created"] is True
+        assert health["ETHUSDT"]["is_default"] is False
+
+    def test_cap_reached_raises_same_error_type_as_unconfigured(self):
+        coordinator, _ = self._make_coordinator(
+            symbols=["BTCUSDT"], allow_dynamic_symbols=True, max_dynamic_symbols=1,
+        )
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            coordinator.get_manager("ETHUSDT")  # 1st dynamic registration — fills the cap
+            with pytest.raises(ValueError, match="dynamic-symbol cap"):
+                coordinator.get_manager("SOLUSDT")  # 2nd — cap already reached
+        assert coordinator.symbols == ["BTCUSDT", "ETHUSDT"]  # SOLUSDT never got added
+
+    def test_cap_does_not_count_re_requests_of_already_registered_symbol(self):
+        """Re-fetching an already-dynamically-registered symbol must not
+        consume additional cap budget — only genuinely NEW symbols count."""
+        coordinator, _ = self._make_coordinator(
+            symbols=["BTCUSDT"], allow_dynamic_symbols=True, max_dynamic_symbols=1,
+        )
+        with patch("execution.trade_manager.settings") as tms:
+            _settings_patch(tms)
+            coordinator.get_manager("ETHUSDT")
+            coordinator.get_manager("ETHUSDT")  # same symbol again — must not raise
+            coordinator.get_manager("ETHUSDT")
+        assert coordinator.symbols == ["BTCUSDT", "ETHUSDT"]
+
+    def test_zero_cap_falls_back_to_unconfigured_error_immediately(self):
+        coordinator, _ = self._make_coordinator(
+            symbols=["BTCUSDT"], allow_dynamic_symbols=True, max_dynamic_symbols=0,
+        )
+        with pytest.raises(ValueError, match="dynamic-symbol cap"):
+            coordinator.get_manager("ETHUSDT")
+
+    def test_concurrent_registration_of_same_new_symbol_creates_only_one_manager(self):
+        """Mirrors tests/test_ceo_symbol_cache.py's TestThreadSafety
+        pattern: N threads race to be first to register+construct the
+        SAME brand-new symbol — must converge on exactly one TradeManager
+        instance and exactly one entry in coordinator.symbols."""
+        import threading
+        coordinator, _ = self._make_coordinator(symbols=["BTCUSDT"], allow_dynamic_symbols=True)
+        results = []
+
+        def worker():
+            with patch("execution.trade_manager.settings") as tms:
+                _settings_patch(tms)
+                results.append(coordinator.get_manager("ETHUSDT"))
+
+        threads = [threading.Thread(target=worker) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results) == 10
+        assert len({id(r) for r in results}) == 1  # every thread got the SAME instance
+        assert coordinator.symbols.count("ETHUSDT") == 1  # registered exactly once, not 10x
+        assert coordinator._dynamically_registered_count == 1
+
+    def test_concurrent_registration_of_different_symbols_respects_cap(self):
+        """N threads race to register N DIFFERENT new symbols against a
+        cap smaller than N — exactly `max_dynamic_symbols` must succeed
+        and the rest must raise, with no overshoot from a race."""
+        import threading
+        coordinator, _ = self._make_coordinator(
+            symbols=["BTCUSDT"], allow_dynamic_symbols=True, max_dynamic_symbols=3,
+        )
+        new_symbols = [f"SYM{i}USDT" for i in range(10)]
+        succeeded = []
+        failed = []
+        lock = threading.Lock()
+
+        def worker(sym):
+            try:
+                with patch("execution.trade_manager.settings") as tms:
+                    _settings_patch(tms)
+                    coordinator.get_manager(sym)
+                with lock:
+                    succeeded.append(sym)
+            except ValueError:
+                with lock:
+                    failed.append(sym)
+
+        threads = [threading.Thread(target=worker, args=(s,)) for s in new_symbols]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(succeeded) == 3  # exactly the cap — no overshoot from the race
+        assert len(failed) == 7
+        assert coordinator._dynamically_registered_count == 3
+
+
 class TestExecutionCoordinatorRouting:
 
     def _make_coordinator(self, symbols=None):
