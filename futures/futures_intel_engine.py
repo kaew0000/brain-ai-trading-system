@@ -9,11 +9,18 @@ Future extension points are defined as abstract interfaces (Protocol) and
 raise NotImplementedError so the dashboard's debug panel can report which
 features are live vs. stub, without breaking the pipeline.
 
-Extension interfaces (DEFINED, NOT YET IMPLEMENTED)
+Extension interfaces
 -----------------------------------------------------
-- orderbook_imbalance  : bid/ask delta from level-2 order book
-- cvd                  : cumulative volume delta (buy vs sell volume)
-- liquidation_heatmap  : liquidation cluster levels from open interest profile
+- liquidation_heatmap  : liquidation cluster levels from open interest
+                         profile — still NOT_IMPLEMENTED.
+- orderbook_imbalance / cvd (legacy `extensions` dict keys): retained as
+  "NOT_IMPLEMENTED" placeholders for full backward compatibility with
+  existing callers/tests that don't pass a WS snapshot (see
+  test_extensions_all_not_implemented). The REAL implementation of this
+  data now lives in the new `hft_flow` field below (V16 Phase 4C Track B,
+  HFT-2) — populated only when an optional `ws_snapshot` argument is
+  passed to analyse(); when omitted, `hft_flow` stays at its all-zero/
+  feature_confidence=0.0 default, identical to before this phase.
 
 Currently implemented
 ---------------------
@@ -22,6 +29,15 @@ Currently implemented
 - long_short_ratio     : crowd sentiment, contrarian signal
 - taker_ratio          : aggressor side dominance
 - liquidation          : recent event detection from OI + price divergence
+- hft_flow             : depth_imbalance, aggressive buy/sell volume, CVD +
+                          CVD-slope, trade_intensity, spread/mid_price
+                          (V16 Phase 4C Track B, HFT-2 — see
+                          features/microstructure_engine.py), PLUS score
+                          (-100..+100) and a 5-state classification
+                          (HFT-3 — see features/hft_flow_scorer.py).
+                          Still NOT consumed by ConfidenceEngine or any
+                          decision/execution path — that is a separate,
+                          later, separately-approved phase.
 
 Output: FuturesIntelResult
 --------------------------
@@ -35,9 +51,14 @@ Output: FuturesIntelResult
   "long_short":   { ratio, crowd_bias, contrarian_signal },
   "taker":        { buy_ratio, sell_ratio, aggressor },
   "liquidation":  { detected, type, severity },
-  "extensions":   { "orderbook_imbalance": "NOT_IMPLEMENTED",
-                    "cvd": "NOT_IMPLEMENTED",
-                    "liquidation_heatmap": "NOT_IMPLEMENTED" }
+  "extensions":   { "orderbook_imbalance": "NOT_IMPLEMENTED",   # legacy — see hft_flow
+                    "cvd": "NOT_IMPLEMENTED",                    # legacy — see hft_flow
+                    "liquidation_heatmap": "NOT_IMPLEMENTED" },
+  "hft_flow":     { score, state, depth_imbalance, delta, cvd, cvd_slope,
+                    aggressive_buy_volume, aggressive_sell_volume,
+                    trade_intensity, spread, mid_price, data_age_ms,
+                    book_valid, sequence_valid, stream_connected,
+                    feature_confidence }
 }
 
 API surface: GET /api/funding  (includes funding + oi + l/s + taker subkeys)
@@ -46,8 +67,14 @@ API surface: GET /api/funding  (includes funding + oi + l/s + taker subkeys)
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
+from typing import TYPE_CHECKING
 
+from features.microstructure_engine import HFTFlowSignal, MicrostructureEngine
+from features.hft_flow_scorer import HFTFlowScorer
 from utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from data.binance_ws_client import SymbolWSSnapshot  # noqa
 
 logger = get_logger(__name__)
 
@@ -117,12 +144,19 @@ class FuturesIntelResult:
     taker:         TakerSignal      = field(default_factory=TakerSignal)
     liquidation:   LiquidationSignal = field(default_factory=LiquidationSignal)
 
-    # Not-yet-implemented extension slots
+    # Legacy not-yet-implemented extension slots — kept exactly as before
+    # for backward compatibility (see module docstring). The real data is
+    # now in `hft_flow` below.
     extensions: dict = field(default_factory=lambda: {
         "orderbook_imbalance":  "NOT_IMPLEMENTED",
         "cvd":                  "NOT_IMPLEMENTED",
         "liquidation_heatmap":  "NOT_IMPLEMENTED",
     })
+
+    # V16 Phase 4C Track B, HFT-2: real microstructure features, populated
+    # only when analyse() is called with a ws_snapshot. Defaults to an
+    # all-zero/feature_confidence=0.0 signal, matching "no data" state.
+    hft_flow: HFTFlowSignal = field(default_factory=HFTFlowSignal)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -176,12 +210,37 @@ class FuturesIntelEngine:
     """
 
     def __init__(self) -> None:
+        self._microstructure = MicrostructureEngine()
+        self._hft_flow_scorer = HFTFlowScorer()
         logger.info("FuturesIntelEngine ready")
 
     # ── Public ────────────────────────────────────────────────────────────────
 
-    def analyse(self, market_data: dict) -> FuturesIntelResult:
+    def analyse(self, market_data: dict, ws_snapshot: "SymbolWSSnapshot | None" = None) -> FuturesIntelResult:
+        """ws_snapshot: V16 Phase 4C Track B, HFT-2 — optional
+        data.binance_ws_client.SymbolWSSnapshot for the same symbol this
+        market_data is for. Omitted (default None) by every existing
+        caller today, which leaves `result.hft_flow` at its all-zero
+        default — byte-identical to this method's behavior before HFT-2.
+        Passing a snapshot populates `result.hft_flow` with real computed
+        features (still no score/state — see features/microstructure_engine.py).
+        """
         result = FuturesIntelResult()
+
+        # V16 Phase 4C Track B, HFT-2: independent of market_data (REST
+        # derivatives data) — computed whenever a ws_snapshot is given,
+        # even if market_data is empty, since the two are separate data
+        # sources gathered on the same cycle, not a dependency of one on
+        # the other.
+        if ws_snapshot is not None:
+            raw_features = self._microstructure.compute(
+                symbol=getattr(ws_snapshot, "symbol", ""), snapshot=ws_snapshot
+            )
+            # V16 Phase 4C Track B, HFT-3: fills in .score/.state on top of
+            # HFT-2's raw features. Still not consumed anywhere in the
+            # decision/execution path — see this module's docstring and
+            # features/hft_flow_scorer.py's own scope-discipline note.
+            result.hft_flow = self._hft_flow_scorer.score(raw_features)
 
         if not market_data:
             logger.warning("FuturesIntelEngine: empty market_data")

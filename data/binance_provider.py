@@ -304,6 +304,37 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
+    def get_order_book_snapshot(self, symbol: str | None = None, limit: int = 1000) -> dict:
+        """V16 Phase 4C Track B (HFT-1): REST order-book snapshot, used by
+        data/local_order_book.py to initialize/resync local book state
+        before/around applying diff-depth WebSocket updates. Returns the
+        raw parsed shape Binance provides (`lastUpdateId`, `bids`, `asks`
+        as [str, str] pairs) rather than a project-specific dataclass —
+        conversion to data.local_order_book.DepthSnapshot is the caller's
+        job, keeping this method a thin, consistent REST wrapper like every
+        other method in this class.
+
+        limit: Binance valid values are 5/10/20/50/100/500/1000 — 1000 is
+        the largest depth the endpoint supports and matches what a diff-
+        depth stream can resync against without a level gap.
+        """
+        target_symbol = symbol or self.symbol
+        try:
+            with _MARKET_BREAKER:
+                raw = self.market_client.depth(symbol=target_symbol, limit=limit)
+            logger.debug(
+                f"Order book snapshot | {target_symbol} | lastUpdateId={raw.get('lastUpdateId')} "
+                f"| bids={len(raw.get('bids', []))} | asks={len(raw.get('asks', []))}"
+            )
+            return raw
+        except CircuitBreakerOpen as exc:
+            logger.warning(f"Order book snapshot skipped — market circuit open: {exc}")
+            raise
+        except ClientError as exc:
+            logger.error(f"Order book snapshot error [{target_symbol}]: {exc}")
+            raise
+
+    @retry_api_call(retries=3, delay=2.0, backoff=2.0)
     def get_current_open_interest(self, symbol: str | None = None) -> float:
         """Return current open interest (contracts)."""
         target_symbol = symbol or self.symbol

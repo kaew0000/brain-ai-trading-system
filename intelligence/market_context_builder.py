@@ -5,13 +5,25 @@ Aggregates outputs from all independent analysis layers into a single
 `market_context` dictionary that the Decision Engine and Confidence Engine
 consume. This is the glue between Layer 1-7 and Layer 8.
 
+V16 Phase 4C Track B, HFT-4 (shadow mode): build() accepts an optional
+`ws_snapshot` that flows through to FuturesIntelEngine.analyse(), which
+populates market_context["futures"]["hft_flow"] (score, state, and every
+raw HFT-2 feature) purely for observability — /api/signals and the
+dashboard's raw_features view expose it, but nothing in ConfidenceEngine,
+DecisionEngine, or the CEO agent reads that key (confirmed by direct
+inspection of every "futures" dict consumer, and by a dedicated regression
+test that scores an identical market_context with and without a non-empty
+hft_flow and asserts byte-identical ConfidenceEngine output). Omitting
+ws_snapshot (every caller before this phase, and most callers after it —
+this stays fully opt-in) leaves hft_flow at its all-default, fully-inert
+state, unchanged from before HFT-4 existed.
+
 Output schema
 -------------
 {
   "symbol":        str,
   "timestamp":     str (ISO-8601),
   "mark_price":    float,
-
   // Layer 3 — Regime
   "regime":        str,             # TREND | RANGE | VOLATILE | SQUEEZE
   "regime_conf":   float,           # 0-1
@@ -27,7 +39,13 @@ Output schema
   "smc_m15":       dict,
 
   // Layer 6 — Futures Intelligence
-  "futures":       dict,            # full FuturesIntelResult.to_dict()
+  "futures":       dict,            # full FuturesIntelResult.to_dict(),
+                                     # including "hft_flow" (V16 Phase 4C
+                                     # Track B, HFT-4 — see note below;
+                                     # NOT consumed by ConfidenceEngine,
+                                     # DecisionEngine, or CEO — verified,
+                                     # not just assumed, see
+                                     # tests/test_hft_shadow_mode.py)
   "futures_signal":str,             # LONG | SHORT | NEUTRAL
   "futures_condition": str,
 
@@ -53,6 +71,7 @@ API surface: /api/signals includes market_context as raw_features
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -61,6 +80,9 @@ from futures.futures_intel_engine import FuturesIntelEngine, FuturesIntelResult
 from features.smc_engine import SMCSignals
 from features.volume_engine import VolumeSignals
 from regime.regime_engine import RegimeResult
+
+if TYPE_CHECKING:
+    from data.binance_ws_client import SymbolWSSnapshot  # noqa
 
 logger = get_logger(__name__)
 
@@ -98,6 +120,17 @@ class MarketContextBuilder:
                                                       # settings.SYMBOL (the single-symbol
                                                       # legacy caller's implicit behavior,
                                                       # unchanged) when omitted.
+        ws_snapshot:    "SymbolWSSnapshot | None" = None,   # V16 Phase 4C Track B,
+                                                      # HFT-4: optional WS-derived
+                                                      # microstructure snapshot for this
+                                                      # symbol. Omitted (default None) by
+                                                      # every existing caller today —
+                                                      # leaves market_context["futures"]
+                                                      # ["hft_flow"] at its all-default,
+                                                      # fully-inert state, identical to
+                                                      # before this phase. See this
+                                                      # module's docstring for the
+                                                      # shadow-mode scope note.
     ) -> dict:
         """
         Assemble the full market context.
@@ -119,6 +152,11 @@ class MarketContextBuilder:
                          explicitly or every context would silently claim
                          to be for settings.SYMBOL regardless of which
                          symbol's data was actually analyzed.
+        ws_snapshot   : V16 Phase 4C Track B, HFT-4 — optional
+                         data.binance_ws_client.SymbolWSSnapshot for the
+                         same symbol. Passed straight through to
+                         FuturesIntelEngine.analyse() unchanged; this
+                         method does not interpret or gate it itself.
         """
 
         # ── Trend (Layer 4) ───────────────────────────────────────────────────
@@ -131,7 +169,7 @@ class MarketContextBuilder:
         )
 
         # ── Futures Intelligence (Layer 6) ────────────────────────────────────
-        futures: FuturesIntelResult = self._futures_engine.analyse(market_data)
+        futures: FuturesIntelResult = self._futures_engine.analyse(market_data, ws_snapshot=ws_snapshot)
 
         # ── SMC summaries per timeframe ───────────────────────────────────────
         h4  = smc_signals.get("h4",  SMCSignals())

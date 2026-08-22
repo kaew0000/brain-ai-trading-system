@@ -351,6 +351,38 @@ _DASHBOARD_SRC_DIST = _os.path.join(
     _os.path.dirname(_os.path.dirname(__file__)), "dashboard_src", "dist"
 )
 
+_hft_ws_client = None   # see get_hft_ws_client() below
+
+
+def get_hft_ws_client():
+    """V16 Phase 4C Track B (HFT-1): module-level singleton, mirroring the
+    get_event_bus()/get_watchdog()/get_control_state() accessor pattern
+    already used throughout this file for shared long-lived state. Returns
+    None when settings.HFT_WS_ENABLED is False (the default) — callers
+    (currently none outside this module; HFT-1 wires no consumer) must
+    handle that, not assume a client always exists.
+
+    Constructed lazily rather than at import time so importing api.app for
+    introspection/tests never opens a network client and never even
+    imports data.binance_ws_client's `websockets` dependency unless the
+    feature flag is actually on — same "don't do it at bare import time"
+    discipline the lifespan() docstring already documents for the
+    EXECUTION_MODE/API_AUTH_ENABLED check just above it.
+    """
+    global _hft_ws_client
+    if not settings.HFT_WS_ENABLED:
+        return None
+    if _hft_ws_client is None:
+        from data.binance_ws_client import BinanceWSClient
+        from data.binance_provider import BinanceDataProvider
+        provider = BinanceDataProvider()
+        _hft_ws_client = BinanceWSClient(
+            symbols=settings.symbol_list,
+            rest_snapshot_fn=lambda symbol: provider.get_order_book_snapshot(symbol=symbol),
+        )
+    return _hft_ws_client
+
+
 async def _supervised_broadcast() -> None:
     """V15: Self-restarting wrapper for the broadcast loop.
     If _broadcast_loop() crashes, logs the error and restarts after 2s.
@@ -390,12 +422,37 @@ async def lifespan(app: FastAPI):
         )
     task = asyncio.create_task(_supervised_broadcast())
     logger.info("Dashboard API V15 started — supervised broadcast loop running")
+
+    # V16 Phase 4C Track B (HFT-1): started in the SAME uvicorn event loop
+    # as the broadcast task above — no second event loop, no second thread.
+    # Off by default (settings.HFT_WS_ENABLED=False); when off,
+    # get_hft_ws_client() returns None and nothing here changes versus
+    # before this phase. This task only ever writes into
+    # BinanceWSClient's own in-memory per-symbol state (read later via
+    # get_snapshot()/get_all_snapshots()) — it is not consumed by
+    # ConfidenceEngine, RiskEngine, or execution anywhere yet.
+    hft_ws_task = None
+    hft_client = get_hft_ws_client()
+    if hft_client is not None:
+        hft_ws_task = asyncio.create_task(hft_client.run_forever())
+        logger.info(f"HFT-1 WS ingestion started — symbols={settings.symbol_list}")
+
     yield
+
     task.cancel()
     try:
         await asyncio.wait_for(asyncio.shield(task), timeout=5)
     except (asyncio.CancelledError, asyncio.TimeoutError):
         pass
+
+    if hft_ws_task is not None:
+        hft_ws_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(hft_ws_task), timeout=5)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        logger.info("HFT-1 WS ingestion stopped")
+
     logger.info("Dashboard API shutdown")
 
 

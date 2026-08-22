@@ -11,12 +11,43 @@ volume   : 20%   (spike + OBV — confirmation)
 oi       : 20%   (open interest trend — smart money)
 funding  : 10%   (funding rate — market structure)
 regime   : 20%   (market regime alignment)
+hft_flow :  0%   (V16 Phase 4C Track B, HFT-5 — microstructure order-flow
+                  confirmation; 0% by default, fully inert unless
+                  explicitly raised via update_weights(). See "HFT Flow
+                  integration" section below.)
 
 Total    : 100%
 
 Weights are intentionally sum-to-100 so the output is directly readable
 as a percentage. Individual weights can be overridden at runtime via
 a config profile.
+
+HFT Flow integration (V16 Phase 4C Track B, HFT-5)
+---------------------------------------------------
+Two independent, separately-gated mechanisms, both off by default:
+
+1. Additive term — hft_flow is one more weighted category like the
+   others above, scored by _score_hft_flow() (0.0-1.0, same convention as
+   every other category: 0 = no confirmation, 1 = maximum confirmation
+   in the traded direction). At the default weight of 0.0 this
+   contributes nothing regardless of the underlying score. The
+   "hft_flow" key only appears in `breakdown` at all when real WS data
+   is present (market_context["futures"]["hft_flow"]["feature_confidence"]
+   > 0) — with HFT_WS_ENABLED off (the default), that's never true, so
+   `breakdown`'s key set is byte-identical to before this phase.
+
+2. Contradiction penalty/block (design review Section 9's Hybrid Model
+   C) — gated separately behind settings.HFT_FLOW_CONTRADICTION_ENABLED
+   (default False). When enabled: a strongly-opposing hft_flow reading
+   (see config/settings.py's HFT_FLOW_CONTRADICTION_* thresholds)
+   subtracts points from the final confidence; an even more extreme
+   opposing reading escalates to a hard BLOCKED action via
+   _check_blocks(), alongside the existing FUTURES_BLOCK_LONG/SHORT and
+   FUNDING_BLOCK_LONG/SHORT reasons. This is intentionally asymmetric
+   (reduce, escalate-to-block only past a second threshold) rather than
+   an unconditional veto — see the design review's own rationale for why
+   a single high-noise signal shouldn't be able to block an otherwise
+   well-established multi-timeframe setup outright.
 
 Hard blocks (override regardless of score)
 ------------------------------------------
@@ -37,6 +68,8 @@ Output: ConfidenceResult
       "oi":      20,
       "funding":  7,
       "regime":  10
+      # "hft_flow": 0,      # present only when real WS data is active —
+                             # see "HFT Flow integration" above
   },
   "blocked":     false,
   "block_reasons": [],
@@ -61,11 +94,13 @@ logger = get_logger(__name__)
 
 # ── Default weights (must sum to 100) ─────────────────────────────────────────
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "smc":     30.0,
-    "volume":  20.0,
-    "oi":      20.0,
-    "funding": 10.0,
-    "regime":  20.0,
+    "smc":      30.0,
+    "volume":   20.0,
+    "oi":       20.0,
+    "funding":  10.0,
+    "regime":   20.0,
+    "hft_flow":  0.0,   # V16 Phase 4C Track B, HFT-5 — off by default, see
+                        # module docstring's "HFT Flow integration" section
 }
 
 # ── Action thresholds ─────────────────────────────────────────────────────────
@@ -197,7 +232,37 @@ class ConfidenceEngine:
             "regime":  _pct(regime_raw  * w["regime"]),
         }
 
+        # V16 Phase 4C Track B, HFT-5: additive hft_flow term. The
+        # "hft_flow" key is only added to `breakdown` when real WS data is
+        # actually present (feature_confidence > 0) — with HFT_WS_ENABLED
+        # off (the default), market_context never carries that, so
+        # `breakdown`'s key set stays byte-identical to before this phase.
+        # See module docstring's "HFT Flow integration" section.
+        hft_flow_ctx = market_context.get("futures", {}).get("hft_flow", {})
+        hft_flow_active = bool(hft_flow_ctx) and float(hft_flow_ctx.get("feature_confidence", 0.0)) > 0.0
+        if hft_flow_active:
+            hft_flow_raw = self._score_hft_flow(market_context, direction)
+            breakdown["hft_flow"] = _pct(hft_flow_raw * w.get("hft_flow", 0.0))
+
         total_confidence = sum(breakdown.values())
+
+        # V16 Phase 4C Track B, HFT-5: contradiction penalty (design
+        # review Section 9's Hybrid Model C), separately gated behind
+        # settings.HFT_FLOW_CONTRADICTION_ENABLED (default False — no
+        # effect at all unless explicitly turned on, independent of the
+        # additive weight above). See module docstring.
+        if hft_flow_active and settings.HFT_FLOW_CONTRADICTION_ENABLED:
+            penalty = self._hft_flow_contradiction_penalty(market_context, direction)
+            if penalty:
+                # Cap the applied penalty at the current total so it can
+                # never drive total_confidence negative — keeps
+                # sum(breakdown.values()) == total_confidence exactly
+                # true in every case, matching the pre-existing invariant
+                # tests/test_phase3.py::test_breakdown_sums_to_confidence
+                # already relies on.
+                applied_penalty = min(penalty, total_confidence)
+                breakdown["hft_flow_contradiction_penalty"] = -applied_penalty
+                total_confidence = total_confidence - applied_penalty
 
         result.breakdown  = breakdown
         result.confidence = min(int(round(total_confidence)), 100)
@@ -398,6 +463,63 @@ class ConfidenceEngine:
 
         return min(score, 1.0)
 
+    @staticmethod
+    def _score_hft_flow(ctx: dict, direction: str) -> float:
+        """V16 Phase 4C Track B, HFT-5. Same convention as every other
+        category scorer here: 0.0 = no confirmation, 1.0 = maximum
+        confirmation in the traded direction. Purely additive — an
+        hft_flow reading that OPPOSES `direction` returns 0.0 here (not a
+        negative value); opposition is handled separately by
+        _hft_flow_contradiction_penalty(), which is independently gated
+        and can reduce or block regardless of what this method returns.
+        Callers must check feature_confidence > 0 themselves before
+        relying on this (see score()'s hft_flow_active gate) — this
+        method still degrades safely to 0.0 on its own if called with
+        stale/invalid data, it just doesn't duplicate that gate check.
+        """
+        hft = ctx.get("futures", {}).get("hft_flow", {})
+        if not hft or float(hft.get("feature_confidence", 0.0)) <= 0.0:
+            return 0.0
+
+        score = float(hft.get("score", 0.0))
+        if direction == "LONG":
+            aligned = score
+        elif direction == "SHORT":
+            aligned = -score
+        else:
+            return 0.0
+
+        if aligned <= 0:
+            return 0.0
+        return min(aligned / 100.0, 1.0)
+
+    @staticmethod
+    def _hft_flow_contradiction_penalty(ctx: dict, direction: str) -> int:
+        """V16 Phase 4C Track B, HFT-5. Returns the number of confidence
+        points to subtract when hft_flow strongly OPPOSES `direction` —
+        0 when aligned, neutral, or below the reduce threshold. Does NOT
+        check settings.HFT_FLOW_CONTRADICTION_ENABLED itself — score()
+        checks that before calling this, so this method is a pure
+        function of ctx/direction/settings-thresholds, easy to unit test
+        in isolation. The block-tier (a further, more extreme threshold)
+        is handled separately in _check_blocks(), not here — this method
+        only ever returns a REDUCE-tier point deduction, never forces
+        BLOCKED itself.
+        """
+        hft = ctx.get("futures", {}).get("hft_flow", {})
+        if not hft or float(hft.get("feature_confidence", 0.0)) <= 0.0:
+            return 0
+        score = float(hft.get("score", 0.0))
+        if direction == "LONG":
+            opposing = -score
+        elif direction == "SHORT":
+            opposing = score
+        else:
+            return 0
+        if opposing >= settings.HFT_FLOW_CONTRADICTION_REDUCE_THRESHOLD:
+            return settings.HFT_FLOW_CONTRADICTION_PENALTY_POINTS
+        return 0
+
     # ── Hard blocks ───────────────────────────────────────────────────────────
 
     @staticmethod
@@ -416,6 +538,27 @@ class ConfidenceEngine:
             blocks.append(f"FUNDING_BLOCK_LONG rate={rate:.5f}")
         if direction == "SHORT" and rate < settings.FUNDING_BLOCK_SHORT:
             blocks.append(f"FUNDING_BLOCK_SHORT rate={rate:.5f}")
+
+        # V16 Phase 4C Track B, HFT-5: contradiction block tier — gated
+        # behind HFT_FLOW_CONTRADICTION_ENABLED (default False, so this
+        # entire block is skipped by default, same as every other HFT
+        # flag in this codebase). Only the most extreme, near-maximal
+        # opposing reading escalates to a hard block; the milder reduce
+        # tier is a point deduction handled in score(), not here.
+        if settings.HFT_FLOW_CONTRADICTION_ENABLED:
+            hft = ctx.get("futures", {}).get("hft_flow", {})
+            if hft and float(hft.get("feature_confidence", 0.0)) > 0.0:
+                score = float(hft.get("score", 0.0))
+                if direction == "LONG":
+                    opposing = -score
+                elif direction == "SHORT":
+                    opposing = score
+                else:
+                    opposing = 0.0
+                if opposing >= settings.HFT_FLOW_CONTRADICTION_BLOCK_THRESHOLD:
+                    blocks.append(
+                        f"HFT_FLOW_CONTRADICTION_BLOCK score={score:.1f} state={hft.get('state', '')}"
+                    )
 
         return blocks
 

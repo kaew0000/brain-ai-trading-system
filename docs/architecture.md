@@ -4451,3 +4451,145 @@ finishing this phase, not Kaew's data.
 open, now joined by: confirm via `logs/brain_bot.log`'s `fk_repaired`
 line after the next real restart that this phase's repair actually
 ran against the live file as expected.
+## 45. HFT Flow Trend Following — V16 Phase 4C Track B, HFT-1 through HFT-6 (2026-08-19 to 2026-08-22)
+
+**Problem.** Every derivatives-flow feature the bot had (`futures/futures_intel_engine.py`'s
+funding/OI/long-short/taker signals) was REST-polled, once per 60-second
+trading cycle — there was no real-time order-book or trade-flow ingestion
+anywhere in the repository. `futures/futures_intel_engine.py` had
+pre-built, never-filled extension stubs (`orderbook_imbalance`, `cvd`,
+both literally `"NOT_IMPLEMENTED"`) marking exactly this gap. A prior
+audit (see the design review reviewed before this track began) confirmed
+the decision layer (`decision/confidence_engine.py`) already had the
+right shape to absorb a new signal category — a dict-driven,
+normalize-to-100 weighting scheme, not a hardcoded 5-slot struct — but
+nothing upstream of it could produce microstructure data to feed it.
+
+**Scope, delivered as six independently-committed, independently-tested
+phases, each on its own branch stacked on the previous one (`feat/hft-1-ws-ingestion`
+→ `feat/hft-2-microstructure-features` → `feat/hft-3-flow-score` →
+`feat/hft-4-shadow-mode` → `feat/hft-5-paper-trading` →
+`feat/hft-6-live-weight-config`), each gated so the shipped defaults are
+byte-identical to the phase before it:**
+
+1. **HFT-1 — WS ingestion.** `data/local_order_book.py`: pure-sync,
+   no-`asyncio` order-book reconstruction from a REST depth snapshot +
+   diff-depth updates, implementing Binance's actual documented
+   sequencing handshake (`U <= lastUpdateId+1 <= u` for the first diff
+   after a snapshot — an early version of this required an exact
+   `U == lastUpdateId+1` match instead, which would have misclassified
+   every legitimate first reconnect diff as a gap; caught and fixed
+   during test-writing). `data/binance_ws_client.py`: async multi-symbol
+   client (bookTicker/depth/aggTrade combined stream), a self-restarting
+   supervised loop mirroring `api/app.py`'s existing
+   `_supervised_broadcast()` pattern, resync-on-sequence-gap, thread-safe
+   immutable snapshot reads. `data/binance_provider.py` gained an
+   additive `get_order_book_snapshot()` REST wrapper. New settings, all
+   `HFT_WS_ENABLED=False` by default. `api/app.py::get_hft_ws_client()`
+   singleton, started in the same uvicorn event loop as the existing
+   dashboard broadcast task — no new thread/process.
+
+2. **HFT-2 — Microstructure features.** `features/microstructure_engine.py`:
+   `HFTFlowSignal` dataclass + `MicrostructureEngine`, computing
+   `depth_imbalance`, `aggressive_buy_volume`/`aggressive_sell_volume`/
+   `delta`, true cumulative `cvd` (incremental across calls, not
+   recomputed from the WS client's bounded trade buffer, which would
+   only ever reflect a fixed retention window), `cvd_slope` (EMA of the
+   delta increment), `trade_intensity`, and the `feature_confidence`
+   validity gate. `futures/futures_intel_engine.py::analyse()` gained an
+   optional `ws_snapshot` parameter (default `None`) — fully backward
+   compatible; the legacy `extensions` dict keeps its literal
+   `"NOT_IMPLEMENTED"` values exactly as before when omitted.
+
+3. **HFT-3 — Flow score.** `features/hft_flow_scorer.py::HFTFlowScorer`
+   combines HFT-2's raw features into `HFT_FLOW_SCORE` (−100..+100) and a
+   5-state classification, via a configurable weighted average +
+   trade-intensity magnitude dampening (never a directional flip — a
+   quiet market's reading is trusted less, floored, never zeroed or
+   flipped). Hard gate: `feature_confidence <= 0.0` forces
+   `score=0.0, state=NEUTRAL` unconditionally, before any combination
+   logic runs. Still not called from anywhere in the decision path at
+   this point.
+
+4. **HFT-4 — Shadow mode.** `intelligence/market_context_builder.py::build()`
+   gained an optional `ws_snapshot` parameter, threaded through to
+   `FuturesIntelEngine.analyse()`, populating
+   `market_context["futures"]["hft_flow"]` for observability via the
+   existing `/api/signals` `raw_features` surface. `main.py` gained
+   `_get_hft_ws_snapshot(symbol)` (flag-gated, never raises) wired into
+   both `ctxb.build()` call sites, plus a gated `HFT_SHADOW` telemetry
+   log line. **The core deliverable of this phase is a direct,
+   mechanical proof of zero trading impact** —
+   `tests/test_hft_shadow_mode.py::test_extreme_hft_flow_produces_identical_confidence_result`
+   builds two market contexts identical except one carries a
+   deliberately extreme, maximally one-sided HFT snapshot, and asserts
+   `ConfidenceEngine.score()` returns byte-identical `action` and
+   `confidence` for both, in both directions — not an argument from
+   absence of wiring, a direct assertion on the actual output.
+
+5. **HFT-5 — Confidence integration (paper-scoped).** After an explicit
+   pause to ask which design-review-proposed combination model to use
+   (Hybrid Model C was chosen over the simpler additive-only Model A),
+   `decision/confidence_engine.py` gained `_score_hft_flow()` (additive,
+   floors at 0 when opposing — never negative) and
+   `_hft_flow_contradiction_penalty()` + a further block tier in
+   `_check_blocks()` (the design review's two-tier reduce/block
+   structure — only the most extreme, near-maximal opposing reading
+   escalates to a hard `BLOCKED`). Double-gated to stay byte-identical
+   at every shipped default: `DEFAULT_WEIGHTS["hft_flow"] = 0.0` and
+   `settings.HFT_FLOW_CONTRADICTION_ENABLED = False`. The `"hft_flow"`
+   breakdown key only appears when real WS data is present — preserving
+   two pre-existing exact-key-set tests unmodified. `ConfidenceEngine`
+   has no notion of `execution_lane`; true paper-only scoping is an
+   operational choice (only raise the weight/enable contradiction in a
+   paper config profile), not something this engine enforces internally.
+   A real cross-phase regression was caught here: running the full
+   14-file ConfidenceEngine-touching regression suite (not just new
+   tests) surfaced that HFT-4's own no-impact test asserted full
+   `breakdown` dict equality, which broke once `breakdown` legitimately
+   gained a diagnostic `"hft_flow": 0` entry — fixed by asserting on the
+   actually decision-relevant fields instead.
+
+6. **HFT-6 — Low-weight live (config only).** After a second explicit
+   pause — this is the actual live-money threshold, not just a bigger
+   version of HFT-5 — the person confirmed the minimal option: a named,
+   documented config value only, no other new logic.
+   `config/settings.py::HFT_FLOW_LIVE_WEIGHT` (default `5.0`, roughly 5%
+   of total confidence weight) exists purely as a value; nothing in the
+   codebase reads it automatically, and `DEFAULT_WEIGHTS` in
+   `decision/confidence_engine.py` still hardcodes `hft_flow` at `0.0`
+   regardless of this setting.
+
+**Enabling for live** (manual, deliberate, not automatic): construct
+`ConfidenceEngine` with
+`weights={**DEFAULT_WEIGHTS, "hft_flow": settings.HFT_FLOW_LIVE_WEIGHT}`,
+or call `engine.update_weights({**current_weights, "hft_flow": settings.HFT_FLOW_LIVE_WEIGHT})`
+at runtime. Do this only in a live config profile, only after HFT-5's
+paper-lane results have produced enough evidence to justify it — nothing
+in this codebase gates that decision for you.
+
+**Explicitly out of scope / not built:** HFT-7 (adaptive weight — needs
+its own separate design, per the original roadmap's own wording),
+historical replay/backtest infrastructure (no recorded order-book/trade-flow
+dataset exists yet — see the design review's own finding on this),
+absorption/spoof-like detection, liquidity addition/removal/replenishment/
+pull tracking, microprice, average_trade_size/large_trade_ratio (all
+deliberately deferred MVP-scope decisions from the original design
+review, unchanged by this track). No changes to `RiskEngine`,
+`ExecutionCoordinator`, `execution/ceo_gated_signal_provider.py`,
+`commander/control_state.py`, journal schema, or `database/db.py` at any
+point across all six phases — verified by direct inspection at every
+phase, not assumed.
+
+**Tests.** 133 new across the six phases (23 local order book, 19 WS
+client, 7 provider/config additions, 4 app wiring, 24 microstructure
+engine, 7 futures-intel wiring, 29 flow scorer, 3 futures-intel score
+wiring, 8 shadow-mode incl. the core no-impact proof, 20 confidence
+integration). Every phase independently verified via a fresh clone from
+its own git bundle (not just the working tree) before delivery. Full
+backend suite: 2734 passed at HFT-5/6 (2590 baseline immediately before
+this track began), same 3 pre-existing dashboard-build failures
+throughout (confirmed present on unmodified `main` before this track
+started, unrelated to any of this work). World suite: 565/565, unchanged
+at every phase. ruff and vulture clean at every phase.
+

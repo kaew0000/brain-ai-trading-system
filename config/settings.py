@@ -457,6 +457,155 @@ class Settings(BaseSettings):
         default=30.0, alias="ORDER_RECONCILIATION_DEDUP_SECONDS"
     )
 
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-1 WS Ingestion ────────────────
+    # Off by default — same posture as ORDER_RECONCILIATION_ENABLED above.
+    # False = byte-identical to before this phase: no WebSocket connection
+    # is opened, api/app.py's lifespan() starts no new supervised task, and
+    # nothing in decision/execution is touched (HFT-1 does not wire into
+    # ConfidenceEngine at all — that is a later, separately-approved phase).
+    HFT_WS_ENABLED: bool = Field(default=False, alias="HFT_WS_ENABLED")
+    # Binance USDT-M Futures combined-stream base URL. Kept separate from
+    # BINANCE_TESTNET_BASE_URL/BINANCE_PROD_BASE_URL (REST) since the WS
+    # host differs from the REST host.
+    HFT_WS_BASE_URL: str = Field(
+        default="wss://fstream.binance.com/stream", alias="HFT_WS_BASE_URL"
+    )
+    HFT_WS_TESTNET_BASE_URL: str = Field(
+        default="wss://stream.binancefuture.com/stream", alias="HFT_WS_TESTNET_BASE_URL"
+    )
+    # Depth-diff update speed Binance publishes at: "100ms" or "250ms".
+    HFT_WS_DEPTH_SPEED: str = Field(default="100ms", alias="HFT_WS_DEPTH_SPEED")
+    # REST depth-snapshot levels fetched for initial sync/resync (see
+    # data/local_order_book.py's Binance-sequencing docstring).
+    HFT_WS_SNAPSHOT_LIMIT: int = Field(default=1000, alias="HFT_WS_SNAPSHOT_LIMIT")
+    # Local order-book state older than this is treated as invalid
+    # (feature_confidence=0 once HFT-2/HFT-3 consume this — see design
+    # review §10). Deliberately generous for HFT-1: this module only
+    # reconstructs the book, it does not yet score anything.
+    HFT_WS_DATA_AGE_LIMIT_MS: int = Field(default=5000, alias="HFT_WS_DATA_AGE_LIMIT_MS")
+    # Reconnect backoff (matches the shape of utils/retry.py's
+    # retry_api_call: exponential with a cap), applied by the supervised
+    # run loop in data/binance_ws_client.py.
+    HFT_WS_RECONNECT_DELAY_SECONDS: float = Field(default=2.0, alias="HFT_WS_RECONNECT_DELAY_SECONDS")
+    HFT_WS_RECONNECT_MAX_DELAY_SECONDS: float = Field(default=30.0, alias="HFT_WS_RECONNECT_MAX_DELAY_SECONDS")
+    # Rolling in-memory trade buffer per symbol, seconds. HFT-1 only stores
+    # raw parsed aggTrade events for this window — computing
+    # aggressive_buy_volume/CVD/trade_intensity FROM this buffer is HFT-2,
+    # not implemented here.
+    HFT_WS_TRADE_BUFFER_SECONDS: int = Field(default=60, alias="HFT_WS_TRADE_BUFFER_SECONDS")
+
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-2 Microstructure Features ────
+    # Feature computation only (depth_imbalance, aggressive buy/sell,
+    # CVD/CVD-slope, trade_intensity) — no HFT_FLOW_SCORE, no
+    # ConfidenceEngine wiring; those are HFT-3/HFT-4, separately approved.
+    # Number of top-of-book price levels summed for depth_imbalance. Must
+    # be <= the max_levels a BinanceWSClient/LocalOrderBook was built with.
+    HFT_FLOW_DEPTH_LEVELS: int = Field(default=10, alias="HFT_FLOW_DEPTH_LEVELS")
+    # Rolling window used for aggressive_buy/sell_volume, delta, and
+    # trade_intensity. Deliberately shorter than HFT_WS_TRADE_BUFFER_SECONDS
+    # (the WS client's raw retention window) so this is a sub-window of it,
+    # not a mismatched/overlapping period.
+    HFT_FLOW_TRADE_WINDOW_SECONDS: int = Field(default=10, alias="HFT_FLOW_TRADE_WINDOW_SECONDS")
+    # EMA smoothing factor applied to the periodic delta measurement to
+    # produce cvd_slope (design review §5: "slope = short EMA of delta").
+    # Higher = more reactive/less smoothed.
+    HFT_FLOW_CVD_EMA_ALPHA: float = Field(default=0.3, alias="HFT_FLOW_CVD_EMA_ALPHA")
+
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-3 Flow Score ──────────────────
+    # Combines HFT-2's raw features (depth_imbalance, delta, cvd_slope,
+    # trade_intensity) into HFT_FLOW_SCORE (-100..+100) + a 5-state enum.
+    # Still NOT wired into decision/confidence_engine.py — that is a later,
+    # separately-approved phase (see the design review's roadmap: HFT-4 is
+    # shadow-mode telemetry with explicitly NO trading impact; decision
+    # integration comes after that).
+    #
+    # CALIBRATION CAVEAT (documented, not hidden): the *_NORMALIZER values
+    # below convert raw volume units (delta, cvd_slope) into a [-1, 1]
+    # range. Per the design review §17, no historical order-book/trade-flow
+    # data exists yet to calibrate these against real per-symbol volume
+    # distributions — these are placeholder defaults that MUST be reviewed
+    # against real recorded data (HFT-5's replay dataset, once it exists)
+    # before this score is trusted for anything beyond shadow-mode
+    # observation. depth_imbalance needs no normalizer (already [-1, 1] by
+    # construction in MicrostructureEngine).
+    HFT_FLOW_DELTA_NORMALIZER: float = Field(default=10.0, alias="HFT_FLOW_DELTA_NORMALIZER")
+    HFT_FLOW_CVD_SLOPE_NORMALIZER: float = Field(default=5.0, alias="HFT_FLOW_CVD_SLOPE_NORMALIZER")
+
+    # Combination weights (design review §6's MVP model: depth_imbalance +
+    # delta + cvd_slope as directional inputs; trade_intensity as a
+    # magnitude multiplier, not a 4th directional term — see
+    # HFT_FLOW_INTENSITY_REFERENCE below). Need not sum to 1.0 — the
+    # scorer normalizes by their sum, mirroring
+    # ConfidenceEngine._normalise_weights()'s own convention.
+    HFT_FLOW_WEIGHT_DEPTH_IMBALANCE: float = Field(default=0.30, alias="HFT_FLOW_WEIGHT_DEPTH_IMBALANCE")
+    HFT_FLOW_WEIGHT_DELTA: float = Field(default=0.35, alias="HFT_FLOW_WEIGHT_DELTA")
+    HFT_FLOW_WEIGHT_CVD_SLOPE: float = Field(default=0.35, alias="HFT_FLOW_WEIGHT_CVD_SLOPE")
+
+    # trade_intensity acts as a magnitude DAMPENER, not a directional
+    # input (design review §6): a quiet/thin market's directional reading
+    # is trusted less, but never fully zeroed (the floor below prevents
+    # that) — it should never be able to flip or invent a direction.
+    HFT_FLOW_INTENSITY_REFERENCE: float = Field(default=2.0, alias="HFT_FLOW_INTENSITY_REFERENCE")
+    HFT_FLOW_MIN_INTENSITY_MULTIPLIER: float = Field(default=0.3, alias="HFT_FLOW_MIN_INTENSITY_MULTIPLIER")
+
+    # State classification thresholds — matches the -100..+100 scale and
+    # 5-state enum specified for this phase. Symmetric for buy/sell sides.
+    HFT_FLOW_STRONG_THRESHOLD: float = Field(default=70.0, alias="HFT_FLOW_STRONG_THRESHOLD")
+    HFT_FLOW_MODERATE_THRESHOLD: float = Field(default=30.0, alias="HFT_FLOW_MODERATE_THRESHOLD")
+
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-5 Confidence Integration ──────
+    # First phase where hft_flow can actually influence a trading decision
+    # (via decision/confidence_engine.py) — deliberately double-gated so
+    # the shipped defaults are byte-identical to before this phase:
+    #   1. DEFAULT_WEIGHTS["hft_flow"] = 0.0 in confidence_engine.py itself
+    #      (not a settings field — matches that module's existing pattern
+    #      of a hardcoded module-level weights dict). At weight 0, the
+    #      additive term contributes exactly nothing regardless of score.
+    #   2. HFT_FLOW_CONTRADICTION_ENABLED below, off by default — the
+    #      separate reduce/block contradiction path (design review
+    #      Section 9's Hybrid Model C) does not run at all unless this is
+    #      explicitly turned on, independent of the weight above.
+    # A person enabling HFT flow for paper-lane validation sets a non-zero
+    # weight via ConfidenceEngine.update_weights() and/or turns this flag
+    # on — ConfidenceEngine itself has no notion of execution_lane, so lane
+    # scoping (paper-only) is an operational choice made by whoever
+    # configures the paper-trading profile, not something this engine can
+    # enforce internally.
+    HFT_FLOW_CONTRADICTION_ENABLED: bool = Field(default=False, alias="HFT_FLOW_CONTRADICTION_ENABLED")
+    # Two-tier structure, mirroring ConfidenceEngine._check_blocks()'s
+    # existing reduce-vs-hard-block pattern (design review Section 9):
+    # opposing-direction hft_flow magnitude >= REDUCE_THRESHOLD subtracts
+    # HFT_FLOW_CONTRADICTION_PENALTY_POINTS from the final confidence;
+    # magnitude >= BLOCK_THRESHOLD (a further, more extreme boundary)
+    # forces action=BLOCKED outright, added as one more entry alongside
+    # the existing FUTURES_BLOCK_LONG/SHORT and FUNDING_BLOCK_LONG/SHORT
+    # reasons already returned by _check_blocks(). Defaults reuse HFT-3's
+    # own STRONG threshold for the reduce tier (a strongly-opposing flow
+    # reading), with BLOCK_THRESHOLD set near saturation so only the most
+    # extreme, near-maximal disagreement escalates all the way to a block.
+    HFT_FLOW_CONTRADICTION_REDUCE_THRESHOLD: float = Field(default=70.0, alias="HFT_FLOW_CONTRADICTION_REDUCE_THRESHOLD")
+    HFT_FLOW_CONTRADICTION_BLOCK_THRESHOLD: float = Field(default=90.0, alias="HFT_FLOW_CONTRADICTION_BLOCK_THRESHOLD")
+    HFT_FLOW_CONTRADICTION_PENALTY_POINTS: int = Field(default=15, alias="HFT_FLOW_CONTRADICTION_PENALTY_POINTS")
+
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-6 Low-weight Live ─────────────
+    # A named, auditable config value for the weight to use once HFT flow
+    # graduates from paper validation (HFT-5) to controlled live use. This
+    # setting exists purely as a documented value — nothing in this
+    # codebase reads it automatically. It is NOT wired into
+    # ConfidenceEngine's construction anywhere, and DEFAULT_WEIGHTS in
+    # decision/confidence_engine.py still hardcodes hft_flow at 0.0
+    # regardless of this setting's value. Enabling it for live is a
+    # deliberate, explicit operational step — see docs/architecture.md's
+    # HFT Flow Trend Following section ("Enabling for live") for the
+    # exact one-line change required, and do it only after HFT-5's paper
+    # validation has produced enough evidence to justify it.
+    #
+    # Default of 5.0 (vs. HFT-5's own paper-testing examples of 20.0) is
+    # deliberately small — about 5% of total confidence weight — so that
+    # even if this value is mistakenly applied, it can only ever nudge an
+    # already-close decision, never dominate SMC/Volume/OI/Funding/Regime.
+    HFT_FLOW_LIVE_WEIGHT: float = Field(default=5.0, alias="HFT_FLOW_LIVE_WEIGHT")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -494,6 +643,12 @@ class Settings(BaseSettings):
     @property
     def base_url(self) -> str:
         return self.BINANCE_TESTNET_BASE_URL if self.BINANCE_TESTNET else self.BINANCE_PROD_BASE_URL
+
+    @property
+    def hft_ws_url(self) -> str:
+        """V16 Phase 4C Track B (HFT-1): mirrors `base_url`'s
+        testnet/mainnet selection, for the WebSocket host instead of REST."""
+        return self.HFT_WS_TESTNET_BASE_URL if self.BINANCE_TESTNET else self.HFT_WS_BASE_URL
 
 
 settings = Settings()
