@@ -1,65 +1,52 @@
-# MIGRATION — Fix: Dangling `signals_pre_w14_2d_1` FK Breaks Trade Journaling
+# MIGRATION — Fix: ExecutionCoordinator Rejects Scanner-Discovered Symbols
 
 ## Do you need to do anything?
 
-**Yes, one step — but it's the same step you always do.**
+**No — this is off by default.** Importing this bundle and restarting
+the bot changes nothing about current behavior. Scanner-discovered
+symbols outside `settings.symbol_list` will continue to fail exactly as
+before (`Symbol 'X' is not configured on this coordinator`) until you
+explicitly opt in.
 
-## Step 1: Import this bundle, restart the bot
+## To actually let the coordinator trade scanner-discovered symbols
 
-That's it for the fix to take effect. `migration_001`'s repair pass
-(Part A) is already wired into the automatic every-boot migration
-sequence (`database/migrations/runner.py`, unchanged), the same way
-every migration in this project always has been. The next time the
-bot boots after this bundle is imported, it will:
-
-1. Detect any table whose FK still dangles from the old bug
-   (`trades`, and/or `ai_explanations` if it already exists on your
-   database).
-2. Rebuild just that table from the current, correct schema — no data
-   is lost, no other column changes, row counts are preserved.
-3. Log the repair the same way every other migration step already
-   logs to `logs/brain_bot.log`.
-
-Nothing to configure, no flag to flip. This is idempotent — if there's
-nothing dangling (or the repair already ran once), it's a silent
-no-op on every subsequent boot.
-
-## Step 2 (optional): inspect or repair a copy first, without booting
-
-If you'd rather see exactly what's dangling on your real file before
-trusting the automatic path — or want to repair a **scratch copy** and
-verify it independently first — use the new standalone script:
+Add to `.env`:
 
 ```
-# Report only — writes nothing:
-python -m database.migrations.migration_002_repair_dangling_signals_fk brain_bot_v13.db
-
-# Actually apply the repair:
-python -m database.migrations.migration_002_repair_dangling_signals_fk brain_bot_v13.db --apply
+EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS=true
 ```
 
-`--dry-run` behavior is the default (no flag needed) — you have to
-explicitly pass `--apply` for it to write anything. This script is
-**not** part of the automatic boot sequence; it's a fully manual tool.
-Recommended sequence if you want extra confidence before restarting:
+Optional — override the default cap of 50 (see PATCH_NOTES.md for why
+this cap exists and how 50 was chosen):
 
 ```
-copy brain_bot_v13.db brain_bot_v13.db.scratch-copy
-python -m database.migrations.migration_002_repair_dangling_signals_fk brain_bot_v13.db.scratch-copy --apply
-# inspect brain_bot_v13.db.scratch-copy — confirm it looks right —
-# then just restart the bot normally; Step 1 handles the real file.
+EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS=50
 ```
 
-## What this does NOT require
+Restart the bot. From then on:
 
-- No schema version bump, no config change.
-- No changes to `journal/journal_v2.py` or anything that writes trades
-  — only the stored FK *target* on the affected table(s) changes.
-- No downtime beyond your normal restart.
+- A scanner-discovered symbol outside the originally-configured list
+  gets registered automatically on first use, up to the cap.
+- `logs/brain_bot.log` gets an INFO line each time:
+  `ExecutionCoordinator: dynamically registering new symbol 'X' ...`
+- Once `max_dynamic_symbols` distinct new symbols have been registered
+  in this run, any further genuinely-new symbol gets the same
+  `ValueError` as before this phase (now mentioning the cap explicitly)
+  — this resets on the next restart (the list is in-memory only).
 
-## If you want to know exactly what was affected on your real file
+## What this does NOT change
 
-The automatic path (Step 1) logs which tables it repaired, if any, to
-`logs/brain_bot.log` under the existing `[0/9] running migrations`
-startup line. Grep for `fk_repaired` after your next restart if you
-want to confirm.
+- The originally-configured `symbol_list` behavior — unaffected either
+  way.
+- `main.py`'s startup pre-warming (`initialize()`) — still only
+  pre-warms the statically-configured symbols. A dynamically-registered
+  symbol's leverage/margin get set on its own first trade instead (this
+  is how the code has always worked for every call, not something new).
+- Nothing about `MarketScanner` or `OpportunityRanker`.
+
+## If you want this on but want a tighter/looser cap
+
+`EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS` is independent of
+`EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` — set both together in `.env`.
+Setting the cap without the flag has no effect (ignored when the flag
+is off).

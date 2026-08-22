@@ -32,6 +32,20 @@ Design constraints (see docs/architecture.md §13 for the full writeup):
     only main.py's `tm.execute_trade(...)`) keeps working with ZERO changes
     when only one symbol is configured — see migration notes.
   - No new third-party dependencies.
+  - fix/execution-coordinator-symbol-mismatch: `allow_dynamic_symbols`
+    (opt-in, default False — see __init__) resolves a mismatch this class
+    didn't anticipate when it was written: MarketScanner/OpportunityRanker
+    later grew to discover candidates across the FULL ~527-symbol Binance
+    universe (docs/architecture.md's Scanner/OpportunityRanker sections),
+    while this class's `_symbols` allowlist still defaults to a single
+    symbol. With the flag off (default), behavior is byte-for-byte
+    unchanged — an unconfigured symbol still raises ValueError exactly as
+    before. With it on, get_manager() registers a genuinely new symbol on
+    first use instead of raising, up to `max_dynamic_symbols` additional
+    symbols beyond the originally-configured list — see __init__'s
+    docstring for why that cap exists even though TradeManager
+    construction itself is cheap (no network call at construction time;
+    see TradeManager.__init__).
 """
 
 from __future__ import annotations
@@ -47,7 +61,14 @@ logger = get_logger(__name__)
 
 class ExecutionCoordinator:
 
-    def __init__(self, data_provider, symbols: list[str] | None = None, lifecycle=None) -> None:
+    def __init__(
+        self,
+        data_provider,
+        symbols: list[str] | None = None,
+        lifecycle=None,
+        allow_dynamic_symbols: bool = False,
+        max_dynamic_symbols: int = 50,
+    ) -> None:
         """
         Parameters
         ----------
@@ -70,6 +91,52 @@ class ExecutionCoordinator:
             constructs (get_manager()), so EMERGCLOSE reporting (see
             TradeManager.__init__) works for every coordinator-managed
             symbol, not just a manually-constructed one.
+        allow_dynamic_symbols : bool, default False
+            fix/execution-coordinator-symbol-mismatch. False (default):
+            byte-for-byte today's behavior — get_manager() raises
+            ValueError for any symbol not in `symbols` at construction
+            time, with zero changes to that code path. True: a symbol
+            outside the original list gets registered on first use
+            instead of raising (see get_manager()), up to
+            `max_dynamic_symbols` additional symbols. Wired to
+            config.settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS by
+            execution/execution_factory.py — see that file for the
+            settings-driven default (also False).
+        max_dynamic_symbols : int, default 50
+            Ceiling on how many symbols BEYOND the originally-configured
+            list can ever be dynamically registered over this
+            coordinator's lifetime (i.e. process uptime — this resets on
+            restart, since `_symbols`/`_managers` are in-memory only).
+            Ignored when allow_dynamic_symbols=False.
+
+            Decision (fix/execution-coordinator-symbol-mismatch, surfaced
+            explicitly per that phase's own instruction rather than
+            silently picked): PORTFOLIO_MAX_POSITIONS (default 5) bounds
+            CONCURRENT open positions, not the cumulative count of
+            DISTINCT symbols this coordinator could ever be asked to
+            manage over a long-running process — a symbol can close and a
+            completely different one open on the next cycle, and
+            `_symbols`/`_managers` are append-only (no eviction), so an
+            unbounded scanner universe (~527 symbols, see
+            scanner/market_scanner.py) feeding this over weeks/months
+            could in principle accumulate a TradeManager per symbol ever
+            selected, not just per symbol concurrently held.
+            TradeManager construction itself is cheap — no network call
+            happens until its first execute_trade() (see
+            TradeManager.__init__/_symbol_info's @retry_api_call, called
+            lazily) — so this cap is NOT primarily a memory/resource
+            safeguard; it exists because "which symbols can the live
+            executor ever place an order on" is a live-money scope-of-
+            trading decision (this phase's own framing), and an explicit,
+            visible ceiling is safer than an implicitly unbounded one.
+            50 was chosen as well above any realistic concurrent need
+            (10x PORTFOLIO_MAX_POSITIONS' default of 5) while still far
+            short of the full ~527-symbol universe — a deliberately
+            generous but non-infinite default. Once reached, a symbol
+            beyond the cap gets EXACTLY today's ValueError (same
+            exception type, same non-retryable classification in
+            execution/execution_orchestrator.py's _NON_RECOVERABLE_MARKERS
+            — unchanged), not a different failure mode.
         """
         self._data_provider = data_provider
         self._symbols: list[str] = list(symbols) if symbols else list(settings.symbol_list)
@@ -79,16 +146,23 @@ class ExecutionCoordinator:
         self._default_symbol: str = self._symbols[0]
         self._managers: dict[str, TradeManager] = {}
         self._lifecycle = lifecycle
-        # Guards _managers. main.py's trading loop and api/app.py's dashboard
+        self._allow_dynamic_symbols = allow_dynamic_symbols
+        self._max_dynamic_symbols = max_dynamic_symbols
+        self._dynamically_registered_count = 0
+        # Guards _managers AND (when allow_dynamic_symbols=True) _symbols'
+        # append below. main.py's trading loop and api/app.py's dashboard
         # thread can both reach a coordinator instance (e.g. via a future
         # health/status endpoint) — cheap insurance against two threads
-        # racing to construct the same symbol's manager.
+        # racing to construct the same symbol's manager (or, now, racing
+        # to register the same new symbol).
         self._lock = threading.RLock()
         self._shutdown = False
 
         logger.info(
             f"ExecutionCoordinator ready | symbols={self._symbols} "
-            f"default={self._default_symbol}"
+            f"default={self._default_symbol} "
+            f"allow_dynamic_symbols={self._allow_dynamic_symbols}"
+            + (f" max_dynamic_symbols={self._max_dynamic_symbols}" if self._allow_dynamic_symbols else "")
         )
 
     # ── Manager lifecycle ────────────────────────────────────────────────
@@ -99,16 +173,48 @@ class ExecutionCoordinator:
         creating and caching it on first use. O(1) dict lookup on the
         cache-hit path; construction only happens once per symbol for the
         life of this coordinator (singleton-per-symbol, no duplicates).
+
+        fix/execution-coordinator-symbol-mismatch: when
+        allow_dynamic_symbols=True, a symbol outside the originally-
+        configured list is registered here on first use (up to
+        max_dynamic_symbols additional symbols) instead of raising — see
+        __init__'s docstring for the full design rationale. With the flag
+        at its default (False), this method's behavior is byte-for-byte
+        unchanged from before this phase.
         """
         if self._shutdown:
             raise RuntimeError("ExecutionCoordinator has been shut down")
 
         symbol = symbol or self._default_symbol
+
         if symbol not in self._symbols:
-            raise ValueError(
-                f"Symbol '{symbol}' is not configured on this coordinator "
-                f"(configured: {self._symbols})"
-            )
+            if not self._allow_dynamic_symbols:
+                raise ValueError(
+                    f"Symbol '{symbol}' is not configured on this coordinator "
+                    f"(configured: {self._symbols})"
+                )
+            with self._lock:
+                # Re-check inside the lock: another thread may have already
+                # registered this exact symbol (or pushed the count to the
+                # cap) between the membership check above and here.
+                if symbol not in self._symbols:
+                    if self._dynamically_registered_count >= self._max_dynamic_symbols:
+                        raise ValueError(
+                            f"Symbol '{symbol}' is not configured on this coordinator "
+                            f"(configured: {self._symbols}) and the dynamic-symbol cap "
+                            f"({self._max_dynamic_symbols}) has been reached — "
+                            f"{self._dynamically_registered_count} symbols already "
+                            f"registered dynamically this run"
+                        )
+                    logger.info(
+                        f"ExecutionCoordinator: dynamically registering new symbol "
+                        f"'{symbol}' (allow_dynamic_symbols=True; not in originally "
+                        f"configured list {self._symbols}; "
+                        f"{self._dynamically_registered_count + 1}/{self._max_dynamic_symbols} "
+                        f"of this run's dynamic-symbol cap)"
+                    )
+                    self._symbols.append(symbol)
+                    self._dynamically_registered_count += 1
 
         manager = self._managers.get(symbol)
         if manager is not None:

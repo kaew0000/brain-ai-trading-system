@@ -403,6 +403,23 @@ class Settings(BaseSettings):
     # of registered strategies and what each one requires.
     STRATEGY_NAME: str = Field(default="portfolio_signal_provider", alias="STRATEGY_NAME")
 
+    # ── fix/execution-coordinator-symbol-mismatch ────────────────────────
+    # Off by default — same posture as SCHEDULER_ENABLED/CEO_MULTI_SYMBOL_
+    # ENABLED above. False = ExecutionCoordinator.get_manager() rejects any
+    # symbol outside settings.symbol_list exactly as it always has
+    # (ValueError). True = a scanner/ranker-discovered symbol outside that
+    # static list gets registered on first use instead of being rejected —
+    # see execution/execution_coordinator.py's __init__ docstring for the
+    # full design (including why max_dynamic_symbols exists — this is not
+    # purely a memory optimization, it's a live-money scope-of-trading
+    # decision, so both dials default to the conservative posture: off,
+    # and bounded once on).
+    EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS: bool = Field(default=False, alias="EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS")
+    # Ignored when the flag above is False. See
+    # ExecutionCoordinator.__init__'s max_dynamic_symbols docstring for
+    # the full reasoning behind the default of 50.
+    EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS: int = Field(default=50, alias="EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS")
+
     # ── Track C3 Phase 1: Unified Order/Trade Timeline (read-model) ─────
     # Off by default — same posture as SCHEDULER_ENABLED/CEO_MULTI_SYMBOL_
     # ENABLED above: this starts a new background poller
