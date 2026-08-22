@@ -1,44 +1,65 @@
-# MIGRATION — Fix: Live Account Balance Reads 0.00 USDT
+# MIGRATION — Fix: Dangling `signals_pre_w14_2d_1` FK Breaks Trade Journaling
 
 ## Do you need to do anything?
 
-**Yes — one action required to actually diagnose the live problem.**
-This bundle does not (and cannot, from this sandbox) fix the root
-cause; it makes it observable and gives you a tool to find it.
+**Yes, one step — but it's the same step you always do.**
 
 ## Step 1: Import this bundle, restart the bot
 
-No settings changed, no schema changed, no existing behavior changed
-for anything that was already working. `get_account_balance()` returns
-the exact same values it always did — the only change is that the
-previously-silent "no USDT entry found" path now logs a `WARNING`
-instead of nothing, and a successful read now logs at `INFO` instead
-of `DEBUG`. Safe to import and restart with zero behavior risk.
+That's it for the fix to take effect. `migration_001`'s repair pass
+(Part A) is already wired into the automatic every-boot migration
+sequence (`database/migrations/runner.py`, unchanged), the same way
+every migration in this project always has been. The next time the
+bot boots after this bundle is imported, it will:
 
-## Step 2: Run the diagnostic script against your live-configured account
+1. Detect any table whose FK still dangles from the old bug
+   (`trades`, and/or `ai_explanations` if it already exists on your
+   database).
+2. Rebuild just that table from the current, correct schema — no data
+   is lost, no other column changes, row counts are preserved.
+3. Log the repair the same way every other migration step already
+   logs to `logs/brain_bot.log`.
+
+Nothing to configure, no flag to flip. This is idempotent — if there's
+nothing dangling (or the repair already ran once), it's a silent
+no-op on every subsequent boot.
+
+## Step 2 (optional): inspect or repair a copy first, without booting
+
+If you'd rather see exactly what's dangling on your real file before
+trusting the automatic path — or want to repair a **scratch copy** and
+verify it independently first — use the new standalone script:
 
 ```
-python scripts/diagnose_balance.py
+# Report only — writes nothing:
+python -m database.migrations.migration_002_repair_dangling_signals_fk brain_bot_v13.db
+
+# Actually apply the repair:
+python -m database.migrations.migration_002_repair_dangling_signals_fk brain_bot_v13.db --apply
 ```
 
-Run this with the **same `.env`** the live bot uses (same
-`BINANCE_TESTNET`, same API keys). It prints:
-- Resolved `EXECUTION_MODE`, `BINANCE_TESTNET`, `base_url`, which API
-  key alias is active, and whether it's set (never the key itself).
-- The full raw `trade_client.balance()` response.
-- An analysis pointing at which of the 5 candidate causes (documented
-  in `PATCH_NOTES.md`) the response is consistent with.
+`--dry-run` behavior is the default (no flag needed) — you have to
+explicitly pass `--apply` for it to write anything. This script is
+**not** part of the automatic boot sequence; it's a fully manual tool.
+Recommended sequence if you want extra confidence before restarting:
 
-## Step 3: Report back what it shows
+```
+copy brain_bot_v13.db brain_bot_v13.db.scratch-copy
+python -m database.migrations.migration_002_repair_dangling_signals_fk brain_bot_v13.db.scratch-copy --apply
+# inspect brain_bot_v13.db.scratch-copy — confirm it looks right —
+# then just restart the bot normally; Step 1 handles the real file.
+```
 
-Paste the script's output (redact nothing except you already don't
-need to — no key material is ever printed) so the actual fix can be
-scoped. The five candidate causes need different fixes — a parsing
-change, a `.env` value, or a Binance-side API key permission change
-that no code change can address — so this phase deliberately stops
-here rather than guessing.
+## What this does NOT require
 
-## New file: `scripts/`
+- No schema version bump, no config change.
+- No changes to `journal/journal_v2.py` or anything that writes trades
+  — only the stored FK *target* on the affected table(s) changes.
+- No downtime beyond your normal restart.
 
-This is the first file in a `scripts/` directory — none existed
-before this phase. Future one-off operator scripts should live here.
+## If you want to know exactly what was affected on your real file
+
+The automatic path (Step 1) logs which tables it repaired, if any, to
+`logs/brain_bot.log` under the existing `[0/9] running migrations`
+startup line. Grep for `fk_repaired` after your next restart if you
+want to confirm.

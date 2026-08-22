@@ -4350,3 +4350,104 @@ runs `scripts/diagnose_balance.py` against the live-configured account
 and reports the raw response; the actual Step-3 fix (which may not be
 a code change at all, if it turns out to be cause 2 or 5) gets scoped
 as its own follow-up phase once that's known.
+
+## 44. Fix: Dangling `signals_pre_w14_2d_1` FK Breaks Trade Journaling (2026-08-21)
+
+Continuation of §43's diagnostic: the same 30+-hour production log
+showed 411 `Invalid qty=0.0` skips (balance = 0.00, §43's bug) — but
+even after that's fixed, every trade insert with a non-null
+`signal_id` was independently broken by a second, unrelated bug in
+`database/migrations/migration_001_execution_lane_backfill.py`.
+
+### Root cause — confirmed by direct reproduction against real SQLite
+
+`_LANE_TABLES` processed `trades` (then `agent_decisions`) **before**
+`signals`. SQLite's `ALTER TABLE ... RENAME TO` automatically rewrites
+every OTHER table's stored FK clauses that reference the table being
+renamed:
+
+1. `trades` rebuilt first — fresh `signal_id INTEGER REFERENCES
+   signals(id)`, correct at that instant.
+2. `signals` rebuilt next (`ALTER TABLE signals RENAME TO
+   signals_pre_w14_2d_1`) — this silently rewrites `trades`'s
+   already-fresh FK clause to `REFERENCES "signals_pre_w14_2d_1"(id)`
+   as an automatic SQLite side effect.
+3. `signals_pre_w14_2d_1` gets dropped moments later. `trades` is left
+   permanently referencing a table that no longer exists.
+
+`ai_explanations` (`signal_id INTEGER REFERENCES signals(id)`,
+`schema_v13.sql` ~line 304) was never in `_LANE_TABLES` — but the same
+rewrite corrupts it too, purely as a side effect of step 2, regardless
+of table processing order, since it's never rebuilt by this migration
+either way.
+
+**A cascading effect found during testing, not anticipated by the
+original brief**: repairing one table can itself corrupt ANOTHER table
+that references it. `trades.explanation_id REFERENCES
+ai_explanations(id)` — repairing `ai_explanations` (rename + recreate)
+corrupts `trades`'s already-correct `explanation_id` clause the exact
+same way. The repair pass (below) iterates to a fixed point rather
+than a single pass to handle this.
+
+### What changed
+
+- `_LANE_TABLES` reordered: `signals` first. Verified empirically this
+  alone prevents the `trades` case for fresh migration applications
+  going forward — but does NOT cover `ai_explanations`, which isn't in
+  this tuple at all, so this is not a complete fix by itself.
+- `_rebuild_table()` (new): extracted shared ALTER-RENAME/recreate/copy
+  mechanics out of `_rebuild_table_with_lane`, parameterized by an
+  optional extra column — both the execution_lane backfill and the new
+  FK repair now share one implementation.
+- `_find_dangling_fk_tables()` (new): for every table, walks `PRAGMA
+  foreign_key_list` and flags FKs whose target ends with this
+  migration's own `_pre_w14_2d_1` temp-rename suffix. **Not** "any FK
+  pointing at a currently-missing table" — that broader version (tried
+  first) false-positived on `trades.explanation_id REFERENCES
+  ai_explanations(id)` whenever `ai_explanations` simply hadn't been
+  created yet, a normal benign state unrelated to this bug.
+- `_repair_dangling_fks()` (new): rebuilds flagged tables from
+  `schema_v13.sql`'s current CREATE TABLE text. Iterates to a fixed
+  point (bounded, 10 passes) to handle the cascading case above.
+- `migrate()`: calls the repair pass unconditionally as its final
+  step; report dict gains `fk_repairs`.
+- `database/migrations/migration_002_repair_dangling_signals_fk.py`
+  (new): standalone, dry-run-by-default operator script reusing Part
+  A's detection/repair functions directly. Deliberately **not**
+  registered in `runner.py`'s automatic every-boot sequence — that
+  path has no way to honor a dry-run/--apply gate, and this script's
+  purpose is a human-confirmed gate for live financial data, separate
+  from (not a replacement for) `migration_001`'s own automatic repair.
+
+### Why the automatic repair pass doesn't bypass the "confirm before
+### mutating live data" principle
+
+`migration_001` was already registered in `runner.py`'s automatic
+every-boot sequence before this phase — that's an existing, accepted
+convention (idempotent migrations are safe to run unattended). This
+phase's repair pass inherits that same idempotency guarantee (verified
+by test — see `tests/test_migration_001_fk_repair.py`). The human
+confirmation step is Kaew choosing when to import the bundle and
+restart, same as every prior phase; `migration_002` exists as an
+*additional* fully-manual tool for anyone who wants to inspect/repair
+a copy before that restart.
+
+### Scope boundary — no live DB reachable from this sandbox
+
+No `.db` file is tracked in this repo (confirmed by search); Kaew's
+real `brain_bot_v13.db` lives only on his own machine and was never
+reachable here. Every finding and test in this phase is against a
+synthetic reproduction built from `schema_v13.sql`'s real CREATE TABLE
+text — the closest available substitute for the brief's requested
+"copy of the live DB" diagnostics. See PATCH_NOTES.md for the full
+transparency note, including that running `import main` in this
+sandbox auto-creates a harmless empty local `brain_bot_v13.db` (0
+rows) via the default relative `DATABASE_PATH` — deleted before
+finishing this phase, not Kaew's data.
+
+**Next up**: everything §43's own scope boundary carried forward
+(which of its 5 candidate balance causes applies — needs
+`scripts/diagnose_balance.py` run against the real account) remains
+open, now joined by: confirm via `logs/brain_bot.log`'s `fk_repaired`
+line after the next real restart that this phase's repair actually
+ran against the live file as expected.
