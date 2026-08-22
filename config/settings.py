@@ -587,6 +587,25 @@ class Settings(BaseSettings):
     HFT_FLOW_CONTRADICTION_BLOCK_THRESHOLD: float = Field(default=90.0, alias="HFT_FLOW_CONTRADICTION_BLOCK_THRESHOLD")
     HFT_FLOW_CONTRADICTION_PENALTY_POINTS: int = Field(default=15, alias="HFT_FLOW_CONTRADICTION_PENALTY_POINTS")
 
+    # ── V16 Phase 4C Track B: HFT Flow — HFT-6 Low-weight Live ─────────────
+    # A named, auditable config value for the weight to use once HFT flow
+    # graduates from paper validation (HFT-5) to controlled live use. This
+    # setting exists purely as a documented value — nothing in this
+    # codebase reads it automatically. It is NOT wired into
+    # ConfidenceEngine's construction anywhere, and DEFAULT_WEIGHTS in
+    # decision/confidence_engine.py still hardcodes hft_flow at 0.0
+    # regardless of this setting's value. Enabling it for live is a
+    # deliberate, explicit operational step — see docs/architecture.md's
+    # HFT Flow Trend Following section ("Enabling for live") for the
+    # exact one-line change required, and do it only after HFT-5's paper
+    # validation has produced enough evidence to justify it.
+    #
+    # Default of 5.0 (vs. HFT-5's own paper-testing examples of 20.0) is
+    # deliberately small — about 5% of total confidence weight — so that
+    # even if this value is mistakenly applied, it can only ever nudge an
+    # already-close decision, never dominate SMC/Volume/OI/Funding/Regime.
+    HFT_FLOW_LIVE_WEIGHT: float = Field(default=5.0, alias="HFT_FLOW_LIVE_WEIGHT")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
