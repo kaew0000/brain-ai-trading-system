@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## [Unreleased] — Fix: Dangling `signals_pre_w14_2d_1` FK Breaks Trade Journaling
+
+Root cause: `database/migrations/migration_001_execution_lane_backfill.py`
+processed `trades` before `signals` in `_LANE_TABLES`. SQLite's `ALTER
+TABLE ... RENAME TO` automatically rewrites every other table's stored
+FK clauses that reference the table being renamed — so when `signals`
+was rebuilt after `trades` already had a fresh FK, that fresh clause
+was silently rewritten to reference the temp rename name, which gets
+dropped moments later. Every trade insert with a non-null `signal_id`
+then failed with `sqlite3.OperationalError: no such table:
+main.signals_pre_w14_2d_1`. `ai_explanations` (same FK shape, not even
+in `_LANE_TABLES`) was corrupted by the identical side effect. See
+`PATCH_NOTES.md` for the full root-cause writeup, including an
+important interaction: repairing one table can itself corrupt another
+table that references it (repairing `ai_explanations` initially broke
+`trades.explanation_id`'s already-fixed clause) — the repair pass
+iterates to a fixed point to handle this.
+
+### Added
+- `database/migrations/migration_002_repair_dangling_signals_fk.py` —
+  standalone, dry-run-by-default operator script for inspecting/repairing
+  a database on demand. Deliberately not registered in
+  `runner.py`'s automatic boot sequence.
+- `_find_dangling_fk_tables()` / `_repair_dangling_fks()` /
+  `_rebuild_table()` in `migration_001_execution_lane_backfill.py`.
+- 11 new tests across
+  `tests/test_migration_001_fk_repair.py` and
+  `tests/test_migration_002_repair_dangling_signals_fk.py`.
+
+### Changed
+- `_LANE_TABLES` reordered so `signals` rebuilds first — prevents this
+  specific corruption for any fresh application of this migration
+  going forward. Kept alongside (not instead of) the generic repair
+  pass, since reordering alone can't cover `ai_explanations`.
+- `migrate()`'s report dict gains an `fk_repairs` key.
+
 ## [Unreleased] — Fix: Live Account Balance Reads 0.00 USDT (Blocks Every Trade)
 
 Root cause: `data/binance_provider.py`'s `get_account_balance()`
