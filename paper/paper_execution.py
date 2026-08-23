@@ -62,6 +62,20 @@ class PaperExecutionEngine:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    @property
+    def open_positions(self) -> list[PaperPosition]:
+        """Read-only snapshot of currently open positions. Additive —
+        existing callers that never used this are unaffected."""
+        with self._lock:
+            return list(self._open)
+
+    @property
+    def closed_trades(self) -> list[ClosedTrade]:
+        """Read-only snapshot of all closed trades this session.
+        Additive — existing callers that never used this are unaffected."""
+        with self._lock:
+            return list(self._closed)
+
     def execute(self, decision, risk_pct: float = 0.01) -> dict:
         """
         Open a paper position from a decision object.
