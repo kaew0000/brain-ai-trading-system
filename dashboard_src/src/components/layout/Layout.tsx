@@ -5,6 +5,7 @@ import { useUI, useDecision, useHealth, useCommander, useAuth } from '@/stores'
 import { StatusDot, ActionBadge } from '@/components/common'
 import LifecycleControl from '@/components/commander/LifecycleControl'
 import LoginModal from '@/components/auth/LoginModal'
+import { parseBootToken } from '@/lib/bootToken'
 import clsx from 'clsx'
 
 const NAV = [
@@ -50,15 +51,32 @@ export default function Layout(){
   const isLive=lifecycleState==='RUNNING'
   const [showLogin,setShowLogin]=useState(false)
 
-  // V16 Phase 4C — Dashboard Session Persistence. Runs once when the
-  // app shell mounts, before the operator does anything. Silently
-  // tries to restore an existing session from the httpOnly refresh
-  // cookie set by a previous login() — see stores/index.ts's
-  // restoreSession() and lib/api.ts's own docstring for the full
-  // root-cause writeup. No-op (leaves the LOGIN button showing,
-  // exactly as before this phase) if there's nothing to restore.
+  // V16 — console/log-based auto-login (companion to main.py's
+  // _boot_login_url()). Runs once when the app shell mounts, BEFORE
+  // restoreSession()'s cookie-based path: main.py auto-opens the
+  // browser at "http://localhost:<port>/?token=<api_key>" printed to
+  // its own startup console log, so the operator never sees/uses the
+  // dashboard's LoginModal at all when starting the bot this way. If
+  // there's no ?token= (e.g. a plain bookmark, or auth disabled),
+  // falls through to the existing restoreSession() cookie-restore path
+  // unchanged — LoginModal remains available as a manual fallback.
+  //
+  // The token is stripped from the URL immediately (history.replaceState)
+  // regardless of login outcome, so it doesn't linger in the address
+  // bar or browser history any longer than the one page load that
+  // consumed it — see main.py::_boot_login_url()'s docstring for the
+  // full security note.
+  const login=useAuth(s=>s.login)
   const restoreSession=useAuth(s=>s.restoreSession)
-  useEffect(()=>{restoreSession()},[restoreSession])
+  useEffect(()=>{
+    const {token,strippedSearch}=parseBootToken(window.location.search)
+    if(token){
+      window.history.replaceState({}, '', window.location.pathname+strippedSearch+window.location.hash)
+      login(token)
+    }else{
+      restoreSession()
+    }
+  },[login,restoreSession])
 
   return(
     <div className="flex h-screen overflow-hidden bg-surface bg-grid bg-grid">
