@@ -614,6 +614,36 @@ def build_system() -> dict:
             logger.error(f"OrderTimeline failed to start (non-fatal): {exc}")
             order_timeline = None
 
+    # V16 Phase 4C Track C (Background Paper-Training Engine) — off by
+    # default (see config/settings.py BACKGROUND_PAPER_TRAINING_ENABLED).
+    # Same guarded, best-effort, non-fatal pattern as MarketScanner/
+    # ExecutionScheduler/OrderTimeline above: any failure here is logged
+    # and never aborts startup or touches the primary trading loop(s),
+    # which this phase does not modify. Deliberately independent of
+    # commander/control_state.py's lifecycle_state and of the primary
+    # lane's balance — see training_lane/training_lane_runner.py's
+    # module docstring for why. Reuses the SAME data_provider/
+    # regime_engine/smc_engine/volume_engine/context_builder/
+    # confidence_engine instances already constructed above — never
+    # constructs a second data_provider or a second decision pipeline.
+    training_lane_runner = None
+    if settings.BACKGROUND_PAPER_TRAINING_ENABLED:
+        try:
+            from training_lane.training_lane_runner import TrainingLaneRunner
+
+            training_lane_runner = TrainingLaneRunner(
+                data_provider=data_provider,
+                regime_engine=regime_engine,
+                smc_engine=smc_engine,
+                volume_engine=volume_engine,
+                context_builder=context_builder,
+                confidence_engine=confidence_engine,
+            )
+            training_lane_runner.start()
+        except Exception as exc:
+            logger.error(f"TrainingLaneRunner failed to start (non-fatal): {exc}")
+            training_lane_runner = None
+
     logger.info("[9/9] All components ready.")
 
     # ── Agent Layer ───────────────────────────────────────────────────────────
@@ -666,6 +696,7 @@ def build_system() -> dict:
         "market_scanner":        market_scanner,
         "execution_scheduler":   execution_scheduler,
         "order_timeline":        order_timeline,
+        "training_lane_runner":  training_lane_runner,
         "exchange_manager":      exchange_manager,
         "current_mission_id":    None,
     }
@@ -1938,6 +1969,10 @@ def main() -> None:
     # than silently fixed here, since neither is part of Track C3.
     if components.get("order_timeline") is not None:
         components["order_timeline"].stop()
+    # V16 Phase 4C Track C — same graceful-stop pattern as OrderTimeline
+    # just above, scoped to this phase's own new service only.
+    if components.get("training_lane_runner") is not None:
+        components["training_lane_runner"].stop()
     logger.info("Bot stopped. Final report:")
     daily_report(components)
 

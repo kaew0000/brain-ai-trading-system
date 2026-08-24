@@ -440,6 +440,40 @@ class Settings(BaseSettings):
     ORDER_TIMELINE_POLL_INTERVAL_SECONDS: float = Field(
         default=5.0, alias="ORDER_TIMELINE_POLL_INTERVAL_SECONDS"
     )
+    # ── V16 Phase 4C Track C: Background Paper-Training Engine ──────────
+    # Off by default — same posture as every other optional subsystem in
+    # this file (SCHEDULER_ENABLED, ORDER_TIMELINE_ENABLED, etc.): a
+    # fresh clone's boot behavior is byte-identical to before this
+    # feature existed until a person explicitly turns it on. When True,
+    # main.py starts training_lane/training_lane_runner.py::
+    # TrainingLaneRunner on its own daemon thread at boot — independent
+    # of commander/control_state.py's lifecycle_state (that gate only
+    # matters once lifecycle_state == RUNNING and only governs live-order
+    # call sites; see control_state.py's own LIFECYCLE_STOPPED docstring)
+    # and independent of the primary execution_lane's balance, per the
+    # person's explicit request that this run "even if real balance is 0".
+    BACKGROUND_PAPER_TRAINING_ENABLED: bool = Field(
+        default=False, alias="BACKGROUND_PAPER_TRAINING_ENABLED"
+    )
+    # Starting (and post-bust reset) balance for the training lane's own
+    # dedicated PaperAccount — fully isolated from the primary lane's
+    # execution engine (see paper/paper_account.py::PaperAccount, a
+    # plain in-memory object with its own lock; no shared state).
+    BACKGROUND_TRAINING_STARTING_BALANCE: float = Field(
+        default=100.0, alias="BACKGROUND_TRAINING_STARTING_BALANCE"
+    )
+    # Deliberately faster than the primary loop's 60s cycle (person's
+    # explicit choice: denser training data over lower REST call volume).
+    # Safe because data/binance_provider.py's market-data calls are
+    # already circuit-breaker + retry wrapped (@retry_api_call,
+    # system_health/circuit_breaker.py) and already have multiple
+    # concurrent readers today (legacy loop + MarketScanner both call it
+    # independently) — this is one more reader of the same wrapper, not
+    # a new unprotected REST client.
+    BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS: float = Field(
+        default=20.0, alias="BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS"
+    )
+
     # Row-count cap for order_timeline_history (operational history
     # only — the journal, not this table, is the durable trade record).
     # Trimmed lazily every _TRIM_CHECK_INTERVAL persisted batches (see
