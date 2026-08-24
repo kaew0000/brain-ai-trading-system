@@ -265,6 +265,46 @@ def _wait_for_health(port: int, timeout: float = 15.0, poll_interval: float = 0.
     return False
 
 
+def _boot_login_url(port: int) -> str:
+    """V16 — console/log-based auto-login. Builds the URL the browser
+    is auto-opened to. When settings.API_AUTH_ENABLED, embeds the
+    highest-privilege configured API key as a one-time `?token=` query
+    param, so the dashboard frontend (components/layout/Layout.tsx's
+    boot-token effect) logs the browser in automatically on first
+    load — no LoginModal, no manually typing a key into the dashboard.
+    Same pattern Jupyter uses for local dev tools (a link printed to
+    the console IS the login).
+
+    Falls back to a plain URL (no token) when auth is disabled or no
+    API key is configured — Layout.tsx's normal LoginModal/
+    restoreSession() path still works unchanged in that case.
+
+    Security note (documented, not silently assumed): the key is
+    briefly visible in the browser's address bar and local history —
+    the frontend strips it from the URL immediately after consuming it,
+    but it was there for one page load. Appropriate for this project's
+    actual usage (single operator, localhost only). If this dashboard
+    is ever bound beyond localhost/0.0.0.0-on-a-trusted-LAN, prefer
+    disabling this (pass a plain URL) since a leaked/shared link would
+    hand out a working API key — this project's ABSOLUTE RULES don't
+    cover that case, so treat it as a live open question if it comes up.
+    """
+    base = f"http://localhost:{port}/"
+    if not settings.API_AUTH_ENABLED or not settings.API_KEYS:
+        return base
+    from api.auth import Role
+
+    best_key, best_rank = None, -1
+    for key, role_name in settings.API_KEYS.items():
+        try:
+            rank = int(Role.from_str(role_name))
+        except ValueError:
+            continue
+        if rank > best_rank:
+            best_key, best_rank = key, rank
+    return f"{base}?token={best_key}" if best_key else base
+
+
 def _open_browser(port: int, timeout: float = 15.0) -> None:
     """Open the dashboard once the API server is actually answering
     /api/health, instead of assuming a fixed 1.5s sleep was always
@@ -284,7 +324,7 @@ def _open_browser(port: int, timeout: float = 15.0) -> None:
     """
     def _open():
         ready = _wait_for_health(port, timeout=timeout)
-        url = f"http://localhost:{port}/"
+        url = _boot_login_url(port)
         if not ready:
             logger.warning(
                 f"Dashboard API did not answer /api/health within {timeout}s "
