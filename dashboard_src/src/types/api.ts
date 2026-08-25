@@ -43,6 +43,64 @@ export interface MLModelsData { meta_label:ModelInfo[]; confidence_calibrator:Mo
 // every payload here `live:false` for exactly this reason; PortfolioHistoryEntry
 // mirrors serialize_history_entry()'s condensed shape field-for-field, no
 // new backend endpoint required.
+// V16 training-lane-visibility phase — Track C background paper-training
+// lane status (GET /api/training-lane/status). Entirely separate account
+// from PortfolioHistoryEntry below: this is the isolated $100 paper
+// account training_lane/training_lane_runner.py drives 24/7, independent
+// of the live scanner/CEO cycle and the real circuit breaker. `enabled:
+// false` is a normal, expected state (flag off, or startup failed) — not
+// an error — so callers should render a plain "not running" state for it
+// rather than treating it as a fetch failure.
+// Field names mirror paper/paper_position.py's PaperPosition.to_dict()
+// and ClosedTrade.to_dict() exactly (both reused as-is, unmodified, by
+// TrainingLaneRunner.status() — see that method's own doc comment).
+export interface TrainingLanePosition {
+  symbol: string
+  direction: string // LONG | SHORT
+  entry_price: number
+  mark_price: number
+  stop_loss: number | null
+  take_profit: number | null
+  quantity: number
+  leverage: number
+  unrealised_pnl: number
+  unrealised_pct: number
+  notional: number
+  opened_at: string
+  bars_open: number
+}
+export interface TrainingLaneClosedTrade {
+  symbol: string
+  direction: string // LONG | SHORT
+  entry_price: number
+  exit_price: number
+  quantity: number
+  stop_loss: number | null
+  take_profit: number | null
+  pnl: number
+  pnl_pct: number
+  rr: number
+  result: string // WIN | LOSS | BREAKEVEN
+  opened_at: string
+  closed_at: string
+  duration_s: number
+  close_reason: string // SL | TP | MANUAL | TIMEOUT
+}
+export interface TrainingLaneStatus {
+  enabled: boolean
+  reason?: string
+  is_running?: boolean
+  symbol?: string
+  execution_lane?: string
+  starting_balance?: number
+  balance?: number
+  bust_count?: number
+  closed_trade_count?: number
+  open_position?: TrainingLanePosition | null
+  last_closed_trade?: TrainingLaneClosedTrade | null
+  poll_interval_seconds?: number
+}
+
 export interface PortfolioHistoryEntry {
   decided_at: string
   timestamp: string

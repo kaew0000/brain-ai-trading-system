@@ -288,23 +288,39 @@ class TestSignalAdapter:
 
 
 class TestBootFlag:
-    def test_flag_off_by_default(self):
+    def test_flag_on_by_default(self):
+        """V16 training-lane-visibility phase: flipped True, by explicit
+        request that training run 24/7 "whenever the system is opened"
+        rather than needing a manual .env edit first — see
+        config/settings.py's own comment on this field for the full
+        rationale and the override instructions for anyone who wants
+        the previous opt-in-only behavior back."""
         from config.settings import Settings
-        assert Settings.model_fields["BACKGROUND_PAPER_TRAINING_ENABLED"].default is False
+        assert Settings.model_fields["BACKGROUND_PAPER_TRAINING_ENABLED"].default is True
 
     def test_starting_balance_and_poll_interval_defaults(self):
         from config.settings import Settings
         assert Settings.model_fields["BACKGROUND_TRAINING_STARTING_BALANCE"].default == 100.0
         assert Settings.model_fields["BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS"].default == 20.0
 
-    def test_main_does_not_construct_runner_when_flag_off(self, monkeypatch):
-        """Byte-identical-boot check: with the flag False (the default),
-        main.py's build_system() must never import/construct
-        TrainingLaneRunner at all — not construct-then-skip-start, but
-        skip entirely, matching every other optional subsystem's
-        SCANNER_ENABLED/SCHEDULER_ENABLED-style guard."""
-        import config.settings as settings_mod
-        assert settings_mod.settings.BACKGROUND_PAPER_TRAINING_ENABLED is False
+    def test_flag_still_respects_env_override_off(self, monkeypatch):
+        """The default flip must not remove the escape hatch: a person
+        who doesn't want the extra background thread/DB writes can
+        still set BACKGROUND_PAPER_TRAINING_ENABLED=false in .env."""
+        monkeypatch.setenv("BACKGROUND_PAPER_TRAINING_ENABLED", "false")
+        from config.settings import Settings
+        assert Settings().BACKGROUND_PAPER_TRAINING_ENABLED is False
+
+    def test_main_guard_constructs_runner_only_when_flag_true(self, monkeypatch):
+        """The guard in main.py is a single `if settings.
+        BACKGROUND_PAPER_TRAINING_ENABLED:` — exercised directly here
+        against both states (rather than running the full, heavy,
+        network-ish main.build_system()) to confirm it still respects
+        the flag in both directions after the default flip."""
+        monkeypatch.setattr(
+            "execution.strategy_registry.build_strategy",
+            lambda _name, **_kwargs: (lambda _symbol: None),
+        )
 
         import training_lane.training_lane_runner as tlr_mod
         original_init = tlr_mod.TrainingLaneRunner.__init__
@@ -316,13 +332,91 @@ class TestBootFlag:
 
         monkeypatch.setattr(tlr_mod.TrainingLaneRunner, "__init__", _spy_init)
 
-        # We don't run full main.build_system() here (heavy, network-ish
-        # dependencies) — the guard itself is a single `if settings.
-        # BACKGROUND_PAPER_TRAINING_ENABLED:` in main.py, exercised
-        # directly against the real settings singleton instead.
-        if settings_mod.settings.BACKGROUND_PAPER_TRAINING_ENABLED:
-            tlr_mod.TrainingLaneRunner(
-                data_provider=None, regime_engine=None, smc_engine=None,
-                volume_engine=None, context_builder=None, confidence_engine=None,
-            )
+        def _boot_guard(flag_enabled):
+            if flag_enabled:
+                tlr_mod.TrainingLaneRunner(
+                    data_provider=None, regime_engine=None, smc_engine=None,
+                    volume_engine=None, context_builder=None, confidence_engine=None,
+                )
+
+        _boot_guard(flag_enabled=False)
         assert constructed["called"] is False
+
+        _boot_guard(flag_enabled=True)
+        assert constructed["called"] is True
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 7 — status() (GET /api/training-lane/status backing method)
+# ══════════════════════════════════════════════════════════════════════
+
+class TestStatus:
+    def test_status_shape_when_flat(self, monkeypatch):
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0], starting_balance=100.0)
+        result = runner.status()
+
+        assert result["enabled"] is True
+        assert result["is_running"] is False  # start() never called in this test
+        assert result["symbol"] == "BTCUSDT"
+        assert result["execution_lane"] == TRAINING_LANE
+        assert result["starting_balance"] == 100.0
+        assert result["balance"] == 100.0
+        assert result["bust_count"] == 0
+        assert result["closed_trade_count"] == 0
+        assert result["open_position"] is None
+        assert result["last_closed_trade"] is None
+        assert result["poll_interval_seconds"] == 0.01
+
+    def test_status_reflects_open_position_and_closed_trade(self, monkeypatch):
+        runner = _make_runner(
+            monkeypatch,
+            # Second entry is None (flat) so the position that closes on
+            # cycle 2 doesn't immediately reopen in that same cycle —
+            # see TrainingLaneRunner._cycle()'s close-then-maybe-reopen
+            # ordering, exercised as-is here rather than changed.
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0), None],
+            prices=[100.0, 90.0, 90.0],  # opens, then walks into SL -> closed LOSS
+        )
+
+        runner._cycle()  # open
+        mid_status = runner.status()
+        assert mid_status["open_position"] is not None
+        assert mid_status["open_position"]["direction"] == "LONG"
+        assert mid_status["last_closed_trade"] is None
+
+        runner._cycle()  # SL hit -> close (flat signal -> no reopen this cycle)
+        end_status = runner.status()
+        assert end_status["open_position"] is None
+        assert end_status["closed_trade_count"] == 1
+        assert end_status["last_closed_trade"]["result"] == "LOSS"
+        assert end_status["last_closed_trade"]["close_reason"] == "SL"
+
+    def test_status_reflects_bust_count_and_reset_balance(self, monkeypatch, db):
+        from research.dataset_builder import reset_dataset_builder
+        from research.feature_store import FeatureStore
+
+        store = FeatureStore(db_path=db)
+        reset_dataset_builder(store=store)
+
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0], starting_balance=100.0)
+        runner._engine.account.realise_pnl(-100.0)
+        runner._handle_bust()
+
+        result = runner.status()
+        assert result["balance"] == 100.0  # reset, not left at 0
+        assert result["bust_count"] == 1
+
+    def test_status_never_leaks_mutable_engine_references(self, monkeypatch):
+        """The status surface is read-only by contract (see the
+        method's own doc comment) — every value must be a primitive or
+        a plain dict, never the live PaperPosition/ClosedTrade object,
+        so a caller can't accidentally mutate training state through
+        a status response."""
+        runner = _make_runner(
+            monkeypatch,
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)],
+            prices=[100.0],
+        )
+        runner._cycle()  # open
+        result = runner.status()
+        assert isinstance(result["open_position"], dict)

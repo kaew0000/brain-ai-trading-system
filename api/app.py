@@ -1272,6 +1272,31 @@ async def paper_metrics():
     })
 
 
+@app.get("/api/training-lane/status")
+async def training_lane_status():
+    """Background Track C paper-training lane status, for the Train
+    Monitor dashboard tab's visibility panel.
+
+    Same posture as /api/paper and /api/paper/metrics above: the lane
+    being off (config/settings.py::BACKGROUND_PAPER_TRAINING_ENABLED
+    is false) or not yet wired is normal, expected runtime state — not
+    a server error — so this always returns 200 with an `enabled`
+    flag rather than a 404/503. See
+    training_lane/training_lane_runner.py::TrainingLaneRunner.status()
+    for the full field list when enabled; that method already returns
+    a plain, JSON-safe dict, so it's passed straight through.
+    """
+    runner = _state.get("training_lane_runner")
+    if runner is None:
+        return _ok({
+            "enabled": False,
+            "reason":  "Background paper-training lane not running "
+                       "(BACKGROUND_PAPER_TRAINING_ENABLED=false, or it "
+                       "failed to start — see server logs)",
+        })
+    return _ok(runner.status())
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # WebSocket Endpoints
 # ═════════════════════════════════════════════════════════════════════════════
