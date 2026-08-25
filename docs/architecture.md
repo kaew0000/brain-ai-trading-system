@@ -4671,3 +4671,106 @@ against a cap of 3 (exactly 3 succeed, no overshoot).
 
 Default (`EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS=False`) leaves every
 existing deployment byte-for-byte unaffected — verified by test.
+
+## 47. Training-Lane Visibility + Boot-Enabled 24/7 Background Training (2026-08-25)
+
+Reported symptom: "Train Monitor shows everything blocked." Diagnosed
+against a real production `run.bat` log before writing any code
+(supplied alongside the request) rather than guessed.
+
+### Root cause
+
+Train Monitor's "Scanner Decision Log" panel (§ Train Monitor tab, W14-1
+Item 12) was correctly rendering `BLOCKED` on every row — it surfaces
+`PortfolioHistoryEntry.blocked`, sourced from the *live* scanner/CEO
+decision cycle, and the real `risk/risk_engine.py` circuit breaker had
+legitimately tripped (`TRADING DISABLED TODAY | Consecutive losses:
+3/3`, confirmed in the supplied log). Not a bug in that panel.
+
+The actual gap: Phase 4C Track C's background paper-training engine
+(`training_lane/training_lane_runner.py`, §PR #76) already implements
+every property the request described — a fully isolated $100 paper
+account, running independent of the live circuit breaker and
+lifecycle state, resetting immediately (no cooldown) on bust, and
+capturing the bust as a labelled training row via `DatasetBuilder`.
+Verified by direct inspection:
+- `config/settings.py`'s `BACKGROUND_PAPER_TRAINING_ENABLED` defaulted
+  to `False` — the supplied log had no `TrainingLaneRunner started`
+  line, confirming it was never running.
+- `main.py` registered the runner in `components` for graceful
+  shutdown only; never passed it into `_start_api_server()`, so no API
+  route could report on it even while running.
+- No dashboard panel referenced Track C's state anywhere — so even
+  once enabled, nothing on screen would distinguish "training is fine,
+  only the live scanner is blocked" from "everything is broken."
+
+### What changed
+
+- `config/settings.py`: `BACKGROUND_PAPER_TRAINING_ENABLED` default
+  flipped `False → True` — the one deliberate default-behavior change
+  in this phase, made on the literal, explicit request that training
+  run "24/7 whenever the system is opened" rather than requiring a
+  manual `.env` edit first. Safe to flip: the lane it enables is
+  provably isolated from any real-order path (mechanically verified,
+  unchanged, by `tests/test_training_lane_runner.py::
+  TestNoRealOrderPath`) and independent of the live circuit breaker by
+  design (that was Track C's whole premise from PR #76). Escape hatch
+  documented in MIGRATION.md for anyone who wants the previous
+  opt-in-only posture back.
+- `training_lane/training_lane_runner.py`: new `status()` method — a
+  read-only plain-dict snapshot for the API/dashboard. Reads only
+  already-lock-protected properties (`PaperAccount.balance`,
+  `PaperExecutionEngine.open_positions`/`.closed_trades`) and returns
+  `PaperPosition.to_dict()`/`ClosedTrade.to_dict()` plain dicts —
+  never a reference to the live mutable objects. No change to the
+  existing cycle/bust logic.
+- `main.py`: `_start_api_server()` gained a `training_lane_runner=None`
+  parameter, injected via the existing `set_state()` mechanism (same
+  pattern already used for `paper_engine`/`reconciliation_engine`) and
+  wired at its one call site from `components.get("training_lane_runner")`.
+- `api/app.py`: new `GET /api/training-lane/status`, same
+  "always-200, `enabled` flag tells the story" contract as the
+  existing `/api/paper` / `/api/paper/metrics` routes right above it.
+- Dashboard: `types/api.ts` (`TrainingLaneStatus` + nested types,
+  field names matching the Python `to_dict()` methods exactly),
+  `lib/api.ts` (`trainingLaneStatus()`, one-line `get()` wrapper,
+  matching every sibling function's style), `pages/TrainMonitor.tsx`
+  (new "Background Training Lane (Track C)" panel — running/stopped,
+  balance vs. starting balance, bust count, closed-trade count, open
+  position, last closed trade, plus an in-panel note making explicit
+  that this account is fully separate from the real one and keeps
+  training through a live circuit-breaker trip; polled locally every
+  20s, matching `BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS`'s own
+  default, same page-local `useEffect`+`setInterval` pattern this file
+  already used for `mlModels`/`portfolioHistory`).
+
+No existing export touched in any file. No change to `risk/`,
+`execution/execution_coordinator.py`, or any live-order code path —
+verified both by direct inspection and by the unchanged
+`TestNoRealOrderPath` suite still passing.
+
+### Testing
+
+Track A: `pytest tests/` — 2823 passed (18 in
+`test_training_lane_runner.py`, up from 14; 2 new in
+`test_api.py::TestTrainingLane`), 45 deselected, 3 pre-existing
+`test_dashboard_serving.py` failures confirmed identical on unmodified
+`main` via `git stash` (require a built `dashboard_src/dist/`,
+environmental). `ruff` / `vulture` / `python3 -c "import main"`: clean.
+
+Track B: `tsc --noEmit` clean, `vitest run` 101/101 passed (no new
+frontend test files — the new panel is presentational, matching every
+other page-local poll panel in this same file, and
+`trainingLaneStatus()` is a trivial GET wrapper, matching its
+untested-individually siblings), `npm run build` clean.
+
+### Known follow-up (not this phase)
+
+- `docs/CHANGELOG.md`'s prepend-per-phase convention (see that file's
+  own accumulating `[Unreleased]` entries) left as-is — a proper
+  consolidation pass is already tracked separately as its own backlog
+  item.
+- No panel surfaces *why* the live circuit breaker tripped beyond the
+  `block_reason` tooltip already on the Scanner Decision Log row —
+  out of scope; this phase's ask was training-lane visibility
+  specifically, not a redesign of the live-blocked view.

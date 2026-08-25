@@ -1,52 +1,75 @@
-# MIGRATION — Fix: ExecutionCoordinator Rejects Scanner-Discovered Symbols
+# MIGRATION — Training-Lane Visibility + Boot-Enabled 24/7 Background Training
 
 ## Do you need to do anything?
 
-**No — this is off by default.** Importing this bundle and restarting
-the bot changes nothing about current behavior. Scanner-discovered
-symbols outside `settings.symbol_list` will continue to fail exactly as
-before (`Symbol 'X' is not configured on this coordinator`) until you
-explicitly opt in.
+**Only if you want the old opt-in-only behavior back.** This phase
+contains one deliberate default-behavior change, made on explicit
+request — everything else is purely additive.
 
-## To actually let the coordinator trade scanner-discovered symbols
+## The one behavior change: `BACKGROUND_PAPER_TRAINING_ENABLED` now defaults to `true`
+
+Before this phase, importing a bundle and restarting the bot never
+started the Track C background paper-training lane unless you'd
+already set `BACKGROUND_PAPER_TRAINING_ENABLED=true` in `.env`. After
+this phase, a fresh boot with no `.env` change will now:
+
+- Start `training_lane/training_lane_runner.py::TrainingLaneRunner` on
+  its own daemon thread, on a $100 isolated paper account
+  (`BACKGROUND_TRAINING_STARTING_BALANCE`, unchanged default), polling
+  every 20s (`BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS`, unchanged
+  default).
+- That thread reads mark prices (read-only, reuses the existing data
+  provider — no new network credentials or exchange permissions) and
+  writes to your local training database via the existing
+  `FeatureStore`/`DatasetBuilder` pipeline, tagged
+  `execution_lane="PAPER"` (`TRAINING_LANE` constant, unchanged).
+
+**What it will never do**, unchanged from before this phase and
+independently re-verified by `tests/test_training_lane_runner.py::
+TestNoRealOrderPath` (still passing): place a real order, touch your
+real balance, or import anything capable of reaching
+`execution/execution_coordinator.py` or a Binance order client. It
+also runs regardless of your real account's lifecycle
+state/circuit-breaker status — that's the whole point (see
+PATCH_NOTES.md's root-cause section) — so it will keep running even
+while your real account shows `TRADING DISABLED TODAY`.
+
+### If you don't want this
 
 Add to `.env`:
 
 ```
-EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS=true
+BACKGROUND_PAPER_TRAINING_ENABLED=false
 ```
 
-Optional — override the default cap of 50 (see PATCH_NOTES.md for why
-this cap exists and how 50 was chosen):
+This restores the exact previous behavior — verified by
+`tests/test_training_lane_runner.py::TestBootFlag::
+test_flag_still_respects_env_override_off`.
 
-```
-EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS=50
-```
+## Everything else: purely additive, nothing to do
 
-Restart the bot. From then on:
+- `GET /api/training-lane/status` is a new, additive endpoint. No
+  existing endpoint's response shape changed.
+- The new "Background Training Lane" panel on the Train Monitor tab
+  only appears once the frontend is rebuilt (`npm run build` in
+  `dashboard_src/`, same as every dashboard-touching phase) — until
+  then the tab renders exactly as before, just without the new panel.
+- If you're running with `BACKGROUND_PAPER_TRAINING_ENABLED=false`
+  (either because you set it explicitly, or if `main.py` failed to
+  start the runner for any reason), the new panel will render a plain
+  "not running" state instead of an error — same posture as every
+  other optional-subsystem panel already in this dashboard.
 
-- A scanner-discovered symbol outside the originally-configured list
-  gets registered automatically on first use, up to the cap.
-- `logs/brain_bot.log` gets an INFO line each time:
-  `ExecutionCoordinator: dynamically registering new symbol 'X' ...`
-- Once `max_dynamic_symbols` distinct new symbols have been registered
-  in this run, any further genuinely-new symbol gets the same
-  `ValueError` as before this phase (now mentioning the cap explicitly)
-  — this resets on the next restart (the list is in-memory only).
+## Note on the test that changed behavior, not just names
 
-## What this does NOT change
-
-- The originally-configured `symbol_list` behavior — unaffected either
-  way.
-- `main.py`'s startup pre-warming (`initialize()`) — still only
-  pre-warms the statically-configured symbols. A dynamically-registered
-  symbol's leverage/margin get set on its own first trade instead (this
-  is how the code has always worked for every call, not something new).
-- Nothing about `MarketScanner` or `OpportunityRanker`.
-
-## If you want this on but want a tighter/looser cap
-
-`EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS` is independent of
-`EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` — set both together in `.env`.
-Setting the cap without the flag has no effect (ignored when the flag
-is off).
+`tests/test_training_lane_runner.py::TestBootFlag::
+test_main_does_not_construct_runner_when_flag_off` (old name) only
+ever exercised the flag-*off* branch of the boot guard, because the
+old default was `False` and the test's own `if
+settings_mod.settings.BACKGROUND_PAPER_TRAINING_ENABLED:` conditional
+never evaluated its `True` branch. Its replacement,
+`test_main_guard_constructs_runner_only_when_flag_true`, now exercises
+*both* directions explicitly via a local `_boot_guard(flag_enabled)`
+helper — worth knowing if you're diffing test behavior, not just test
+names, since this closes a real (if low-stakes) pre-existing gap in
+what that test actually proved.

@@ -341,6 +341,11 @@ export const api = {
   // types/api.ts. Reuses the existing, already-live /api/portfolio/history
   // route (api/portfolio_api.py); no backend change.
   portfolioHistory: (l = 30) => get(`/api/portfolio/history?limit=${l}`),
+  // V16 training-lane-visibility phase — Track C background paper-training
+  // lane status. `enabled:false` is a normal response body (flag off /
+  // not started), not a thrown error — see TrainingLaneStatus in
+  // types/api.ts.
+  trainingLaneStatus: () => get('/api/training-lane/status'),
   forwardTest:    () => get('/api/forward_test'),
   commandState:   () => get('/api/command/state'),
   // V16 Track W14-1 Item 4/5 — real account/position telemetry, replaces

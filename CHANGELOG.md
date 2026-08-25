@@ -1,6 +1,48 @@
 # CHANGELOG
 
-## [Unreleased] — Fix: ExecutionCoordinator Rejects Scanner-Discovered Symbols
+## [Unreleased] — Training-Lane Visibility + Boot-Enabled 24/7 Background Training
+
+Reported symptom: Train Monitor showing every row `BLOCKED`. Traced
+against a real production run.bat log: correct behavior — the real
+RiskEngine circuit breaker had tripped (3 consecutive losses), and
+Train Monitor's Scanner Decision Log panel was accurately reporting
+the *live* scanner's blocked cycles. The actual gap: Phase 4C Track C's
+background paper-training engine (`training_lane/training_lane_runner.py`,
+PR #76) already runs fully independent of that circuit breaker, resets
+its isolated $100 account immediately on bust, and labels the bust
+event for training — but it defaulted to disabled, and nothing on the
+dashboard showed it was alive even when running. See PATCH_NOTES.md
+for the full root-cause trace and file-by-file breakdown.
+
+### Added
+- `TrainingLaneRunner.status()` — read-only snapshot (balance, bust
+  count, open position, last closed trade), reading only
+  already-lock-protected properties.
+- `GET /api/training-lane/status` — same "always 200, `enabled` flag
+  tells the story" contract as `/api/paper`.
+- Train Monitor dashboard: "Background Training Lane (Track C)" panel,
+  polled every 20s, showing live training-lane state independent of
+  the live scanner's blocked/unblocked status.
+- 6 new backend tests (`tests/test_training_lane_runner.py::TestStatus`,
+  `tests/test_api.py::TestTrainingLane`).
+
+### Changed
+- **`BACKGROUND_PAPER_TRAINING_ENABLED` now defaults to `true`**
+  (was `false`) — training now starts automatically on boot rather
+  than requiring a manual `.env` edit, per explicit request that it
+  run "24/7 whenever the system is opened." See MIGRATION.md to
+  restore the previous opt-in-only behavior.
+- `main.py::_start_api_server()` gained a `training_lane_runner`
+  parameter (additive; every existing parameter unchanged) so the API
+  layer can report the lane's real state instead of always answering
+  "disabled."
+- `tests/test_training_lane_runner.py::TestBootFlag` — two tests
+  rewritten for the new default; the old flag-off-only guard test
+  never actually exercised its own flag-on branch (old default made
+  that branch dead code) — its replacement exercises both directions.
+  See MIGRATION.md's closing note.
+
+
 
 Root cause: `MarketScanner`/`OpportunityRanker` discover candidates
 across the full ~527-symbol Binance USDT-perpetual universe, but

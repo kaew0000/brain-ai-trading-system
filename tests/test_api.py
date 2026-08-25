@@ -222,6 +222,44 @@ class TestPaper:
         assert data["reason"] == "Paper trading not initialized"
 
 
+class TestTrainingLane:
+    """GET /api/training-lane/status — same "always 200, enabled flag
+    tells the story" contract as TestPaper above. See
+    training_lane/training_lane_runner.py::TrainingLaneRunner.status()
+    for the enabled=True field list."""
+
+    def test_disabled_when_runner_not_wired(self):
+        """Flag off (the pre-training-lane-visibility-phase default) or
+        startup failed → enabled=False, not a 404/503."""
+        from api.app import app, set_state
+        set_state("training_lane_runner", None)
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get("/api/training-lane/status")
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["enabled"] is False
+        assert "reason" in data
+
+    def test_enabled_passes_through_runner_status(self):
+        """Passes runner.status() straight through — no reshaping in
+        the route itself."""
+        from api.app import app, set_state
+
+        class _FakeRunner:
+            def status(self):
+                return {"enabled": True, "is_running": True, "balance": 123.45}
+
+        set_state("training_lane_runner", _FakeRunner())
+        try:
+            with TestClient(app, raise_server_exceptions=False) as c:
+                r = c.get("/api/training-lane/status")
+            assert r.status_code == 200
+            data = r.json()["data"]
+            assert data == {"enabled": True, "is_running": True, "balance": 123.45}
+        finally:
+            set_state("training_lane_runner", None)
+
+
 class TestJournal:
 
     def test_journal_200(self, client):

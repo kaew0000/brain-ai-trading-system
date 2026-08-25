@@ -210,6 +210,42 @@ class TrainingLaneRunner:
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    # ── Status (read-only, for API/dashboard visibility) ───────────────────────
+
+    def status(self) -> dict:
+        """Plain-dict snapshot for GET /api/training-lane/status (added
+        alongside the Train Monitor visibility panel). Reads only
+        already-lock-protected properties (PaperAccount.balance,
+        PaperExecutionEngine.open_positions/.closed_trades all take
+        their own internal lock — see paper/paper_account.py and
+        paper/paper_execution.py) — no new locking needed here, and
+        this never mutates anything, so it's safe to call from the API
+        thread while the runner thread is mid-cycle.
+
+        Deliberately returns primitives/plain dicts only, never a
+        reference to internal engine/account/position objects, so a
+        caller can't accidentally mutate training state through the
+        status surface.
+        """
+        engine = self._engine
+        balance = engine.account.balance
+        open_positions = [p.to_dict() for p in engine.open_positions]
+        closed = engine.closed_trades
+        last_closed = closed[-1].to_dict() if closed else None
+        return {
+            "enabled": True,
+            "is_running": self.is_running,
+            "symbol": self.symbol,
+            "execution_lane": TRAINING_LANE,
+            "starting_balance": self._starting_balance,
+            "balance": balance,
+            "bust_count": self._bust_count,
+            "closed_trade_count": len(closed),
+            "open_position": open_positions[0] if open_positions else None,
+            "last_closed_trade": last_closed,
+            "poll_interval_seconds": self._poll_interval,
+        }
+
     # ── Main loop ────────────────────────────────────────────────────────────
 
     def _run_loop(self) -> None:

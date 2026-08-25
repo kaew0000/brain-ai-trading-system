@@ -190,7 +190,7 @@ def _run_world_runtime_manager(components: dict) -> None:
 
 # ── Dashboard / API server ────────────────────────────────────────────────────
 
-def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent_layer=None, risk_engine=None, portfolio_state=None, trade_lifecycle=None, reconciliation_engine=None, host: str = "0.0.0.0", port: int = 8000) -> None:
+def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent_layer=None, risk_engine=None, portfolio_state=None, trade_lifecycle=None, reconciliation_engine=None, training_lane_runner=None, host: str = "0.0.0.0", port: int = 8000) -> None:
     """
     Start the FastAPI dashboard server in a daemon background thread.
     Runs alongside the trading loop — does not block main.
@@ -228,6 +228,17 @@ def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent
     _api_module.set_state("event_bus", bus)
     if reconciliation_engine is not None:
         _api_module.set_state("reconciliation_engine", reconciliation_engine)
+    # V16 training-lane-visibility — expose the Track C background
+    # paper-training runner (see components["training_lane_runner"] in
+    # build_system()) so GET /api/training-lane/status can report real
+    # state instead of always answering "disabled". None when the flag
+    # is off or the runner failed to start (main.py's own guarded
+    # best-effort construction) — set_state stores None in that case
+    # too, deliberately, so the route can tell "disabled/failed" apart
+    # from "never wired at all" (get_state's own default already
+    # handles the pre-this-phase case for any caller still on an older
+    # build).
+    _api_module.set_state("training_lane_runner", training_lane_runner)
     from api.app import app
 
     config = uvicorn.Config(
@@ -1937,6 +1948,7 @@ def main() -> None:
         paper_engine  = components["paper_engine"],
         data_provider = components["data_provider"],
         agent_layer   = components["agent_layer"],
+        training_lane_runner = components.get("training_lane_runner"),
         risk_engine   = components["risk_engine"],
         portfolio_state       = components["portfolio_state"],
         trade_lifecycle       = components["trade_lifecycle"],

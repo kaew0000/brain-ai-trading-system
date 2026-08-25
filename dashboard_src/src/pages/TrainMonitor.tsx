@@ -14,8 +14,19 @@
  *    page-local useEffect+setInterval pattern already used by
  *    TradeReplay.tsx / DebateRoom.tsx / Memory.tsx for page-specific
  *    data that doesn't need to live in the global store.
+ *  - GET /api/training-lane/status (api.trainingLaneStatus()) — new in
+ *    the training-lane-visibility phase, same page-local poll pattern.
+ *    Added because the "Scanner Decision Log" panel below can
+ *    correctly show BLOCKED on every row (the real circuit breaker
+ *    tripped) while training_lane/training_lane_runner.py's isolated
+ *    background lane is still training fine — with no earlier way to
+ *    tell those two apart from this tab, "everything blocked" reads
+ *    as "training is broken" even when it isn't. This panel is the
+ *    fix for that: it reports Track C directly, so this tab always
+ *    answers "is training still happening" correctly regardless of
+ *    live circuit-breaker state.
  *
- * No new backend routes. No existing export touched.
+ * No existing export touched.
  *
  * "Still training normally" is answered with facts, not a guessed
  * verdict: last_prediction recency (raw timestamp — this page doesn't
@@ -33,7 +44,7 @@ import { Panel, StatCard, DataTable, Empty, Loading, ConfBar, fmtPct, timeAgo } 
 import { MiniChart } from '@/components/common/MiniChart'
 import { api } from '@/lib/api'
 import { computeRowsGrowth } from '@/lib/trainMonitor'
-import type { MLModelsData, ModelInfo, MLStatus, PortfolioHistoryEntry } from '@/types/api'
+import type { MLModelsData, ModelInfo, MLStatus, PortfolioHistoryEntry, TrainingLaneStatus } from '@/types/api'
 import clsx from 'clsx'
 
 const MODEL_TYPES = [
@@ -87,6 +98,29 @@ export default function TrainMonitor() {
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
+  // Background Track C paper-training lane — see file header. Polled at
+  // the same 20s cadence as its own default cycle interval
+  // (config/settings.py::BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS);
+  // `enabled:false` is a normal response, not a fetch failure, so it's
+  // kept in state and rendered explicitly rather than swallowed by the
+  // catch block below.
+  const [trainingLane, setTrainingLane] = useState<TrainingLaneStatus | null>(null)
+  const [trainingLaneLoading, setTrainingLaneLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const data = await api.trainingLaneStatus()
+        if (!cancelled) setTrainingLane(data as unknown as TrainingLaneStatus)
+      } catch { /* keep last-known-good, same posture as every other poll in this app */ }
+      if (!cancelled) setTrainingLaneLoading(false)
+    }
+    load()
+    const id = setInterval(load, 20000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
   // Dataset growth observed since this page was opened — see file header.
   const firstTotalRows = useRef<number | null>(null)
   const totalRows = performance?.dataset?.total_rows
@@ -128,6 +162,77 @@ export default function TrainMonitor() {
           color={rowsGrowth != null && rowsGrowth > 0 ? 'text-accent-green' : 'text-text-muted'}
           sub="rows since tab opened"
         />
+      </div>
+
+      <div className="grid grid-cols-12 gap-3">
+        <div className="col-span-12">
+          <Panel
+            title="Background Training Lane (Track C) — 24/7, Independent of Live Circuit Breaker"
+            icon="⟳"
+            accent={trainingLane?.enabled && trainingLane.is_running ? 'text-accent-green' : 'text-text-muted'}
+          >
+            {trainingLaneLoading ? <Loading /> : !trainingLane?.enabled ? (
+              <Empty text={trainingLane?.reason ?? 'Background paper-training lane not running'} />
+            ) : (
+              <div className="space-y-2">
+                <div className="px-2 py-1.5 text-[10px] text-accent-green/90 border border-accent-green/20 rounded bg-accent-green/5">
+                  บัญชีนี้แยกจากบัญชีจริงโดยสมบูรณ์ (${trainingLane.starting_balance ?? 100} เริ่มต้น) เทรนอยู่เบื้องหลังตลอดเวลา
+                  ไม่ขึ้นกับ circuit breaker ของบัญชีจริง แม้บัญชีจริงจะถูกบล็อกอยู่ก็ยังเทรนต่อ —
+                  ดูสถานะบัญชีจริงที่หน้า Commander
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <StatCard
+                    label="Status"
+                    value={trainingLane.is_running ? 'RUNNING' : 'STOPPED'}
+                    color={trainingLane.is_running ? 'text-accent-green' : 'text-accent-red'}
+                    sub={trainingLane.symbol}
+                  />
+                  <StatCard
+                    label="Balance"
+                    value={typeof trainingLane.balance === 'number' ? `$${trainingLane.balance.toFixed(2)}` : '—'}
+                    color={
+                      typeof trainingLane.balance === 'number' && typeof trainingLane.starting_balance === 'number'
+                        ? trainingLane.balance >= trainingLane.starting_balance ? 'text-accent-green' : 'text-accent-red'
+                        : 'text-text-muted'
+                    }
+                    sub={`of $${trainingLane.starting_balance ?? '—'} start`}
+                  />
+                  <StatCard
+                    label="Busts (auto-reset)"
+                    value={trainingLane.bust_count ?? 0}
+                    sub="account emptied → reset immediately"
+                  />
+                  <StatCard
+                    label="Closed Trades"
+                    value={trainingLane.closed_trade_count ?? 0}
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded border border-border p-2">
+                    <div className="text-[10px] text-text-muted mb-1">Open Position</div>
+                    {!trainingLane.open_position ? <span className="text-text-muted text-xs">None — watching for entry</span> : (
+                      <div className="text-xs space-y-1">
+                        <div className="flex justify-between"><span className="text-text-muted">Direction</span><span className="font-mono">{trainingLane.open_position.direction}</span></div>
+                        <div className="flex justify-between"><span className="text-text-muted">Entry</span><span className="font-mono">{trainingLane.open_position.entry_price}</span></div>
+                        <div className="flex justify-between"><span className="text-text-muted">Unrealised PnL</span><span className={clsx('font-mono', trainingLane.open_position.unrealised_pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{trainingLane.open_position.unrealised_pnl.toFixed(4)}</span></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded border border-border p-2">
+                    <div className="text-[10px] text-text-muted mb-1">Last Closed Trade{trainingLane.last_closed_trade ? ` — ${trainingLane.last_closed_trade.close_reason}` : ''}</div>
+                    {!trainingLane.last_closed_trade ? <span className="text-text-muted text-xs">No trades closed yet</span> : (
+                      <div className="text-xs space-y-1">
+                        <div className="flex justify-between"><span className="text-text-muted">Result</span><span className={clsx('font-mono', trainingLane.last_closed_trade.result === 'WIN' ? 'text-accent-green' : trainingLane.last_closed_trade.result === 'LOSS' ? 'text-accent-red' : 'text-text-secondary')}>{trainingLane.last_closed_trade.result}</span></div>
+                        <div className="flex justify-between"><span className="text-text-muted">PnL</span><span className={clsx('font-mono', trainingLane.last_closed_trade.pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{trainingLane.last_closed_trade.pnl.toFixed(4)}</span></div>
+                        <div className="flex justify-between"><span className="text-text-muted">Closed</span><span className="font-mono text-text-secondary" title={trainingLane.last_closed_trade.closed_at}>{timeAgo(trainingLane.last_closed_trade.closed_at)}</span></div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </Panel>
+        </div>
       </div>
 
       <div className="grid grid-cols-12 gap-3 min-h-0">
