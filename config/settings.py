@@ -480,6 +480,24 @@ class Settings(BaseSettings):
     BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS: float = Field(
         default=20.0, alias="BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS"
     )
+    # V16 Phase 4C Track C addition: rotate the background training lane
+    # across multiple scanner-ranked symbols instead of pinning it
+    # forever to settings.SYMBOL, so training data reflects the same
+    # multi-symbol universe the live portfolio_signal_provider lane
+    # actually trades. Off by default — the training lane's original
+    # single-symbol behavior is preserved for anyone who hasn't opted
+    # in; see training_lane/training_lane_runner.py's module docstring
+    # and TrainingLaneRunner._select_symbol().
+    BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED: bool = Field(
+        default=False, alias="BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED"
+    )
+    # How many top-ranked candidates (from the same MarketScanner/
+    # OpportunityRanker the live scanner path already uses) to
+    # round-robin through when multi-symbol mode is on. Only read when
+    # BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED is True.
+    BACKGROUND_TRAINING_SYMBOL_POOL_SIZE: int = Field(
+        default=10, alias="BACKGROUND_TRAINING_SYMBOL_POOL_SIZE"
+    )
 
     # Row-count cap for order_timeline_history (operational history
     # only — the journal, not this table, is the durable trade record).

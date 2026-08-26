@@ -8,6 +8,19 @@ Completely isolated from whatever the primary execution_lane
 (LIVE/TRAINING) is doing — its own $100 PaperAccount, its own
 PaperExecutionEngine, its own thread.
 
+Multi-symbol rotation (V16 Phase 4C Track C addition)
+-------------------------------------------------------
+Originally traded settings.SYMBOL only, forever. When
+config/settings.py::BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED is True and
+an opportunity_ranker was supplied at construction, this lane instead
+round-robins entries across that ranker's top-N scanner-ranked
+candidates (see TrainingLaneRunner._select_symbol()) — so the training
+dataset reflects the same multi-symbol universe the live
+portfolio_signal_provider lane actually trades, rather than a single
+hardcoded symbol the live lane may rarely even select. Off by default;
+with it off (or no ranker supplied), behavior is unchanged from before
+this addition.
+
 Purpose
 -------
 Continuously generate execution_lane="PAPER" trade outcomes against
@@ -147,11 +160,19 @@ class TrainingLaneRunner:
         symbol: str | None = None,
         starting_balance: float | None = None,
         poll_interval_seconds: float | None = None,
+        opportunity_ranker=None,
+        multi_symbol_enabled: bool | None = None,
     ) -> None:
         from execution.strategy_registry import build_strategy
 
         self._data_provider = data_provider
-        self.symbol = symbol or settings.SYMBOL
+        # `_fixed_symbol` is the permanent fallback (this class's original,
+        # single-symbol behavior). `self.symbol` is the *currently active*
+        # symbol and is mutable — it changes between trades when rotation
+        # is on (see _select_symbol()), but never mid-position: a position
+        # opened on one symbol is always ticked/closed on that same symbol.
+        self._fixed_symbol = symbol or settings.SYMBOL
+        self.symbol = self._fixed_symbol
         self._starting_balance = (
             starting_balance
             if starting_balance is not None
@@ -181,6 +202,59 @@ class TrainingLaneRunner:
         self._bust_count = 0
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+
+        # V16 Phase 4C Track C: rotate across scanner-ranked symbols
+        # instead of pinning this lane to _fixed_symbol forever, so
+        # training data reflects the same multi-symbol universe the live
+        # portfolio_signal_provider lane actually trades. Off by default
+        # (settings.BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED) — with it
+        # off, or no ranker supplied, behavior is byte-for-byte identical
+        # to before this phase. `opportunity_ranker` is duck-typed (needs
+        # only a .rank() method returning objects with a .symbol
+        # attribute) rather than requiring a real MarketScanner, so a
+        # fake is trivial in tests — see main.py's wiring for how the
+        # real one (ranking.opportunity_ranker.OpportunityRanker wrapping
+        # the same MarketScanner instance the live scanner path uses) is
+        # constructed and injected.
+        self._multi_symbol_enabled = (
+            multi_symbol_enabled
+            if multi_symbol_enabled is not None
+            else settings.BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED
+        )
+        self._ranker = opportunity_ranker if self._multi_symbol_enabled else None
+        self._rotation_index = 0
+
+    def _select_symbol(self) -> str:
+        """Picks the symbol for the *next* entry attempt. Only ever
+        called when this lane is flat (no open position) — see
+        _cycle() — since a position, once opened, is always ticked and
+        closed on the symbol it was opened with; switching mid-position
+        would corrupt PnL tracking (PaperExecutionEngine.tick() applies
+        one mark price to every currently-open position).
+
+        Round-robins through opportunity_ranker.rank()'s top-N candidates
+        when multi-symbol mode is on. Falls back to _fixed_symbol —
+        never raises — whenever multi-symbol mode is off, no ranker was
+        supplied, ranking returns nothing (e.g. "scanner cache is empty"
+        early after boot), or ranking itself raises for any reason. A
+        rotation hiccup should never be able to stop this lane trading;
+        it should just fall back to the one symbol it always knew how to
+        trade."""
+        if self._ranker is None:
+            return self._fixed_symbol
+        try:
+            ranked = self._ranker.rank()
+            if not ranked:
+                return self._fixed_symbol
+            symbol = ranked[self._rotation_index % len(ranked)].symbol
+            self._rotation_index += 1
+            return symbol
+        except Exception as exc:
+            logger.debug(
+                f"TrainingLaneRunner: symbol rotation skipped this attempt, "
+                f"falling back to {self._fixed_symbol}: {exc}"
+            )
+            return self._fixed_symbol
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -236,6 +310,7 @@ class TrainingLaneRunner:
             "enabled": True,
             "is_running": self.is_running,
             "symbol": self.symbol,
+            "multi_symbol_enabled": self._multi_symbol_enabled,
             "execution_lane": TRAINING_LANE,
             "starting_balance": self._starting_balance,
             "balance": balance,
@@ -272,9 +347,18 @@ class TrainingLaneRunner:
             return  # don't open a new position on the same cycle as a reset
 
         if not self._engine.open_positions:  # max_open=1 by construction
+            # Reselect right before attempting an entry — covers both
+            # "already flat at the top of this cycle" and "just closed a
+            # position a few lines up, in this same cycle" in one place,
+            # rather than only reselecting once per cycle at the top
+            # (which would leave rotation lagging by a cycle after every
+            # close). self.symbol is intentionally NOT touched anywhere
+            # else in this method — see _select_symbol()'s docstring for
+            # why mid-position symbol switches aren't safe.
+            self.symbol = self._select_symbol()
             decision = _to_paper_decision(self._signal_provider(self.symbol))
             if decision is not None:
-                self._engine.execute(decision)
+                self._engine.execute(decision, symbol=self.symbol)
 
     # ── ML pipeline feed ─────────────────────────────────────────────────────
 

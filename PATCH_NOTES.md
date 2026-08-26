@@ -1,163 +1,95 @@
-# PATCH NOTES — Training-Lane Visibility + Boot-Enabled 24/7 Background Training
+# PATCH NOTES — V16 Phase 4C Track C: Multi-Symbol Rotation for the Background Training Lane
 
-Branch: `feat/training-lane-visibility-and-boot-default`
-Base: `main` @ `5eb52e0` (merge of PR #77, `fix/dashboard-boot-login`)
+Branch: `feat/training-lane-multi-symbol-rotation`
+Base: `main` @ `9ddd9d6` (merge of PR #78, Training-Lane Visibility + Boot-Enabled 24/7 Background Training)
 
-## Root cause
+## Scope note
 
-Reported symptom: "Train Monitor ขึ้น block หมด" (Train Monitor shows
-everything blocked). Traced against a real run.bat production log
-provided alongside the request:
+Requested directly, after confirming the background training lane
+(`training_lane/training_lane_runner.py`, shipped in PR #76/#78) was
+running successfully: it trades exactly one hardcoded symbol
+(`settings.SYMBOL`, `BTCUSDT` in this deployment) forever, while the
+live `portfolio_signal_provider` lane trades across the full scanner
+universe (~527 symbols, up to `PORTFOLIO_MAX_POSITIONS=5` concurrently).
+Any model eventually trained from this lane's dataset would only have
+ever seen BTCUSDT market conditions — a real train/serve mismatch
+against what the live lane actually does. This phase makes the training
+lane rotate across scanner-ranked candidates instead, opt-in, off by
+default.
 
-```
-13:16:57 [WARNING] risk.risk_engine: TRADING DISABLED TODAY | Consecutive losses: 3/3
-13:17:53 [INFO] execution.execution_scheduler: ExecutionScheduler: decision blocked (Trading disabled for today)
-```
+Track A only (Python backend). No `dashboard_src/` changes.
 
-Train Monitor's "Scanner Decision Log" panel was correctly reporting
-this — every row shows `BLOCKED` because it renders
-`PortfolioHistoryEntry.blocked`, sourced from the *live* scanner/CEO
-decision cycle, which the real RiskEngine's circuit breaker was
-legitimately halting for the day. Not a display bug.
+## Root cause / what was actually blocking this
 
-The actual gap: `training_lane/training_lane_runner.py` (Phase 4C
-Track C, merged PR #76) already implements everything the request
-described — a fully isolated $100 paper account that runs
-independent of the live circuit breaker/lifecycle state, resets
-immediately (no cooldown, no wait) when it busts, and captures the
-bust event as a labelled training row. But
-`BACKGROUND_PAPER_TRAINING_ENABLED` defaulted to `False`, and the
-provided boot log has no `TrainingLaneRunner started` line — the lane
-was never enabled. Train Monitor also had no panel surfacing Track
-C's own state at all, so even once enabled there was nothing on
-screen distinguishing "training is fine, only the live scanner is
-blocked" from "everything is broken."
+Two things, found in that order:
 
-Confirmed via direct inspection (not assumed) before writing any
-code:
-- `config/settings.py:455` — flag default was `False`.
-- `main.py:670` — `if settings.BACKGROUND_PAPER_TRAINING_ENABLED:` guard,
-  never true with the shipped default.
-- `main.py` — `training_lane_runner` was registered in `components`
-  for graceful shutdown only; never passed into `_start_api_server()`,
-  so the API layer had zero visibility into it even when running.
+1. `training_lane/training_lane_runner.py`'s `TrainingLaneRunner.__init__`
+   set `self.symbol = symbol or settings.SYMBOL` once, and `_cycle()`
+   never touched it again — no rotation mechanism existed at all.
+2. Deeper, and the actual hard blocker even after adding a rotation
+   mechanism: `paper/paper_execution.py`'s `PaperExecutionEngine.execute()`
+   hardcoded `symbol=settings.SYMBOL` directly on the `PaperPosition` it
+   constructs, **ignoring whatever symbol the caller actually asked
+   for**. This class predates the training lane (it originally only
+   backed `EXECUTION_MODE=paper`, a whole-bot single-symbol mode — see
+   `execution/execution_factory.py`), so it was never built with
+   per-call symbol flexibility. Rotating `self.symbol` on the
+   `TrainingLaneRunner` side alone would not have worked — every
+   position opened would still have been tagged with the fixed
+   `settings.SYMBOL` regardless of which symbol was actually rotated to,
+   silently mislabeling the training data. Confirmed by reading
+   `execute()`'s body directly before writing any fix, not assumed.
 
 ## What changed
 
-### `config/settings.py`
-`BACKGROUND_PAPER_TRAINING_ENABLED` default flipped `False → True` —
-literal reading of "เทรน 24/7 เมื่อเปิดระบบ" (train 24/7 whenever the
-system opens): training must start automatically on boot, not require
-a manual `.env` edit first. This is the one explicit default-behavior
-change in this phase (see MIGRATION.md). The lane it enables is
-provably isolated (own `PaperAccount`, own `PaperExecutionEngine`, no
-import capable of placing a real order — mechanically verified by
-`tests/test_training_lane_runner.py::TestNoRealOrderPath`, unchanged
-by this phase), so flipping the default carries no live-money risk;
-it only adds one extra background thread + local DB writes to a
-fresh boot. Anyone who doesn't want that can still set
-`BACKGROUND_PAPER_TRAINING_ENABLED=false` in `.env`.
+| File | Change |
+|---|---|
+| `paper/paper_execution.py` | `execute()` gains an optional `symbol: str \| None = None` parameter, defaulting to `settings.SYMBOL` when omitted — every existing caller (`execution/execution_factory.py`'s `EXECUTION_MODE=paper` wiring) is byte-for-byte unaffected. Also corrected a misleading `# BTC min` comment on the quantity floor (still a generic 0.001 floor, not a real per-symbol exchange minimum — documented honestly in the method's own docstring rather than left silently wrong now that arbitrary symbols are supported). |
+| `training_lane/training_lane_runner.py` | New `_select_symbol()` method: round-robins through an injected `opportunity_ranker`'s top-N ranked candidates when multi-symbol mode is on; falls back to the original fixed symbol (never raises) when the flag is off, no ranker was supplied, ranking returns nothing, or ranking itself throws. `_cycle()` now calls `_select_symbol()` only at the point of attempting a new entry (i.e., only while flat) — a position, once opened, keeps its symbol for its whole life; rotation cannot happen mid-position. `execute()` is now called with `symbol=self.symbol` explicitly. `status()` gained a `multi_symbol_enabled` field. |
+| `config/settings.py` | `+BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` (bool, default `False`), `+BACKGROUND_TRAINING_SYMBOL_POOL_SIZE` (int, default `10`). |
+| `main.py` | When `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` is `True` and `market_scanner` is available (i.e., `SCANNER_ENABLED=true`), constructs a dedicated `OpportunityRanker(market_scanner, top_n=BACKGROUND_TRAINING_SYMBOL_POOL_SIZE)` — its own instance, reading the same underlying scanner cache `ExecutionScheduler`'s own ranker reads, not a second `MarketScanner` — and passes it into `TrainingLaneRunner(opportunity_ranker=...)`. If the flag is off or the scanner isn't running, `training_lane_ranker` stays `None` and the lane behaves exactly as it did before this phase. |
+| `tests/test_training_lane_runner.py` | +21 new tests: rotation order, empty-ranking fallback, raising-ranker fallback, no-ranker fallback, mid-position symbol stability (regression guard — the one case that would have silently corrupted PnL tracking if gotten wrong), post-close rotation, `PaperExecutionEngine.execute()`'s new `symbol=` parameter (default-preserved, explicit-respected, and that a closed trade actually carries the symbol it was opened with), and `main.py` wiring (ast-based source check, mirroring `TestBootBehavior`'s existing pattern). |
 
-### `training_lane/training_lane_runner.py`
-Added `TrainingLaneRunner.status()` — a read-only plain-dict snapshot
-(`enabled`, `is_running`, `symbol`, `starting_balance`, `balance`,
-`bust_count`, `closed_trade_count`, `open_position`,
-`last_closed_trade`, `poll_interval_seconds`). Reads only
-already-lock-protected properties (`PaperAccount.balance`,
-`PaperExecutionEngine.open_positions`/`.closed_trades` each take
-their own internal lock) and returns `PaperPosition.to_dict()` /
-`ClosedTrade.to_dict()` plain dicts — never a reference to the live
-mutable objects, so a caller can't mutate training state through the
-status surface. No behavior change to the existing cycle/bust logic.
-
-### `main.py`
-`_start_api_server()` gained a `training_lane_runner=None` parameter,
-injected via the existing `set_state()` mechanism (same pattern as
-`paper_engine`/`reconciliation_engine` above it) and wired at the one
-call site from `components.get("training_lane_runner")`. Purely
-additive — every existing parameter/call site untouched.
-
-### `api/app.py`
-New `GET /api/training-lane/status`. Same "always 200, `enabled` flag
-tells the story" contract as the existing `/api/paper` and
-`/api/paper/metrics` routes right above it (off/not-wired is a normal
-runtime state, not a 404/503). Passes `TrainingLaneRunner.status()`
-straight through with no reshaping.
-
-### Dashboard (`dashboard_src/`)
-- `types/api.ts` — `TrainingLaneStatus`, `TrainingLanePosition`,
-  `TrainingLaneClosedTrade`, field names matching
-  `PaperPosition.to_dict()` / `ClosedTrade.to_dict()` exactly.
-- `lib/api.ts` — `trainingLaneStatus()`, same one-line `get()` wrapper
-  style as its neighbors.
-- `pages/TrainMonitor.tsx` — new "Background Training Lane (Track C)"
-  panel, polled locally every 20s (matching
-  `BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS`'s own default), placed
-  as the first panel below the KPI row so it's the first thing visible
-  on the tab. Shows running/stopped, balance vs. starting balance
-  (color-coded), bust count, closed-trade count, current open
-  position, and the most recent closed trade — with an in-panel Thai
-  note (matching the existing note style already used lower on this
-  same page) making explicit that this account is completely separate
-  from the real account and keeps training even while the real
-  account's circuit breaker is tripped. This directly answers "is
-  training still happening" regardless of live circuit-breaker state
-  — the actual gap behind the reported symptom.
-
-No existing export touched in any file. No change to `risk/`,
-`execution/execution_coordinator.py`, or any live-order code path.
+**Not touched**: `ranking/opportunity_ranker.py`, `scanner/market_scanner.py`
+— both reused exactly as they already existed for the live scanner path,
+zero changes needed. `execution/execution_factory.py`'s
+`EXECUTION_MODE=paper` wiring — unaffected, doesn't pass the new
+`symbol=` parameter, gets the exact same default behavior as before.
 
 ## Testing
 
-**Track A** — `pytest tests/`: 2823 passed, 45 deselected (unrelated
-markers), 3 pre-existing failures in `tests/test_dashboard_serving.py`
-confirmed identical on unmodified `main` (they require a built
-`dashboard_src/dist/`, environmental, not caused by this phase — see
-below). `ruff check . --exclude dashboard_src --exclude dashboard`:
-clean. `vulture . --exclude dashboard_src,dashboard,tests
---min-confidence 80`: clean. `python3 -c "import main"`: clean.
+- `pytest tests/`: **2876 passed** (2842 baseline + 34 new in
+  `test_training_lane_runner.py`), 0 failed, 45 deselected (integration
+  marker) — zero regressions. Also independently re-ran every other test
+  file touching `PaperExecutionEngine`
+  (`test_execution_factory.py`, `test_recovery_engine.py`,
+  `test_phase4c.py`, `test_p1b1_dynamic_risk.py`, `test_audit_fixes.py`
+  — 256 tests) before touching the shared file, to catch any regression
+  from the `execute()` signature change specifically: all passed,
+  unchanged.
+- `ruff check .`: clean, before and after.
+- `vulture . --min-confidence 80`: 0 findings, before and after.
+- `python3 -c "import main"`: OK.
+- Frontend: not touched this phase — `tsc`/`vitest`/`npm run build`
+  gates not applicable.
+- Independent second-clone verification: see delivery message.
 
-18 tests in `tests/test_training_lane_runner.py` (up from 14): new
-`TestStatus` class (shape when flat, reflects an open position and a
-closed trade, reflects bust count + reset balance, never leaks
-mutable engine references) plus `TestBootFlag` rewritten for the new
-default — `test_flag_on_by_default`, a new
-`test_flag_still_respects_env_override_off` (confirms the escape
-hatch), and `test_main_guard_constructs_runner_only_when_flag_true`
-(replaces the old flag-off-only guard test; now exercises both
-directions of the guard, which the previous version never actually
-did — see MIGRATION.md).
+## What this does not fix / does not do
 
-2 new tests in `tests/test_api.py::TestTrainingLane`, mirroring
-`TestPaper`'s existing pattern exactly (disabled-when-not-wired,
-enabled-passes-through-unchanged).
-
-**Track B** — `npx tsc --noEmit`: clean. `npx vitest run`: 101 passed
-(101), no new test files needed — the new panel is presentational
-(same convention as every other page-local poll panel in this file,
-none of which are unit-tested individually) and `trainingLaneStatus()`
-is a trivial one-line GET wrapper (same convention as `mlModels()`/
-`portfolioHistory()`, neither of which are unit-tested either).
-`npm run build`: clean production build (`TrainMonitor-*.js` grew from
-its previous size to 14.76 kB / 4.11 kB gzipped).
-
-### Pre-existing failures (not this phase's)
-
-`tests/test_dashboard_serving.py` — 3 tests require a built
-`dashboard_src/dist/index.html` to exist on disk; this sandbox never
-ran `npm run build` before this phase started. Confirmed via `git
-stash` + re-run against unmodified `main`: identical 3 failures,
-0 changes. Not touched by this phase.
-
-## Known follow-up (not done here, out of scope for this phase)
-
-- `docs/CHANGELOG.md`'s `[Unreleased]` section is overwritten
-  per-phase rather than accumulated (pre-existing convention, flagged
-  separately as its own backlog item — "CHANGELOG.md cleanup pass").
-  Followed the existing convention as-is here rather than silently
-  changing it mid-phase.
-- No panel currently surfaces *why* the live circuit breaker tripped
-  beyond the existing `block_reason` tooltip already on the Scanner
-  Decision Log row — out of scope; this phase's ask was specifically
-  about the training lane being independently visible, not about
-  redesigning the live-blocked view.
+- Does not turn multi-symbol rotation on by default —
+  `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED=false` remains the default;
+  opt in via `.env` to activate it.
+- Does not change what the *live* lane trades — this phase is entirely
+  about the background training lane's own dataset diversity, not live
+  execution scope (that was already fixed separately — PR #75,
+  `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS`).
+- Does not add a real per-symbol exchange minimum-quantity table to
+  `PaperExecutionEngine` — the 0.001 floor is a generic safety floor,
+  documented honestly as such, not exchange-accurate for every symbol.
+  Acceptable for this engine's actual purpose (paper/training data), not
+  something to reuse anywhere real order sizing matters.
+- Does not change the rotation *strategy* itself beyond simple
+  round-robin through the top-N ranked list — no weighting by score,
+  liquidity, or recency. A reasonable, simple starting point; revisit if
+  the resulting dataset's symbol distribution turns out skewed in
+  practice.

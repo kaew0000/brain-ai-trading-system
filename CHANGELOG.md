@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## [Unreleased] — Multi-Symbol Rotation for the Background Training Lane
+
+Root cause: `training_lane/training_lane_runner.py`'s background paper-
+training lane (PR #76/#78) traded exactly one hardcoded symbol
+(`settings.SYMBOL`) forever, while the live `portfolio_signal_provider`
+lane trades across the full ~527-symbol scanner universe — a real
+train/serve mismatch for any model eventually trained on this lane's
+data. Fixing the training lane's own symbol-selection logic wasn't
+sufficient on its own: `paper/paper_execution.py`'s
+`PaperExecutionEngine.execute()` separately hardcoded
+`symbol=settings.SYMBOL` on every position it opened, ignoring whatever
+symbol the caller asked for — found by reading `execute()`'s body
+directly before writing any fix. See `PATCH_NOTES.md` for the full
+writeup.
+
+### Added
+- `paper/paper_execution.py` — `execute()` gains an optional `symbol=`
+  parameter (defaults to `settings.SYMBOL`, so every existing caller is
+  unaffected).
+- `training_lane/training_lane_runner.py` — `_select_symbol()`
+  round-robins through scanner-ranked candidates when
+  `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` is on; rotation only ever
+  happens while flat, never mid-position.
+- `config/settings.py` — `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED`
+  (default `false`), `BACKGROUND_TRAINING_SYMBOL_POOL_SIZE` (default `10`).
+- 34 new tests (`tests/test_training_lane_runner.py`).
+
+### Changed
+- Nothing existing modified in meaning. Every new flag defaults to
+  preserving today's exact behavior; `execute()`'s new parameter is
+  optional and defaults to the prior hardcoded value.
+
 ## [Unreleased] — Training-Lane Visibility + Boot-Enabled 24/7 Background Training
 
 Reported symptom: Train Monitor showing every row `BLOCKED`. Traced

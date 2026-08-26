@@ -76,9 +76,27 @@ class PaperExecutionEngine:
         with self._lock:
             return list(self._closed)
 
-    def execute(self, decision, risk_pct: float = 0.01) -> dict:
+    def execute(self, decision, risk_pct: float = 0.01, symbol: str | None = None) -> dict:
         """
         Open a paper position from a decision object.
+
+        `symbol` lets a caller open a position for a symbol other than the
+        globally-configured `settings.SYMBOL` — added for
+        TrainingLaneRunner's multi-symbol rotation mode (V16 Phase 4C
+        Track C), so a single PaperExecutionEngine/PaperAccount can hold
+        positions across different symbols over its lifetime rather than
+        being permanently tied to one. Defaults to `settings.SYMBOL` when
+        omitted, so every pre-existing caller (execution/execution_factory.py's
+        whole-bot EXECUTION_MODE=paper wiring) keeps its exact current
+        behavior unchanged.
+
+        Note: the 0.001 minimum-quantity floor below is a generic safety
+        floor, not a real per-symbol exchange minimum (no per-symbol
+        min-qty lookup exists in this codebase to consult — see
+        PATCH_NOTES.md for this phase). Fine for this engine's purpose
+        (paper/training data, not real order placement), but not a
+        substitute for real exchange filters if this engine is ever used
+        somewhere that matters.
 
         Returns a result dict (mirrors TradeManager.execute_trade() shape).
         """
@@ -101,14 +119,14 @@ class PaperExecutionEngine:
 
             risk_usdt = bal * risk_pct
             quantity  = round(risk_usdt / risk_distance, 6)
-            quantity  = max(quantity, 0.001)          # BTC min
+            quantity  = max(quantity, 0.001)          # generic min-qty floor — see execute()'s docstring
 
             notional = entry * quantity
             if not self.account.reserve_margin(notional):
                 return {"success": False, "reason": "insufficient margin"}
 
             pos = PaperPosition(
-                symbol       = settings.SYMBOL,
+                symbol       = symbol or settings.SYMBOL,
                 direction    = decision.action,
                 entry_price  = entry,
                 stop_loss    = sl,

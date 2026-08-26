@@ -4774,3 +4774,73 @@ untested-individually siblings), `npm run build` clean.
   `block_reason` tooltip already on the Scanner Decision Log row —
   out of scope; this phase's ask was training-lane visibility
   specifically, not a redesign of the live-blocked view.
+
+## 48. Multi-Symbol Rotation for the Background Training Lane (2026-08-25)
+
+Requested directly, after §47's fix confirmed the background training
+lane running successfully: it traded exactly one hardcoded symbol
+(`settings.SYMBOL`) forever, while the live `portfolio_signal_provider`
+lane trades across the full ~527-symbol scanner universe (up to
+`PORTFOLIO_MAX_POSITIONS=5` concurrently) — a real train/serve mismatch
+for any model eventually trained on this lane's dataset.
+
+### Root cause / two-layer blocker
+
+1. `TrainingLaneRunner.__init__` set `self.symbol` once from
+   `settings.SYMBOL` and `_cycle()` never touched it again — no
+   rotation mechanism existed.
+2. The actual hard blocker, found by reading the code rather than
+   assumed: `paper/paper_execution.py`'s `PaperExecutionEngine.execute()`
+   separately hardcoded `symbol=settings.SYMBOL` on every `PaperPosition`
+   it constructed, regardless of what the caller wanted. This class
+   predates the training lane — it originally only backed
+   `EXECUTION_MODE=paper` (a whole-bot single-symbol mode, §
+   `execution/execution_factory.py`) — so it was never built with
+   per-call symbol flexibility. Rotating `TrainingLaneRunner.symbol`
+   alone would have silently mislabeled every position with the wrong
+   symbol; both layers needed fixing together.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `paper/paper_execution.py` | `execute()` gains optional `symbol: str \| None = None`, defaulting to `settings.SYMBOL` — every existing caller unaffected. Also corrected a `# BTC min` comment on the quantity floor to honestly describe it as a generic (not per-symbol-accurate) floor, now that arbitrary symbols are supported. |
+| `training_lane/training_lane_runner.py` | New `_select_symbol()` — round-robins an injected `opportunity_ranker`'s top-N candidates when `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` is on; falls back to the fixed symbol (never raises) on any failure. Called only at the point of attempting a new entry — rotation cannot happen mid-position (a regression test pins this down explicitly, since getting it wrong would corrupt PnL tracking: `tick()` applies one mark price to whatever is currently open). `status()` gained `multi_symbol_enabled`. |
+| `config/settings.py` | `+BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` (default `False`), `+BACKGROUND_TRAINING_SYMBOL_POOL_SIZE` (default `10`). |
+| `main.py` | Constructs a dedicated `OpportunityRanker(market_scanner, top_n=...)` — reading the same scanner cache `ExecutionScheduler`'s own ranker reads, not a second `MarketScanner` — and injects it into `TrainingLaneRunner` only when the new flag is on and the scanner is running. |
+
+Not touched: `ranking/opportunity_ranker.py`, `scanner/market_scanner.py`
+(reused as-is), `execution/execution_factory.py`'s `EXECUTION_MODE=paper`
+wiring (doesn't pass the new `symbol=` param, unaffected).
+
+### Testing
+
+34 new tests (`tests/test_training_lane_runner.py`): rotation order,
+empty-ranking/raising-ranker/no-ranker fallbacks, mid-position symbol
+stability, post-close rotation, `execute()`'s new parameter (default
+preserved, explicit respected, closed-trade symbol tagging), and
+`main.py` wiring (ast-based, mirroring §47's `TestBootBehavior`
+pattern).
+
+**In-sandbox** (`dashboard_src/dist/` present from an earlier `npm run
+build` this session): `pytest tests/` → 2876 passed, 0 failed, 45
+deselected. Independently re-ran every other test file touching
+`PaperExecutionEngine` (`test_execution_factory.py`,
+`test_recovery_engine.py`, `test_phase4c.py`, `test_p1b1_dynamic_risk.py`,
+`test_audit_fixes.py` — 256 tests) before touching the shared file:
+unchanged, all passing. `ruff`/`vulture`/`python3 -c "import main"`:
+clean. See delivery message for the independent-fresh-clone result,
+which (per §47's own note) may reproduce the 3 environmental
+`test_dashboard_serving.py` failures that require a built
+`dashboard_src/dist/` to pass — unrelated to this phase's changes
+either way.
+
+### Known follow-up (not this phase)
+
+- Rotation strategy is simple round-robin through the top-N ranked
+  list — no weighting by score/liquidity/recency. Revisit if the
+  resulting dataset's symbol distribution turns out skewed in practice.
+- `PaperExecutionEngine`'s 0.001 quantity floor is still a generic
+  safety floor, not a real per-symbol exchange minimum — no such
+  lookup exists in this codebase to consult; out of scope for this
+  phase (paper/training engine, not real order placement).
