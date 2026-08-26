@@ -4774,3 +4774,193 @@ untested-individually siblings), `npm run build` clean.
   `block_reason` tooltip already on the Scanner Decision Log row —
   out of scope; this phase's ask was training-lane visibility
   specifically, not a redesign of the live-blocked view.
+
+## 48. AI Self-Improvement Governance Layer — Phase 1: Proposal record + deterministic Review Agent (2026-08-26)
+
+Request: make the system able to learn/self-tune (parameters, and
+eventually trading logic) automatically, but hold every change for
+explicit human confirmation first, with a log of what changed sent to
+a second "review" agent that opines on whether the change looks good
+before the human decides. Scoped across several rounds of clarifying
+questions before any code was written (see chat) into a 6-phase
+roadmap (G1-G6); this section covers **Phase 1 only** — G1 (the
+proposal record + store) and G3 (the deterministic Review Agent),
+including the lane-breakdown transparency addition surfaced during
+scoping. G2 (wiring `ml/learning_mode.py`'s nightly retrain to
+actually *produce* a proposal instead of calling
+`ModelRegistry.promote()` directly) and G4 (dashboard approval UI)
+are explicitly **not** part of this delivery — see "Known follow-up"
+below.
+
+### Scope decisions made before writing code
+
+Verified against the real codebase (fresh clone, not assumed from
+docs) before scoping:
+
+- **No approval/proposal concept existed anywhere.** Grepped the
+  whole repo for `approval`/`pending_update`/`human_review` — nothing.
+  The closest existing precedent is `tools/bundle_manager.py`'s
+  `update/incoming → applied/failed` flow, which never auto-merges —
+  same spirit, different subsystem (code bundles, not
+  parameters/models).
+- **`ml/learning_mode.py::run_nightly_retrain()` already auto-promotes
+  today, unconditionally, with no flag gating it** — scheduled daily
+  at `main.py:1970`. This is the most urgent live gap the request
+  describes; fixing it is Phase 2 (G2), not this delivery.
+- **`research/feature_store.py::get_training_rows()` has no
+  `execution_lane` filter at all** — the nightly retrain dataset
+  already silently mixes `LIVE` + `TRAINING` (Track C's background
+  paper account, §47, `BACKGROUND_PAPER_TRAINING_ENABLED` now
+  defaults `True`) + `PAPER` rows with zero visibility into the mix.
+  Not previously documented anywhere. Addressed here as a
+  transparency addition (`governance/lane_breakdown.py` +
+  `UpdateReviewAgent`'s lane note) rather than a behavior change —
+  Phase 1 does not filter or change what the retrain trains on, it
+  only makes the composition visible once a producer populates it.
+- **A full historical "what-if" replay/backtest engine for CEOAgent
+  decisions does not exist.** `agent_decisions` + `signals` + `trades`
+  are enough for a cheap "Replay Tier A" (re-score already-taken
+  trades under counterfactual weights, honestly excluding
+  WAIT→would-have-fired flips) once built; `market_snapshots.mark_price`
+  is enough to eventually support a full "Replay Tier B" simulation,
+  but that is a standalone backtesting-engine build. Neither is part
+  of this delivery — this is why `agent_weight` /
+  `recommendation_param` / `strategy_selection` / `logic_change`
+  proposals are explicitly **unscored** by the Review Agent in
+  Phase 1 (see below), not estimated.
+- **"Auto-adjust trading logic" was scoped into 3 tiers** before any
+  design: Tier 1 (externalize+tune hardcoded numeric constants —
+  `agents/ceo_agent.py`'s `WEIGHTS` dict, `AGREEMENT_FLOOR_MULTIPLIER`,
+  and the literal `>=40` action threshold are all hardcoded in Python
+  today, not in `config/settings.py`, despite Rule 16/17's
+  no-hardcoding principle predating this request), Tier 2 (switch
+  among existing, already-vetted strategies via
+  `execution/strategy_registry.py`), Tier 3 (AI proposes genuinely new
+  code) — agreed that Tier 3 always terminates in the existing
+  feature-branch + bundle + human PR-review workflow, never an
+  auto-deploy, matching `CLAUDE.md`'s stated priority ("reliability
+  and capital preservation always higher than trading frequency").
+  `requires_pr_review` on the schema is the enforcement point for
+  this; no Tier of G6 is implemented yet.
+
+### Design decisions
+
+- **`update_proposals` needed no separate migration script.** Checked
+  `database/db.py::_apply_schema()` first: it re-runs the full
+  `schema_v13.sql` script (all `CREATE TABLE IF NOT EXISTS`
+  statements) against every database path once per process, including
+  pre-existing files — so a brand-new table with no historical rows to
+  preserve is picked up automatically. This is the exact precedent
+  `migration_001_execution_lane_backfill.py`'s own docstring already
+  describes for `execution_events`. `migration_001`'s rebuild-by-copy
+  approach is only needed when an *existing* table needs a new column
+  on *existing* rows — not the case here.
+- **`UpdateReviewAgent` does not subclass `BaseAgent`.** Read
+  `agents/base_agent.py` in full first: `analyse(market_context) ->
+  AgentReport` is built specifically around trading signals
+  (LONG/SHORT/NEUTRAL/WAIT, `EventBus` `SIGNAL_`/`ANALYSIS` events,
+  telemetry keyed on `last_signal`) — none of which fits "should this
+  proposal be approved." A standalone class was judged a better fit
+  than forcing an ill-matched abstraction onto it.
+- **The Review Agent is deterministic, not an LLM call.** Checked
+  `agents/` first: nothing in the existing decision path calls an LLM
+  anywhere. Matches
+  `learning/application/recommendation_scoring.py`'s own stated
+  philosophy ("deterministic, explainable, arithmetic ... nothing
+  that could silently drift"), which this mirrors deliberately.
+- **Scoring is two-stage: a hard gate, then a composite score,** same
+  "hard veto beats soft score" safety-ordering already used elsewhere
+  in this codebase (`recommendation_advisor.py`'s Circuit Breaker >
+  Risk Manager > CEO ordering). The hard gate for `model_promotion`
+  proposals is a literal re-implementation of
+  `ml/model_registry.py::ModelRegistry.should_promote()`'s exact rule
+  (win_rate↑ AND profit_factor↑ AND drawdown not worse) — re-implemented
+  rather than imported so `governance`/`agents` has no import-time
+  dependency on `ml/model_registry.py`, with
+  `tests/test_update_review_agent.py::TestHardGateMatchesModelRegistryExactly`
+  asserting the two agree against a real `ModelRegistry` instance so
+  they can't silently drift apart. Below
+  `REVIEW_MIN_SAMPLE_SIZE` training rows, verdict is capped at
+  `"caution"` even if the hard gate passes, same floor pattern
+  `DYNAMIC_WEIGHT_MIN_SAMPLES`/`RECOMMENDATION_MIN_SAMPLE_SIZE`
+  already use.
+- **Only `proposal_type="model_promotion"` is scored for real in
+  Phase 1.** It is the only type with an honest metrics source today
+  (`ml/trainer.py`'s 80/20 held-out validation split). Every other
+  type returns an explicit unscored `ReviewResult` (`verdict=""`,
+  reasoning states why) rather than inventing numbers — see "Scope
+  decisions" above.
+
+### What changed
+
+- `database/schema_v13.sql`: new `update_proposals` table (id,
+  created_at/updated_at, proposal_type, target, before_json/after_json,
+  rationale, metrics_json, generated_by, review_verdict/reasoning/score,
+  status, decided_at/applied_at/apply_result,
+  requires_pr_review/pr_branch/pr_bundle_path) + 3 indexes. No existing
+  table touched.
+- `config/settings.py`: new `REVIEW_SCORE_WEIGHT_IMPROVEMENT` (0.40) /
+  `REVIEW_SCORE_WEIGHT_DRAWDOWN_MARGIN` (0.30) /
+  `REVIEW_SCORE_WEIGHT_SAMPLE_SIZE` (0.30, sums to 1.0, asserted by
+  `tests/test_update_review_agent.py::TestScoreWeightsSumToOne`),
+  `REVIEW_SCORE_WIN_RATE_DELTA_SCALE` (0.05),
+  `REVIEW_SCORE_PROFIT_FACTOR_DELTA_SCALE` (0.5),
+  `REVIEW_SCORE_SATURATION_N` (50), `REVIEW_MIN_SAMPLE_SIZE` (20),
+  `REVIEW_SCORE_APPROVE_THRESHOLD` (0.6). No existing setting touched.
+- `governance/` (new package): `update_proposal.py`
+  (`UpdateProposal` dataclass, `to_row()`/`from_row()`),
+  `proposal_store.py` (`ProposalStore` — `create()`/`get()`/`list()`/
+  `set_review()`/`set_status()`, same `ManagedConn` +
+  module-singleton-via-`get_x()`/`reset_x(db_path=...)` pattern as
+  `ml/model_registry.py`), `lane_breakdown.py`
+  (`compute_lane_breakdown()`).
+- `agents/update_review_agent.py` (new): `UpdateReviewAgent`,
+  `ReviewResult`, `model_promotion_hard_gate_passed()`.
+- Tests (new, all `pytest.mark.unit`): `tests/test_proposal_store.py`
+  (25), `tests/test_update_review_agent.py` (21),
+  `tests/test_lane_breakdown.py` (4) — 50 total.
+
+No existing export touched in any file. No dashboard_src/ changes —
+Track B is untouched in this phase.
+
+### Testing
+
+Track A: `pytest tests/` — 2873 passed (50 new, all listed above), 45
+deselected, same 3 pre-existing `test_dashboard_serving.py` failures
+as baseline (confirmed identical against unmodified `main` before
+branching — require a built `dashboard_src/dist/`, environmental,
+unrelated to this change). `ruff check .`: clean. `vulture
+governance/ agents/update_review_agent.py tests/test_proposal_store.py
+tests/test_update_review_agent.py tests/test_lane_breakdown.py
+--min-confidence 80`: clean. `python3 -c "import main"`: clean.
+
+Track B: not applicable — no `dashboard_src/` files changed this
+phase, so `tsc --noEmit`/`vitest`/`npm run build` have no diff to
+check.
+
+### Known follow-up (not this phase)
+
+- **Phase 2 (G2 + G4)**: wrap `run_nightly_retrain()` to create a
+  `model_promotion` proposal instead of calling
+  `ModelRegistry.promote()` directly, and ship the dashboard
+  approve/reject panel — these two must ship together, since a
+  proposal sitting only in the DB with no UI isn't actionable.
+- **Phase 3 (G5)**: extend the same proposal+review pipeline to
+  `DYNAMIC_AGENT_WEIGHTS_ENABLED`/`RECOMMENDATION_APPLICATION_ENABLED`
+  — needs Replay Tier A first (see "Scope decisions" above) before the
+  Review Agent can score these for real; until then they'd stay
+  unscored exactly like `logic_change` does today.
+- **Phase 4-6 (G6, all 3 tiers)**: externalize+tune
+  `ceo_agent.WEIGHTS`/`AGREEMENT_FLOOR_MULTIPLIER`/action-threshold
+  (Tier 1), dynamic strategy selection via
+  `execution/strategy_registry.py` (Tier 2), AI-authored logic/strategy
+  proposals always gated through the existing feature-branch + bundle
+  + human PR-review workflow (Tier 3, never auto-deployed).
+- **Replay Tier B** (full historical trade-outcome simulation from
+  `market_snapshots.mark_price`, for scoring proposals that would have
+  changed which decisions fired, not just their confidence) — a
+  standalone backtesting-engine build, deliberately not started.
+- `ProposalStore`/`UpdateReviewAgent` are not wired into any live code
+  path yet in this phase — both are fully functional and tested in
+  isolation, but nothing calls `ProposalStore.create()` from
+  production code until Phase 2.

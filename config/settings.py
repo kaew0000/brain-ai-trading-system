@@ -243,6 +243,53 @@ class Settings(BaseSettings):
     # reading the decision's `reasons`.
     RECOMMENDATION_MAX_APPLIED_PER_DECISION: int = Field(default=5, alias="RECOMMENDATION_MAX_APPLIED_PER_DECISION")
 
+    # ── AI Self-Improvement Governance — V16 Phase 4C (Track A), Phase 1
+    #    (docs/architecture.md §48) ─────────────────────────────────────────
+    # agents/update_review_agent.py's UpdateReviewAgent is deterministic —
+    # no LLM call, same as every other agent in agents/ (checked before
+    # writing this: nothing in agents/ calls out to an LLM anywhere in the
+    # decision path). It only ever scores proposal_type="model_promotion"
+    # for real in Phase 1, since that is the only type with an honest
+    # metrics source today (ml/trainer.py's 80/20 held-out validation
+    # split) — see UpdateReviewAgent's module docstring for the other
+    # proposal types' Phase-1 "unscored" behaviour and why.
+    #
+    # Scoring is two-stage, mirroring the "hard veto beats soft score"
+    # safety-ordering already used throughout this codebase (e.g.
+    # recommendation_advisor.py's Circuit Breaker > Risk Manager > CEO
+    # ordering): a proposal must first pass the SAME hard gate
+    # ml/model_registry.py's should_promote() already uses (win_rate↑ AND
+    # profit_factor↑ AND drawdown not worse) before any of the weights
+    # below are even computed. Failing the hard gate is always
+    # review_verdict="reject_recommended", regardless of these weights.
+    #
+    # Component weights for the composite score (only computed once the
+    # hard gate passes) — must sum to 1.0, same convention
+    # RECOMMENDATION_SCORE_WEIGHT_* above already uses.
+    REVIEW_SCORE_WEIGHT_IMPROVEMENT: float = Field(default=0.40, alias="REVIEW_SCORE_WEIGHT_IMPROVEMENT")
+    REVIEW_SCORE_WEIGHT_DRAWDOWN_MARGIN: float = Field(default=0.30, alias="REVIEW_SCORE_WEIGHT_DRAWDOWN_MARGIN")
+    REVIEW_SCORE_WEIGHT_SAMPLE_SIZE: float = Field(default=0.30, alias="REVIEW_SCORE_WEIGHT_SAMPLE_SIZE")
+    # How much win_rate / profit_factor have to improve by to earn full
+    # credit on the "improvement" sub-score (a diminishing-returns cap, not
+    # a hard cutoff — same pattern RECOMMENDATION_SCORE_SATURATION_N uses).
+    # 5 percentage points of win-rate, or +0.5 profit-factor, are treated as
+    # a "clearly meaningful" improvement worth full credit on their own.
+    REVIEW_SCORE_WIN_RATE_DELTA_SCALE: float = Field(default=0.05, alias="REVIEW_SCORE_WIN_RATE_DELTA_SCALE")
+    REVIEW_SCORE_PROFIT_FACTOR_DELTA_SCALE: float = Field(default=0.5, alias="REVIEW_SCORE_PROFIT_FACTOR_DELTA_SCALE")
+    # Sample size (training_rows) at which the sample_size sub-score
+    # saturates to 1.0. Same pattern/value as
+    # RECOMMENDATION_SCORE_SATURATION_N — kept as its own setting since the
+    # two score different things and may need to diverge later.
+    REVIEW_SCORE_SATURATION_N: int = Field(default=50, alias="REVIEW_SCORE_SATURATION_N")
+    # Below this many training rows, verdict is capped at "caution" even if
+    # the hard gate technically passes — protects against a tiny, noisy
+    # sample clearing should_promote()'s gate by luck. Same floor concept as
+    # DYNAMIC_WEIGHT_MIN_SAMPLES / RECOMMENDATION_MIN_SAMPLE_SIZE above.
+    REVIEW_MIN_SAMPLE_SIZE: int = Field(default=20, alias="REVIEW_MIN_SAMPLE_SIZE")
+    # Composite score at/above which a proposal that already passed the
+    # hard gate is verdict="approve_recommended" rather than "caution".
+    REVIEW_SCORE_APPROVE_THRESHOLD: float = Field(default=0.6, alias="REVIEW_SCORE_APPROVE_THRESHOLD")
+
     # ── Market Scanner (V16 Phase 2, Part 1) ───────────────
     # Off by default: (1) this is a brand-new background thread making live
     # exchange calls — it must never auto-start just because main.py or a

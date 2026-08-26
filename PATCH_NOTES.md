@@ -1,163 +1,164 @@
-# PATCH NOTES — Training-Lane Visibility + Boot-Enabled 24/7 Background Training
+# PATCH NOTES — AI Self-Improvement Governance Layer, Phase 1
 
-Branch: `feat/training-lane-visibility-and-boot-default`
-Base: `main` @ `5eb52e0` (merge of PR #77, `fix/dashboard-boot-login`)
+Branch: `feat/self-improvement-governance-phase1`
+Base: `main` @ `9ddd9d6` (merge of PR #78, training-lane visibility phase)
 
-## Root cause
+## Context
 
-Reported symptom: "Train Monitor ขึ้น block หมด" (Train Monitor shows
-everything blocked). Traced against a real run.bat production log
-provided alongside the request:
+Request: make the system able to learn/self-tune (parameters, and
+eventually trading logic) automatically, but hold every change for
+explicit human confirmation first, with a log of what changed sent to
+a second "review" agent that opines on whether the change looks good
+before the human decides.
 
-```
-13:16:57 [WARNING] risk.risk_engine: TRADING DISABLED TODAY | Consecutive losses: 3/3
-13:17:53 [INFO] execution.execution_scheduler: ExecutionScheduler: decision blocked (Trading disabled for today)
-```
+Scoped across several rounds of clarifying questions before any code
+was written into a 6-phase roadmap (G1 proposal record, G2 wire the
+nightly-retrain producer, G3 Review Agent, G4 dashboard approval UI,
+G5 extend to agent weights/recommendation params, G6 trading-logic
+tiers). **This delivery is Phase 1 only: G1 + G3**, plus a
+lane-breakdown transparency addition surfaced during scoping (see
+below). See `docs/architecture.md` §48 for the full write-up,
+including every scope decision made and why.
 
-Train Monitor's "Scanner Decision Log" panel was correctly reporting
-this — every row shows `BLOCKED` because it renders
-`PortfolioHistoryEntry.blocked`, sourced from the *live* scanner/CEO
-decision cycle, which the real RiskEngine's circuit breaker was
-legitimately halting for the day. Not a display bug.
+## What was verified before writing code
 
-The actual gap: `training_lane/training_lane_runner.py` (Phase 4C
-Track C, merged PR #76) already implements everything the request
-described — a fully isolated $100 paper account that runs
-independent of the live circuit breaker/lifecycle state, resets
-immediately (no cooldown, no wait) when it busts, and captures the
-bust event as a labelled training row. But
-`BACKGROUND_PAPER_TRAINING_ENABLED` defaulted to `False`, and the
-provided boot log has no `TrainingLaneRunner started` line — the lane
-was never enabled. Train Monitor also had no panel surfacing Track
-C's own state at all, so even once enabled there was nothing on
-screen distinguishing "training is fine, only the live scanner is
-blocked" from "everything is broken."
-
-Confirmed via direct inspection (not assumed) before writing any
-code:
-- `config/settings.py:455` — flag default was `False`.
-- `main.py:670` — `if settings.BACKGROUND_PAPER_TRAINING_ENABLED:` guard,
-  never true with the shipped default.
-- `main.py` — `training_lane_runner` was registered in `components`
-  for graceful shutdown only; never passed into `_start_api_server()`,
-  so the API layer had zero visibility into it even when running.
+- No approval/proposal concept existed anywhere in the repo (grepped
+  for `approval`/`pending_update`/`human_review` — nothing).
+- `ml/learning_mode.py::run_nightly_retrain()` already auto-promotes
+  today, unconditionally, scheduled daily at `main.py:1970` — the
+  most urgent live gap the request describes. Fixing it is Phase 2
+  (G2), **not part of this delivery** — see "Known follow-up" below.
+- `research/feature_store.py::get_training_rows()` has no
+  `execution_lane` filter — the nightly retrain dataset already
+  silently mixes `LIVE` + `TRAINING` (Track C's background paper
+  account) + `PAPER` rows with zero visibility into the mix. Not
+  previously documented. Addressed here as a transparency addition
+  only (see below) — this phase does not change what the retrain
+  trains on.
+- No historical "what-if" replay/backtest engine exists for CEOAgent
+  decisions — this is why the Review Agent only scores
+  `proposal_type="model_promotion"` for real in Phase 1 (see below).
 
 ## What changed
 
+### `database/schema_v13.sql`
+New `update_proposals` table (+ 3 indexes) — one row per proposal the
+system generates for itself. No separate migration script needed:
+`database/db.py::_apply_schema()` re-runs the full schema script
+(`CREATE TABLE IF NOT EXISTS`) against every DB path once per
+process, including pre-existing files, so a brand-new table is picked
+up automatically — same precedent `migration_001`'s own docstring
+already documents for `execution_events`. No existing table touched.
+
 ### `config/settings.py`
-`BACKGROUND_PAPER_TRAINING_ENABLED` default flipped `False → True` —
-literal reading of "เทรน 24/7 เมื่อเปิดระบบ" (train 24/7 whenever the
-system opens): training must start automatically on boot, not require
-a manual `.env` edit first. This is the one explicit default-behavior
-change in this phase (see MIGRATION.md). The lane it enables is
-provably isolated (own `PaperAccount`, own `PaperExecutionEngine`, no
-import capable of placing a real order — mechanically verified by
-`tests/test_training_lane_runner.py::TestNoRealOrderPath`, unchanged
-by this phase), so flipping the default carries no live-money risk;
-it only adds one extra background thread + local DB writes to a
-fresh boot. Anyone who doesn't want that can still set
-`BACKGROUND_PAPER_TRAINING_ENABLED=false` in `.env`.
+Seven new settings for the Review Agent's scoring rubric —
+`REVIEW_SCORE_WEIGHT_IMPROVEMENT` (0.40),
+`REVIEW_SCORE_WEIGHT_DRAWDOWN_MARGIN` (0.30),
+`REVIEW_SCORE_WEIGHT_SAMPLE_SIZE` (0.30, sums to 1.0),
+`REVIEW_SCORE_WIN_RATE_DELTA_SCALE` (0.05),
+`REVIEW_SCORE_PROFIT_FACTOR_DELTA_SCALE` (0.5),
+`REVIEW_SCORE_SATURATION_N` (50), `REVIEW_MIN_SAMPLE_SIZE` (20),
+`REVIEW_SCORE_APPROVE_THRESHOLD` (0.6). All new — no existing setting
+touched, nothing reads these yet outside the new code below.
 
-### `training_lane/training_lane_runner.py`
-Added `TrainingLaneRunner.status()` — a read-only plain-dict snapshot
-(`enabled`, `is_running`, `symbol`, `starting_balance`, `balance`,
-`bust_count`, `closed_trade_count`, `open_position`,
-`last_closed_trade`, `poll_interval_seconds`). Reads only
-already-lock-protected properties (`PaperAccount.balance`,
-`PaperExecutionEngine.open_positions`/`.closed_trades` each take
-their own internal lock) and returns `PaperPosition.to_dict()` /
-`ClosedTrade.to_dict()` plain dicts — never a reference to the live
-mutable objects, so a caller can't mutate training state through the
-status surface. No behavior change to the existing cycle/bust logic.
+### `governance/` (new package)
+- `update_proposal.py` — `UpdateProposal` dataclass (not frozen,
+  unlike `Recommendation` — it has a real mutating lifecycle) +
+  `to_row()`/`from_row()`. `proposal_type="logic_change"` always
+  forces `requires_pr_review=True` in `__post_init__`, regardless of
+  what the caller passes.
+- `proposal_store.py` — `ProposalStore`: `create()` (always lands as
+  `status="pending"`, even if the caller's dataclass says otherwise),
+  `get()`, `list()` (filter by status/proposal_type), `set_review()`
+  (attaches the Review Agent's opinion, never touches `status`),
+  `set_status()` (the human decision point — raises on an unknown
+  status rather than silently no-op'ing). Same `ManagedConn` +
+  module-singleton `get_proposal_store()`/`reset_proposal_store()`
+  pattern as `ml/model_registry.py`.
+- `lane_breakdown.py` — `compute_lane_breakdown(rows)`, groups
+  `feature_rows`-style dicts by `execution_lane`. Answers "how much of
+  this model's training data was real trades vs. the paper account" —
+  the transparency addition folded into this phase after that gap was
+  found. Does not change what `get_training_rows()` returns; only
+  makes the composition visible to whatever wants to report it.
 
-### `main.py`
-`_start_api_server()` gained a `training_lane_runner=None` parameter,
-injected via the existing `set_state()` mechanism (same pattern as
-`paper_engine`/`reconciliation_engine` above it) and wired at the one
-call site from `components.get("training_lane_runner")`. Purely
-additive — every existing parameter/call site untouched.
+### `agents/update_review_agent.py` (new)
+`UpdateReviewAgent` — deterministic, no LLM call (checked `agents/`
+first: nothing there calls an LLM anywhere in the decision path).
+Deliberately **not** a `BaseAgent` subclass — `analyse(market_context)
+-> AgentReport` is built around trading signals
+(LONG/SHORT/NEUTRAL/WAIT), which doesn't fit "should this proposal be
+approved."
 
-### `api/app.py`
-New `GET /api/training-lane/status`. Same "always 200, `enabled` flag
-tells the story" contract as the existing `/api/paper` and
-`/api/paper/metrics` routes right above it (off/not-wired is a normal
-runtime state, not a 404/503). Passes `TrainingLaneRunner.status()`
-straight through with no reshaping.
+`.review(proposal)` returns a `ReviewResult`:
+- `proposal_type="model_promotion"`: real two-stage scoring. Stage 1
+  is a hard gate — `model_promotion_hard_gate_passed()`, a literal
+  re-implementation of `ml/model_registry.py::
+  ModelRegistry.should_promote()`'s exact rule (win_rate↑ AND
+  profit_factor↑ AND drawdown not worse), asserted equal to a real
+  `ModelRegistry.should_promote()` call across 5 parametrized cases in
+  `tests/test_update_review_agent.py`. Failing it is always
+  `verdict="reject_recommended", score=0.0`, full stop. Stage 2 (only
+  once the gate passes) is a weighted composite of
+  improvement/drawdown-margin/sample-size sub-scores; below
+  `REVIEW_MIN_SAMPLE_SIZE` rows the verdict is capped at `"caution"`
+  even if the composite would otherwise clear
+  `REVIEW_SCORE_APPROVE_THRESHOLD`.
+- Every other `proposal_type` (`agent_weight`, `recommendation_param`,
+  `strategy_selection`, `logic_change`): explicit **unscored** result
+  (`verdict=""`, reasoning states there's no honest metrics source for
+  it yet) rather than an invented number.
+- If the proposal's `metrics["training_rows_by_lane"]` is present, the
+  reasoning text surfaces it verbatim (e.g. "LIVE=150 (75%),
+  TRAINING=50 (25%) — includes non-LIVE data") — only when a producer
+  actually populates it; Phase 1 doesn't populate this on any live
+  proposal itself.
 
-### Dashboard (`dashboard_src/`)
-- `types/api.ts` — `TrainingLaneStatus`, `TrainingLanePosition`,
-  `TrainingLaneClosedTrade`, field names matching
-  `PaperPosition.to_dict()` / `ClosedTrade.to_dict()` exactly.
-- `lib/api.ts` — `trainingLaneStatus()`, same one-line `get()` wrapper
-  style as its neighbors.
-- `pages/TrainMonitor.tsx` — new "Background Training Lane (Track C)"
-  panel, polled locally every 20s (matching
-  `BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS`'s own default), placed
-  as the first panel below the KPI row so it's the first thing visible
-  on the tab. Shows running/stopped, balance vs. starting balance
-  (color-coded), bust count, closed-trade count, current open
-  position, and the most recent closed trade — with an in-panel Thai
-  note (matching the existing note style already used lower on this
-  same page) making explicit that this account is completely separate
-  from the real account and keeps training even while the real
-  account's circuit breaker is tripped. This directly answers "is
-  training still happening" regardless of live circuit-breaker state
-  — the actual gap behind the reported symptom.
+### Tests (new, all `pytest.mark.unit`)
+`tests/test_proposal_store.py` (25), `tests/test_update_review_agent.py`
+(21, including the direct `ModelRegistry.should_promote()` cross-check),
+`tests/test_lane_breakdown.py` (4). 50 total.
 
-No existing export touched in any file. No change to `risk/`,
-`execution/execution_coordinator.py`, or any live-order code path.
+No existing export touched in any file. No `dashboard_src/` changes —
+Track B untouched this phase.
 
 ## Testing
 
-**Track A** — `pytest tests/`: 2823 passed, 45 deselected (unrelated
-markers), 3 pre-existing failures in `tests/test_dashboard_serving.py`
-confirmed identical on unmodified `main` (they require a built
-`dashboard_src/dist/`, environmental, not caused by this phase — see
-below). `ruff check . --exclude dashboard_src --exclude dashboard`:
-clean. `vulture . --exclude dashboard_src,dashboard,tests
+**Track A** — `pytest tests/`: 2873 passed (up from a 2823-passed
+baseline, +50 = exactly the new tests), 45 deselected, same 3
+pre-existing `tests/test_dashboard_serving.py` failures as baseline
+(need a built `dashboard_src/dist/`, environmental, confirmed
+identical before branching). `ruff check .`: clean. `vulture
+governance/ agents/update_review_agent.py tests/test_proposal_store.py
+tests/test_update_review_agent.py tests/test_lane_breakdown.py
 --min-confidence 80`: clean. `python3 -c "import main"`: clean.
 
-18 tests in `tests/test_training_lane_runner.py` (up from 14): new
-`TestStatus` class (shape when flat, reflects an open position and a
-closed trade, reflects bust count + reset balance, never leaks
-mutable engine references) plus `TestBootFlag` rewritten for the new
-default — `test_flag_on_by_default`, a new
-`test_flag_still_respects_env_override_off` (confirms the escape
-hatch), and `test_main_guard_constructs_runner_only_when_flag_true`
-(replaces the old flag-off-only guard test; now exercises both
-directions of the guard, which the previous version never actually
-did — see MIGRATION.md).
-
-2 new tests in `tests/test_api.py::TestTrainingLane`, mirroring
-`TestPaper`'s existing pattern exactly (disabled-when-not-wired,
-enabled-passes-through-unchanged).
-
-**Track B** — `npx tsc --noEmit`: clean. `npx vitest run`: 101 passed
-(101), no new test files needed — the new panel is presentational
-(same convention as every other page-local poll panel in this file,
-none of which are unit-tested individually) and `trainingLaneStatus()`
-is a trivial one-line GET wrapper (same convention as `mlModels()`/
-`portfolioHistory()`, neither of which are unit-tested either).
-`npm run build`: clean production build (`TrainMonitor-*.js` grew from
-its previous size to 14.76 kB / 4.11 kB gzipped).
-
-### Pre-existing failures (not this phase's)
-
-`tests/test_dashboard_serving.py` — 3 tests require a built
-`dashboard_src/dist/index.html` to exist on disk; this sandbox never
-ran `npm run build` before this phase started. Confirmed via `git
-stash` + re-run against unmodified `main`: identical 3 failures,
-0 changes. Not touched by this phase.
+**Track B** — not applicable this phase; no `dashboard_src/` files
+changed, so `tsc --noEmit`/`vitest`/`npm run build` have no diff to
+check.
 
 ## Known follow-up (not done here, out of scope for this phase)
 
-- `docs/CHANGELOG.md`'s `[Unreleased]` section is overwritten
-  per-phase rather than accumulated (pre-existing convention, flagged
-  separately as its own backlog item — "CHANGELOG.md cleanup pass").
-  Followed the existing convention as-is here rather than silently
-  changing it mid-phase.
-- No panel currently surfaces *why* the live circuit breaker tripped
-  beyond the existing `block_reason` tooltip already on the Scanner
-  Decision Log row — out of scope; this phase's ask was specifically
-  about the training lane being independently visible, not about
-  redesigning the live-blocked view.
+- **Phase 2 (G2 + G4, must ship together)**: wrap
+  `run_nightly_retrain()` to create a `model_promotion` proposal
+  instead of calling `ModelRegistry.promote()` directly, and ship the
+  dashboard approve/reject panel — a proposal with no UI isn't
+  actionable.
+- **Phase 3 (G5)**: extend to
+  `DYNAMIC_AGENT_WEIGHTS_ENABLED`/`RECOMMENDATION_APPLICATION_ENABLED`
+  — needs a "Replay Tier A" (re-score already-taken trades under
+  counterfactual weights from `agent_decisions`/`signals`/`trades`,
+  honestly excluding WAIT→would-have-fired flips) before the Review
+  Agent can score these for real.
+- **Phase 4-6 (G6, 3 tiers)**: externalize+tune `ceo_agent.WEIGHTS`/
+  `AGREEMENT_FLOOR_MULTIPLIER`/action-threshold (Tier 1), dynamic
+  strategy selection (Tier 2), AI-authored logic always gated through
+  the existing feature-branch+bundle+PR-review workflow (Tier 3,
+  `requires_pr_review` is the schema-level enforcement point, never
+  auto-deployed).
+- **Replay Tier B** (full trade-outcome simulation from
+  `market_snapshots.mark_price`) — a standalone backtesting-engine
+  build, deliberately not started.
+- `ProposalStore`/`UpdateReviewAgent` are fully functional and tested
+  in isolation but not wired into any live code path yet — nothing in
+  production code calls `ProposalStore.create()` until Phase 2.
