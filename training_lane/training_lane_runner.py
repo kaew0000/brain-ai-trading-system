@@ -21,6 +21,19 @@ hardcoded symbol the live lane may rarely even select. Off by default;
 with it off (or no ranker supplied), behavior is unchanged from before
 this addition.
 
+Restore-on-restart (V16 Phase 4C §49 addition)
+-------------------------------------------------------
+Originally, every process restart threw this lane's whole state away —
+fresh $100 PaperAccount, and any genuinely-open position simply
+vanished (its eventual WIN/LOSS outcome never captured at all). Now
+saves a full snapshot (training_lane/state_store.py, one row in
+training_lane_state) at the end of every cycle, and attempts to restore
+it at construction — see TrainingLaneRunner._restore_state(). A restore
+problem of any kind (first-ever run, corrupted row, incompatible future
+format) is logged and this lane simply continues with a fresh account,
+exactly as it always did before this addition — restore is strictly
+additive, never a precondition for this lane to run.
+
 Purpose
 -------
 Continuously generate execution_lane="PAPER" trade outcomes against
@@ -93,6 +106,7 @@ from dataclasses import dataclass
 from config.settings import settings
 from paper.paper_account import PaperAccount
 from paper.paper_execution import PaperExecutionEngine
+from training_lane.state_store import get_training_lane_state_store
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -162,6 +176,7 @@ class TrainingLaneRunner:
         poll_interval_seconds: float | None = None,
         opportunity_ranker=None,
         multi_symbol_enabled: bool | None = None,
+        state_store=None,
     ) -> None:
         from execution.strategy_registry import build_strategy
 
@@ -223,6 +238,66 @@ class TrainingLaneRunner:
         )
         self._ranker = opportunity_ranker if self._multi_symbol_enabled else None
         self._rotation_index = 0
+
+        # V16 Phase 4C §49: restore-on-restart. Every prior restart threw
+        # this lane's whole in-memory state away (fresh $100 PaperAccount,
+        # any genuinely-open position silently vanishing — losing that
+        # trade's eventual outcome entirely, never captured by
+        # DatasetBuilder) — the exact "training resets every time the bot
+        # restarts" symptom this phase closes. Attempted here,
+        # unconditionally, right after constructing the fresh engine
+        # above: if a prior state exists and restores cleanly, it
+        # replaces the fresh engine and restores symbol/bust_count/
+        # rotation_index too; if not (first-ever run, corrupted state, or
+        # any other failure), the fresh engine already constructed above
+        # is simply left in place — restore is additive-on-top, never a
+        # precondition for this lane to run.
+        self._state_store = state_store or get_training_lane_state_store()
+        self.restored_from_prior_run = False
+        self._restore_state()
+
+    def _restore_state(self) -> None:
+        """Never raises — a restore problem is logged and this lane
+        proceeds with the fresh engine _new_engine() already built,
+        exactly as if this method didn't exist. See __init__'s comment
+        for why this is safe to treat as best-effort."""
+        try:
+            saved = self._state_store.load_state()
+            if saved is None:
+                return
+            engine_state = saved.get("engine")
+            if not engine_state:
+                return
+            self._engine = PaperExecutionEngine.from_state_dict(engine_state)
+            self.symbol = saved.get("symbol", self.symbol)
+            self._bust_count = int(saved.get("bust_count", self._bust_count))
+            self._rotation_index = int(saved.get("rotation_index", self._rotation_index))
+            self.restored_from_prior_run = True
+            open_count = len(self._engine.open_positions)
+            logger.info(
+                f"TrainingLaneRunner: restored prior state | "
+                f"balance={self._engine.account.balance:.2f} "
+                f"open_positions={open_count} symbol={self.symbol} "
+                f"bust_count={self._bust_count}"
+            )
+        except Exception as exc:
+            logger.error(
+                f"TrainingLaneRunner: restore failed, continuing with a "
+                f"fresh account: {exc}", exc_info=True,
+            )
+
+    def _save_state(self) -> None:
+        """Never raises — see _restore_state()'s docstring; a failed
+        save should never interrupt this lane's own trading cycle."""
+        try:
+            self._state_store.save_state({
+                "engine":         self._engine.to_state_dict(),
+                "symbol":         self.symbol,
+                "bust_count":     self._bust_count,
+                "rotation_index": self._rotation_index,
+            })
+        except Exception as exc:
+            logger.error(f"TrainingLaneRunner: state save failed: {exc}", exc_info=True)
 
     def _select_symbol(self) -> str:
         """Picks the symbol for the *next* entry attempt. Only ever
@@ -319,6 +394,7 @@ class TrainingLaneRunner:
             "open_position": open_positions[0] if open_positions else None,
             "last_closed_trade": last_closed,
             "poll_interval_seconds": self._poll_interval,
+            "restored_from_prior_run": self.restored_from_prior_run,
         }
 
     # ── Main loop ────────────────────────────────────────────────────────────
@@ -344,6 +420,7 @@ class TrainingLaneRunner:
 
         if self._engine.account.balance <= 0:
             self._handle_bust()
+            self._save_state()
             return  # don't open a new position on the same cycle as a reset
 
         if not self._engine.open_positions:  # max_open=1 by construction
@@ -359,6 +436,15 @@ class TrainingLaneRunner:
             decision = _to_paper_decision(self._signal_provider(self.symbol))
             if decision is not None:
                 self._engine.execute(decision, symbol=self.symbol)
+
+        # V16 Phase 4C §49: save every cycle, unconditionally — not just
+        # on a graceful stop() — so a hard kill/crash (this project's own
+        # history: restarts have far more often looked like a closed
+        # terminal window than a clean Ctrl+C) never loses more than one
+        # cycle's worth of state. Cheap enough at this poll interval
+        # (default 20s) to not bother gating on "did anything actually
+        # change this cycle".
+        self._save_state()
 
     # ── ML pipeline feed ─────────────────────────────────────────────────────
 

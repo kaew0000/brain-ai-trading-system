@@ -192,6 +192,63 @@ class PaperPosition:
             "is_open":         self.is_open,
         }
 
+    # ── State persistence (V16 Phase 4C — TrainingLaneRunner restore-on-restart) ─
+
+    def to_state_dict(self) -> dict:
+        """Full internal state for persistence/restore. Unlike to_dict()
+        (a display snapshot), this includes opened_at as a raw
+        reconstructible value and bars_open — both needed so a restored
+        position keeps an accurate TIMEOUT_BARS countdown and an accurate
+        duration_s when it eventually closes, rather than silently
+        resetting either."""
+        return {
+            "symbol":       self.symbol,
+            "direction":    self.direction,
+            "entry_price":  self.entry_price,
+            "stop_loss":    self.stop_loss,
+            "take_profit":  self.take_profit,
+            "quantity":     self.quantity,
+            "leverage":     self.leverage,
+            "confidence":   self.confidence,
+            "regime":       self.regime,
+            "oi_delta":     self.oi_delta,
+            "funding_rate": self.funding_rate,
+            "opened_at":    self.opened_at.isoformat(),
+            "bars_open":    self._bars_open,
+            "mark_price":   self.mark_price,
+        }
+
+    @classmethod
+    def from_state_dict(cls, state: dict) -> "PaperPosition":
+        """Reconstructs a position from to_state_dict()'s output. Raises
+        (deliberately, unlike PaperAccount.from_state_dict()) if the
+        required fields are missing or invalid — an open position
+        that can't be faithfully reconstructed shouldn't be silently
+        half-restored with fabricated entry/SL/TP; the caller
+        (PaperExecutionEngine.from_state_dict()) is responsible for
+        catching this per-position and skipping just that one rather
+        than failing the whole restore."""
+        pos = cls(
+            symbol=state["symbol"],
+            direction=state["direction"],
+            entry_price=state["entry_price"],
+            stop_loss=state["stop_loss"],
+            take_profit=state["take_profit"],
+            quantity=state["quantity"],
+            leverage=state["leverage"],
+            confidence=state.get("confidence", 0),
+            regime=state.get("regime", ""),
+            oi_delta=state.get("oi_delta", 0.0),
+            funding_rate=state.get("funding_rate", 0.0),
+        )
+        try:
+            pos.opened_at = datetime.fromisoformat(state["opened_at"])
+        except Exception:
+            pass  # keep the fresh-construction default (now) rather than raise
+        pos._bars_open = int(state.get("bars_open", 0))
+        pos.mark_price = float(state.get("mark_price", pos.entry_price))
+        return pos
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _sl_hit(self) -> bool:

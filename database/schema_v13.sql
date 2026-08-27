@@ -479,3 +479,80 @@ CREATE TABLE IF NOT EXISTS portfolio_history (
     data                     TEXT    NOT NULL      -- JSON: OrchestratedDecision.to_dict() + sector_exposure/drawdown context
 );
 CREATE INDEX IF NOT EXISTS idx_portfolio_history_timestamp ON portfolio_history(timestamp);
+
+
+-- ----------------------------------------------------------------------------
+-- update_proposals — V16 Phase 4C: AI Self-Improvement Governance Layer,
+-- Phase 1 (docs/architecture.md §48). Brand new table, no historical data to
+-- preserve — CREATE TABLE IF NOT EXISTS via _apply_schema() is sufficient for
+-- existing database files too, same precedent as execution_events above (see
+-- migration_001_execution_lane_backfill.py's own docstring); no separate
+-- migration script needed.
+--
+-- One row per self-improvement proposal the system generates for itself —
+-- a model promotion, an agent-weight/recommendation-parameter nudge, a
+-- strategy selection, or a trading-logic code change. Nothing in this table
+-- ever applies itself; every row starts 'pending' and only ever changes
+-- status via an explicit human decision (see docs/architecture.md §48's
+-- "Safety ordering" section). `requires_pr_review=1` (always true for
+-- proposal_type='logic_change') means even an 'approved' row here still has
+-- to go through the existing feature-branch + bundle + PR review workflow
+-- before any code lands — this table can never itself deploy code.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS update_proposals (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at          TEXT    NOT NULL,     -- ISO-8601 UTC
+    updated_at          TEXT    NOT NULL,     -- ISO-8601 UTC, bumped on every status change
+
+    proposal_type       TEXT    NOT NULL CHECK(proposal_type IN
+                         ('model_promotion','agent_weight',
+                          'recommendation_param','strategy_selection',
+                          'logic_change')),
+    target              TEXT    NOT NULL,     -- e.g. "model_registry.meta_label",
+                                               -- "ceo_agent.WEIGHTS.smc"
+    before_json         TEXT    NOT NULL DEFAULT '',
+    after_json          TEXT    NOT NULL,
+    rationale           TEXT    NOT NULL DEFAULT '',
+    metrics_json        TEXT    DEFAULT '',   -- win_rate/profit_factor/max_drawdown/
+                                               -- sample_size/training_rows_by_lane etc.
+    generated_by        TEXT    NOT NULL DEFAULT '',  -- e.g. "ml.learning_mode"
+
+    review_verdict      TEXT    DEFAULT '' CHECK(review_verdict IN
+                         ('','approve_recommended','caution','reject_recommended')),
+    review_reasoning    TEXT    DEFAULT '',
+    review_score        REAL    DEFAULT 0.0,
+
+    status              TEXT    NOT NULL DEFAULT 'pending' CHECK(status IN
+                         ('pending','approved','rejected','applied',
+                          'apply_failed','expired')),
+    decided_at          TEXT    DEFAULT '',
+    applied_at          TEXT    DEFAULT '',
+    apply_result        TEXT    DEFAULT '',
+
+    -- Tier 3 (logic_change) safety valve — see table comment above.
+    requires_pr_review  INTEGER NOT NULL DEFAULT 0,
+    pr_branch           TEXT    DEFAULT '',
+    pr_bundle_path      TEXT    DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_update_proposals_status  ON update_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_update_proposals_type    ON update_proposals(proposal_type);
+CREATE INDEX IF NOT EXISTS idx_update_proposals_created ON update_proposals(created_at);
+
+-- V16 Phase 4C §49 — background training lane (training_lane/
+-- training_lane_runner.py) restore-on-restart. A single-row table
+-- (enforced via the CHECK) holding the lane's last-known full state as
+-- one JSON blob (PaperAccount + any open PaperPosition + the runner's
+-- own bust_count/rotation_index) — see training_lane/state_store.py.
+-- Deliberately one opaque JSON column rather than individual typed
+-- columns: this state's shape is owned by paper/paper_account.py's and
+-- paper/paper_position.py's own to_state_dict() methods, not by this
+-- schema, and both are already defensive about missing/extra fields on
+-- load — a normalized column-per-field table would need a migration
+-- every time either of those classes' internal state grows, for no
+-- real benefit (nothing ever queries into this blob's fields with SQL).
+CREATE TABLE IF NOT EXISTS training_lane_state (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    updated_at TEXT    NOT NULL,
+    state_json TEXT    NOT NULL
+);
+

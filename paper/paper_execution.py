@@ -76,6 +76,44 @@ class PaperExecutionEngine:
         with self._lock:
             return list(self._closed)
 
+    # ── State persistence (V16 Phase 4C §49 — TrainingLaneRunner restore-on-restart) ─
+    # Deliberately does NOT include self._closed (this session's in-memory
+    # closed-trade cache) — the durable record of every closed trade
+    # already lives in research/dataset_builder.py's captured rows
+    # regardless of this engine's own in-memory history, so restoring
+    # _closed here would be redundant, not a source of truth. What DOES
+    # need restoring is the account and any still-OPEN position — those
+    # would otherwise silently vanish (and that trade's eventual outcome
+    # would never get captured at all) on every process restart.
+
+    def to_state_dict(self) -> dict:
+        with self._lock:
+            return {
+                "account":   self.account.to_state_dict(),
+                "positions": [p.to_state_dict() for p in self._open],
+            }
+
+    @classmethod
+    def from_state_dict(cls, state: dict, max_open: int = 1) -> "PaperExecutionEngine":
+        """Reconstructs an engine from to_state_dict()'s output. Never
+        raises: an account that fails to restore falls back to
+        PaperAccount's own from_state_dict() defensiveness; any single
+        position that fails to restore is logged and skipped (not fatal
+        to the rest of the restore) — matches this whole subsystem's
+        established "a restore hiccup should degrade, never crash"
+        posture."""
+        account = PaperAccount.from_state_dict(state.get("account") or {})
+        engine = cls(account=account, max_open=max_open)
+        for pos_state in state.get("positions") or []:
+            try:
+                engine._open.append(PaperPosition.from_state_dict(pos_state))
+            except Exception as exc:
+                logger.error(
+                    f"PaperExecutionEngine.from_state_dict: skipping one "
+                    f"position that failed to restore: {exc}"
+                )
+        return engine
+
     def execute(self, decision, risk_pct: float = 0.01, symbol: str | None = None) -> dict:
         """
         Open a paper position from a decision object.

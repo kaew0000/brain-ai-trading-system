@@ -4844,3 +4844,86 @@ either way.
   safety floor, not a real per-symbol exchange minimum — no such
   lookup exists in this codebase to consult; out of scope for this
   phase (paper/training engine, not real order placement).
+
+## 49. Training Lane Restore-on-Restart (2026-08-27)
+
+Requested directly: every process restart threw the background
+training lane's whole state away — a fresh $100 `PaperAccount`, and any
+genuinely open position simply vanished (its eventual WIN/LOSS outcome
+never captured, silently). Given how often this bot has restarted
+throughout this project's history, this was a real, recurring loss of
+training continuity.
+
+Delivered as a **second commit on the §48 branch** rather than a new
+sibling branch — both touch `training_lane_runner.py`'s `_cycle()`/
+`__init__` significantly, and stacking avoids a real code-level merge
+conflict. Import/merge as one PR containing both commits.
+
+### Root cause
+
+`TrainingLaneRunner._new_engine()` always built a fresh account with no
+loading from anywhere. `PaperAccount`'s own docstring says "no DB
+dependency," which remains true — the module was simply never given
+anything to load from.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `paper/paper_account.py`, `paper/paper_position.py`, `paper/paper_execution.py` | `+to_state_dict()`/`+from_state_dict()` on each class. |
+| `database/schema_v13.sql` | `+training_lane_state` — single-row (`CHECK (id=1)`), one JSON blob column; not normalized, since nothing queries into it with SQL and its shape is owned by the three classes above, not by this schema. |
+| `training_lane/state_store.py` (new) | Persistence layer + singleton accessor, mirrors `get_dataset_builder()`/`get_trade_journal_v2()`. |
+| `training_lane_runner.py` | Restores at construction (never raises — any problem falls back to a fresh account, exactly as before this phase). Saves every cycle, not just on graceful `stop()` — this project's restarts have far more often looked like a closed terminal than a clean Ctrl+C. New `status()` field: `restored_from_prior_run`. |
+
+Deliberately **not** persisted: `PaperExecutionEngine._closed` (in-memory
+closed-trade cache) and the full unbounded equity curve (capped to the
+last 500 points) — neither is the source of truth for training data;
+`research/dataset_builder.py`'s durably-captured rows already are,
+regardless of this phase.
+
+### A real bug this phase's own tests caught before delivery
+
+`PaperAccount.from_state_dict()`'s first draft called `float()`/`int()`
+directly on saved fields with no exception handling around the
+coercion — a corrupted saved value (e.g. `"balance": "not-a-number"`)
+raised immediately, contradicting the method's own documented "never
+raises" contract. Caught by
+`TestPaperAccountStateRoundtrip::test_from_state_dict_never_raises_on_garbage_values`
+before delivery; fixed with small safe-coercion helpers.
+
+A second, unrelated bug was also caught while writing these tests: the
+existing `_make_runner()` test helper had no state-store isolation,
+so adding restore-on-construction made every pre-existing test in
+`tests/test_training_lane_runner.py` start silently sharing the real
+production `db_path`'s singleton store — one test's saved state leaked
+into and corrupted the next test's "fresh" runner. Fixed with a
+`_NoOpStateStore` test fake as the default; every pre-existing test in
+the file re-verified passing after the fix.
+
+### Testing
+
+21 new tests (13 in `tests/test_training_lane_runner.py`'s
+`TestRestoreOnRestart`/`TestPaperAccountStateRoundtrip`/
+`TestPaperPositionStateRoundtrip`, 8 in new
+`tests/test_training_lane_state_store.py`) — covers a genuinely open
+position surviving a restart with all fields intact and still able to
+close normally afterward (hit TP exactly as if never restarted), bust
+count/rotation index surviving, corrupted state and store I/O failures
+both falling back to fresh without raising, and the state store's own
+save/load/singleton mechanics independent of the runner.
+
+**`pytest tests/`: 2863 passed** (2842 true baseline on this branch,
+independently re-measured via `git stash -u` — 2842 + 21 = 2863
+exactly), 0 failed. `ruff`/`vulture`/`python3 -c "import main"`: clean.
+
+### Known follow-up (not this phase)
+
+- `restored_from_prior_run` is in the `status()` dict but not yet
+  surfaced in the Train Monitor dashboard panel §47 added — a small
+  follow-up visibility pass, not done here.
+- No TTL/staleness check on a restored state — a state saved days ago
+  (e.g. the lane was disabled for a while, `BACKGROUND_PAPER_TRAINING_ENABLED`
+  toggled off then back on) restores exactly as if it were from the
+  last cycle. Not obviously wrong (the account/position are still
+  logically valid either way), but worth deciding explicitly if it ever
+  matters in practice.

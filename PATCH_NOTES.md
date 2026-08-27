@@ -1,95 +1,110 @@
-# PATCH NOTES — V16 Phase 4C Track C: Multi-Symbol Rotation for the Background Training Lane
+# PATCH NOTES — V16 Phase 4C §49: Training Lane Restore-on-Restart
 
-Branch: `feat/training-lane-multi-symbol-rotation`
-Base: `main` @ `9ddd9d6` (merge of PR #78, Training-Lane Visibility + Boot-Enabled 24/7 Background Training)
+Branch: `feat/training-lane-multi-symbol-rotation` (this is the **second commit**
+on this branch — the first, already delivered, was the multi-symbol
+rotation phase; both are part of the same PR)
+Base: `main` @ `9ddd9d6` (merge of PR #78)
 
 ## Scope note
 
-Requested directly, after confirming the background training lane
-(`training_lane/training_lane_runner.py`, shipped in PR #76/#78) was
-running successfully: it trades exactly one hardcoded symbol
-(`settings.SYMBOL`, `BTCUSDT` in this deployment) forever, while the
-live `portfolio_signal_provider` lane trades across the full scanner
-universe (~527 symbols, up to `PORTFOLIO_MAX_POSITIONS=5` concurrently).
-Any model eventually trained from this lane's dataset would only have
-ever seen BTCUSDT market conditions — a real train/serve mismatch
-against what the live lane actually does. This phase makes the training
-lane rotate across scanner-ranked candidates instead, opt-in, off by
-default.
+Requested directly: "แก้ให้ต่อของเดิมที่เทรนค้างได้" — every process
+restart threw the background training lane's whole in-memory state
+away. A fresh $100 `PaperAccount` every time, and — worse — any
+genuinely open position simply vanished: that trade's eventual
+WIN/LOSS outcome was never captured at all, silently dropped, no error,
+no log. Given how often this bot has restarted throughout this thread
+(crash-looking restarts, manual restarts, dashboard-driven confusion
+now separately fixed), this was a real, recurring loss of training
+continuity, not a theoretical edge case.
+
+Delivered as a second commit on the rotation branch rather than a new
+sibling branch: both touch `training_lane_runner.py`'s `_cycle()`/
+`__init__` significantly, and stacking avoids a real code-level merge
+conflict Kaew would otherwise have to resolve by hand. Import/merge
+this bundle as one PR containing both commits.
 
 Track A only (Python backend). No `dashboard_src/` changes.
 
-## Root cause / what was actually blocking this
+## Root cause
 
-Two things, found in that order:
-
-1. `training_lane/training_lane_runner.py`'s `TrainingLaneRunner.__init__`
-   set `self.symbol = symbol or settings.SYMBOL` once, and `_cycle()`
-   never touched it again — no rotation mechanism existed at all.
-2. Deeper, and the actual hard blocker even after adding a rotation
-   mechanism: `paper/paper_execution.py`'s `PaperExecutionEngine.execute()`
-   hardcoded `symbol=settings.SYMBOL` directly on the `PaperPosition` it
-   constructs, **ignoring whatever symbol the caller actually asked
-   for**. This class predates the training lane (it originally only
-   backed `EXECUTION_MODE=paper`, a whole-bot single-symbol mode — see
-   `execution/execution_factory.py`), so it was never built with
-   per-call symbol flexibility. Rotating `self.symbol` on the
-   `TrainingLaneRunner` side alone would not have worked — every
-   position opened would still have been tagged with the fixed
-   `settings.SYMBOL` regardless of which symbol was actually rotated to,
-   silently mislabeling the training data. Confirmed by reading
-   `execute()`'s body directly before writing any fix, not assumed.
+`TrainingLaneRunner._new_engine()` always did
+`PaperAccount(balance=self._starting_balance)` — no loading from
+anywhere. `PaperAccount`'s own module docstring says "no DB
+dependency," which was true and remains true; the module was simply
+never given anything to load from in the first place.
 
 ## What changed
 
 | File | Change |
 |---|---|
-| `paper/paper_execution.py` | `execute()` gains an optional `symbol: str \| None = None` parameter, defaulting to `settings.SYMBOL` when omitted — every existing caller (`execution/execution_factory.py`'s `EXECUTION_MODE=paper` wiring) is byte-for-byte unaffected. Also corrected a misleading `# BTC min` comment on the quantity floor (still a generic 0.001 floor, not a real per-symbol exchange minimum — documented honestly in the method's own docstring rather than left silently wrong now that arbitrary symbols are supported). |
-| `training_lane/training_lane_runner.py` | New `_select_symbol()` method: round-robins through an injected `opportunity_ranker`'s top-N ranked candidates when multi-symbol mode is on; falls back to the original fixed symbol (never raises) when the flag is off, no ranker was supplied, ranking returns nothing, or ranking itself throws. `_cycle()` now calls `_select_symbol()` only at the point of attempting a new entry (i.e., only while flat) — a position, once opened, keeps its symbol for its whole life; rotation cannot happen mid-position. `execute()` is now called with `symbol=self.symbol` explicitly. `status()` gained a `multi_symbol_enabled` field. |
-| `config/settings.py` | `+BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` (bool, default `False`), `+BACKGROUND_TRAINING_SYMBOL_POOL_SIZE` (int, default `10`). |
-| `main.py` | When `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` is `True` and `market_scanner` is available (i.e., `SCANNER_ENABLED=true`), constructs a dedicated `OpportunityRanker(market_scanner, top_n=BACKGROUND_TRAINING_SYMBOL_POOL_SIZE)` — its own instance, reading the same underlying scanner cache `ExecutionScheduler`'s own ranker reads, not a second `MarketScanner` — and passes it into `TrainingLaneRunner(opportunity_ranker=...)`. If the flag is off or the scanner isn't running, `training_lane_ranker` stays `None` and the lane behaves exactly as it did before this phase. |
-| `tests/test_training_lane_runner.py` | +21 new tests: rotation order, empty-ranking fallback, raising-ranker fallback, no-ranker fallback, mid-position symbol stability (regression guard — the one case that would have silently corrupted PnL tracking if gotten wrong), post-close rotation, `PaperExecutionEngine.execute()`'s new `symbol=` parameter (default-preserved, explicit-respected, and that a closed trade actually carries the symbol it was opened with), and `main.py` wiring (ast-based source check, mirroring `TestBootBehavior`'s existing pattern). |
+| `paper/paper_account.py` | `+to_state_dict()`/`+from_state_dict()` — full internal state (balance, margin, trade counts, day-PnL tracking, a capped equity-curve tail), not just the read-only display fields `to_dict()` already exposed. `from_state_dict()` is defensive against missing **and malformed** fields (a dedicated test caught an early version of this that still raised on a garbage string value — fixed before delivery, not after). |
+| `paper/paper_position.py` | `+to_state_dict()`/`+from_state_dict()` on `PaperPosition` — includes `opened_at` and `bars_open` (not just the entry/SL/TP/quantity fields) so a restored open position keeps an accurate `TIMEOUT_BARS` countdown and accurate `duration_s` when it eventually closes, rather than silently resetting either. Deliberately raises on missing required fields (unlike the account's version) — the caller catches this per-position. |
+| `paper/paper_execution.py` | `+to_state_dict()`/`+from_state_dict()` on `PaperExecutionEngine` — account plus any open position(s). Deliberately does **not** persist `self._closed` (this session's in-memory closed-trade cache) — the durable closed-trade record already lives in `research/dataset_builder.py`'s captured rows regardless; restoring the in-memory cache too would be redundant, not a source of truth. |
+| `database/schema_v13.sql` | `+training_lane_state` table — single-row (`CHECK (id = 1)`), one opaque JSON blob column. Deliberately not normalized into typed columns: nothing ever queries into this blob's fields with SQL, and the blob's shape is owned by the three classes' own `to_state_dict()` methods, not by this schema. |
+| `training_lane/state_store.py` (new) | `TrainingLaneStateStore` (thin `ManagedConn`-per-call wrapper, mirrors `research/feature_store.py`'s pattern) plus `get_training_lane_state_store()`/`reset_training_lane_state_store()` singleton accessors (mirrors `get_dataset_builder()`/`get_trade_journal_v2()`'s established pattern). |
+| `training_lane/training_lane_runner.py` | `__init__` attempts `_restore_state()` right after building the fresh engine — replaces it only on a clean restore, never raises, never a precondition to run. `_cycle()` calls `_save_state()` at the end **every cycle** (not just on a graceful `stop()`) — deliberate: this project's restarts have far more often looked like a closed terminal than a clean Ctrl+C, so "never more than one cycle stale" only holds if saving doesn't depend on a graceful exit path. New `status()` field: `restored_from_prior_run`. |
 
-**Not touched**: `ranking/opportunity_ranker.py`, `scanner/market_scanner.py`
-— both reused exactly as they already existed for the live scanner path,
-zero changes needed. `execution/execution_factory.py`'s
-`EXECUTION_MODE=paper` wiring — unaffected, doesn't pass the new
-`symbol=` parameter, gets the exact same default behavior as before.
+**Not touched**: `paper/paper_execution.py`'s `tick()`/`execute()` core
+logic, `PaperPosition`'s SL/TP/timeout logic — all unchanged; this
+phase is purely about what gets reconstructed at startup, not how any
+of it behaves once running.
+
+## A real bug this phase's own tests caught before delivery
+
+`PaperAccount.from_state_dict()`'s first draft called `float(...)`/
+`int(...)` directly on saved fields with no exception handling around
+the coercion itself — a genuinely corrupted saved value (e.g.
+`"balance": "not-a-number"`) would raise immediately, contradicting the
+method's own documented "never raises" contract.
+`TestPaperAccountStateRoundtrip::test_from_state_dict_never_raises_on_garbage_values`
+caught this before delivery; fixed with small `_f()`/`_i()` safe-coercion
+helpers used throughout.
 
 ## Testing
 
-- `pytest tests/`: **2876 passed** (2842 baseline + 34 new in
-  `test_training_lane_runner.py`), 0 failed, 45 deselected (integration
-  marker) — zero regressions. Also independently re-ran every other test
-  file touching `PaperExecutionEngine`
-  (`test_execution_factory.py`, `test_recovery_engine.py`,
-  `test_phase4c.py`, `test_p1b1_dynamic_risk.py`, `test_audit_fixes.py`
-  — 256 tests) before touching the shared file, to catch any regression
-  from the `execute()` signature change specifically: all passed,
-  unchanged.
-- `ruff check .`: clean, before and after.
-- `vulture . --min-confidence 80`: 0 findings, before and after.
-- `python3 -c "import main"`: OK.
-- Frontend: not touched this phase — `tsc`/`vitest`/`npm run build`
-  gates not applicable.
+- `pytest tests/`: **2863 passed** (2842 true baseline on this branch,
+  independently re-measured via `git stash -u` — 2842 + 21 new = 2863
+  exactly), 0 failed, 45 deselected.
+- 13 new tests in `tests/test_training_lane_runner.py`
+  (`TestRestoreOnRestart`, 8; `TestPaperAccountStateRoundtrip`, 3;
+  `TestPaperPositionStateRoundtrip`, 2) — covers: nothing-to-restore on
+  first run, a flat account surviving a restart, an **open position**
+  surviving a restart with all fields intact, that a restored position
+  can still genuinely close (hit TP) exactly as if never restarted, bust
+  count and rotation index surviving a restart, corrupted saved state
+  and a state-store I/O failure both falling back to a fresh account
+  without raising, and the new `status()` field.
+- 8 new tests in `tests/test_training_lane_state_store.py` — save/load
+  roundtrip, overwrite-not-duplicate (single-row enforcement), two
+  store instances against the same file seeing each other's writes,
+  I/O-failure-never-raises for both save and load, and the singleton
+  accessor.
+- **Also had to fix a real test-isolation bug found while writing these
+  tests**: `_make_runner()`'s test helper, before this phase, had no
+  `state_store` parameter at all — adding restore-on-construction meant
+  every existing test in the file (which never expected persistence)
+  started silently sharing the real production `db_path`'s singleton
+  store, causing one test's saved state to leak into and corrupt the
+  next test's "fresh" runner. Fixed with a `_NoOpStateStore` test fake
+  now used as `_make_runner()`'s default, so persistence stays fully
+  opt-in per test — every pre-existing test in the file was re-verified
+  passing after this fix, not just the new ones.
+- `ruff check .`: clean. `vulture . --min-confidence 80`: 0 findings.
+  `python3 -c "import main"`: OK.
 - Independent second-clone verification: see delivery message.
 
 ## What this does not fix / does not do
 
-- Does not turn multi-symbol rotation on by default —
-  `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED=false` remains the default;
-  opt in via `.env` to activate it.
-- Does not change what the *live* lane trades — this phase is entirely
-  about the background training lane's own dataset diversity, not live
-  execution scope (that was already fixed separately — PR #75,
-  `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS`).
-- Does not add a real per-symbol exchange minimum-quantity table to
-  `PaperExecutionEngine` — the 0.001 floor is a generic safety floor,
-  documented honestly as such, not exchange-accurate for every symbol.
-  Acceptable for this engine's actual purpose (paper/training data), not
-  something to reuse anywhere real order sizing matters.
-- Does not change the rotation *strategy* itself beyond simple
-  round-robin through the top-N ranked list — no weighting by score,
-  liquidity, or recency. A reasonable, simple starting point; revisit if
-  the resulting dataset's symbol distribution turns out skewed in
-  practice.
+- Does not persist `PaperExecutionEngine._closed` (in-memory closed-trade
+  cache) or `PaperAccount`'s full unbounded equity curve (capped to the
+  most recent 500 points) — neither is the source of truth for training
+  data (that's `research/dataset_builder.py`'s durable rows, already
+  safe regardless of this phase), so this was a deliberate scope
+  boundary, not an oversight.
+- Does not persist anything about the *live* lane — this phase is
+  entirely about the background training lane's own continuity.
+- Does not add a migration script — `training_lane_state` is a purely
+  additive new table; `database/db.py`'s existing `_apply_schema()`
+  (idempotent `CREATE TABLE IF NOT EXISTS`, applied on every connection)
+  already creates it automatically for both fresh and existing
+  databases, including Kaew's live one, with no separate step needed.
