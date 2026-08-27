@@ -45,7 +45,7 @@ from features.smc_engine import SMCEngine, SMCSignals
 from features.volume_engine import VolumeEngine
 from regime.regime_engine import RegimeEngine
 from intelligence.market_context_builder import MarketContextBuilder
-from decision.confidence_engine import ConfidenceEngine
+from decision.confidence_engine import ConfidenceEngine, resolve_confidence_weights
 from decision.causal_explainer import CausalExplainer
 from events.event_bus import (
     EventBus, reset_event_bus,
@@ -411,7 +411,18 @@ def build_system() -> dict:
     context_builder = MarketContextBuilder()
 
     logger.info("[5/9] Decision Layer …")
-    confidence_engine = ConfidenceEngine()
+    # HFT-6b: resolve_confidence_weights() returns DEFAULT_WEIGHTS
+    # untouched unless settings.HFT_FLOW_LIVE_ENABLED is explicitly True
+    # — see decision/confidence_engine.py module docstring and
+    # docs/architecture.md section 45 ("Enabling for live").
+    confidence_engine = ConfidenceEngine(weights=resolve_confidence_weights())
+    if settings.HFT_FLOW_LIVE_ENABLED:
+        logger.info(
+            f"[5/9] HFT flow LIVE weight active: hft_flow="
+            f"{settings.HFT_FLOW_LIVE_WEIGHT} "
+            f"(contradiction_enabled={settings.HFT_FLOW_CONTRADICTION_ENABLED}, "
+            f"ws_enabled={settings.HFT_WS_ENABLED})"
+        )
     causal_explainer  = CausalExplainer()
 
     logger.info("[6/9] Analytics / Risk Layer …")

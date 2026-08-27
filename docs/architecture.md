@@ -5117,3 +5117,90 @@ exactly), 0 failed. `ruff`/`vulture`/`python3 -c "import main"`: clean.
   last cycle. Not obviously wrong (the account/position are still
   logically valid either way), but worth deciding explicitly if it ever
   matters in practice.
+
+## 51. HFT Flow — Enabling-for-Live Switch (HFT-6b) (2026-08-27)
+
+**Request.** "ต้องการให้ระบบตรวจจับสภาพคล่อง liquidity เพื่อช่วยตัดสินใจเทรด"
+(want the system to detect liquidity to help trade decisions). Before
+writing any code, inspected the full repo for existing liquidity-related
+logic rather than assuming a gap existed.
+
+**Found: three pre-existing "liquidity" mechanisms, plus one confirmed
+gap.**
+1. SMC liquidity pools (`decision/brain_decision_engine.py`'s
+   `entry.liquidity_high`/`liquidity_low`) — swing-high/low zones used
+   as take-profit targets, routed through `agents/smc_analyst.py`.
+   Already live, unrelated to order-book depth.
+2. `ranking/score_breakdown.py::score_liquidity()` — a scanner-level
+   *proxy* (volume percentile + spread tightness), explicitly documented
+   in its own docstring as a stand-in because the scanner cache only
+   carries best bid/ask, not real depth. Feeds `OpportunityRanker` and
+   `PORTFOLIO_MIN_LIQUIDITY_SCORE`. Already live, working as designed —
+   not touched by this patch.
+3. Real order-book depth (HFT-1 through HFT-6, §45 above) —
+   `data/local_order_book.py` + `features/microstructure_engine.py`
+   compute actual `depth_imbalance`/`spread` from live WS data, combined
+   by `features/hft_flow_scorer.py` into a flow score. Fully built and
+   tested across six phases, but **inert** —
+   `decision/confidence_engine.py::DEFAULT_WEIGHTS["hft_flow"]`
+   hardcoded to `0.0`, `HFT_WS_ENABLED` and `HFT_FLOW_CONTRADICTION_ENABLED`
+   both `False` by default. **This is what this patch activates.**
+4. Gap confirmed, out of scope: no pre-trade slippage/depth guard exists
+   anywhere in `execution/` or `risk/`. `execution/execution_orchestrator.py::_compute_slippage()`
+   only measures slippage *after* a fill, never checks book depth before
+   sizing or sending an order. Left for a future patch if wanted.
+
+**Root cause of why (3) needed a code change, not just an env var.**
+HFT-6 (§45) deliberately shipped `HFT_FLOW_LIVE_WEIGHT` as "a named,
+auditable config value... nothing in this codebase reads it
+automatically" — the documented "Enabling for live" procedure was a
+manual one-off edit at whichever `ConfidenceEngine()` call site an
+operator used, untested as its own unit, and `.env.example` never even
+listed the relevant flags. Confirmed by inspection that
+`main.py:414`'s `confidence_engine = ConfidenceEngine()` is the single
+live construction site in the repo — injected into
+`PortfolioSignalProvider` via `build_strategy()` at `main.py`'s
+scheduler-wiring block, covering both the legacy single-symbol loop and
+the multi-symbol `ExecutionScheduler` path — while
+`pipeline/brain_pipeline_v13.py`'s own `ConfidenceEngine(weights=weights)`
+construction is dead code, imported by nothing else in the repo.
+
+**What changed.**
+
+| File | Change |
+|---|---|
+| `config/settings.py` | New `HFT_FLOW_LIVE_ENABLED: bool` (default `False`) — the actual opt-in switch, kept separate from `HFT_FLOW_LIVE_WEIGHT` so a candidate weight can sit in config without silently taking effect. |
+| `decision/confidence_engine.py` | New `resolve_confidence_weights()` — returns `DEFAULT_WEIGHTS` unchanged unless `HFT_FLOW_LIVE_ENABLED` is `True`, else a copy with `hft_flow` set to `HFT_FLOW_LIVE_WEIGHT`. Never mutates `DEFAULT_WEIGHTS` itself (relied on by the existing HFT-6/shadow-mode tests). |
+| `main.py` | `build_system()`'s Decision Layer now does `ConfidenceEngine(weights=resolve_confidence_weights())`, plus a startup log line (only when active) echoing the live weight alongside `HFT_FLOW_CONTRADICTION_ENABLED`/`HFT_WS_ENABLED`, so an operator can see at boot whether the whole chain — not just this one flag — is actually live. |
+| `.env.example` | Documented all four previously-undiscoverable HFT flags, each at its existing safe default. |
+| `tests/test_hft_flow_live_enable_switch.py` | 6 new tests: off/on, custom weight, `DEFAULT_WEIGHTS` non-mutation, `ConfidenceEngine` construction both ways, shipped default. |
+
+**Impact.** Zero behavior change for any deployment that doesn't set
+the new env vars. All pre-existing HFT-suite, shadow-mode, and
+confidence-integration tests pass unchanged.
+
+**Applied activation** (this operator's explicit choice, for the
+currently-running `EXECUTION_MODE=paper` deployment — the safe lane
+HFT-6's own docstring says this evidence should be gathered in before
+any live-money config profile):
+```
+HFT_WS_ENABLED=true
+HFT_FLOW_LIVE_ENABLED=true
+HFT_FLOW_LIVE_WEIGHT=5.0
+HFT_FLOW_CONTRADICTION_ENABLED=true
+```
+The conservative live weight (5.0), not HFT-5's own 20.0 paper-testing
+example — chosen explicitly, not defaulted to.
+
+**Tests.** 6 new. HFT-suite regression: 156/156 passed. Full backend
+suite: 2922 passed, 45 deselected — same 3 pre-existing
+`tests/test_dashboard_serving.py` failures (no frontend build present
+in this environment, confirmed unrelated and present on unmodified
+`main`). ruff and vulture clean on all touched files. `python3 -c
+"import main"` succeeds.
+
+**Explicitly out of scope / not built:** the pre-trade slippage/depth
+guard identified as gap (4) above — no changes to `RiskEngine`,
+`ExecutionCoordinator`, `execution/ceo_gated_signal_provider.py`,
+`commander/control_state.py`, journal schema, or `database/db.py`,
+verified by direct inspection.

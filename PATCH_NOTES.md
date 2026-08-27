@@ -1,110 +1,93 @@
-# PATCH NOTES — V16 Phase 4C §49: Training Lane Restore-on-Restart
+# PATCH NOTES — V16 Phase 4C §51: HFT Flow Enabling-for-Live Switch (HFT-6b)
 
-Branch: `feat/training-lane-multi-symbol-rotation` (this is the **second commit**
-on this branch — the first, already delivered, was the multi-symbol
-rotation phase; both are part of the same PR)
-Base: `main` @ `9ddd9d6` (merge of PR #78)
+Branch: `feature/hft-6b-live-enable-switch`
+Base: `main` @ `884278d` (merge of PR #80, training-lane restore-on-restart)
 
 ## Scope note
 
-Requested directly: "แก้ให้ต่อของเดิมที่เทรนค้างได้" — every process
-restart threw the background training lane's whole in-memory state
-away. A fresh $100 `PaperAccount` every time, and — worse — any
-genuinely open position simply vanished: that trade's eventual
-WIN/LOSS outcome was never captured at all, silently dropped, no error,
-no log. Given how often this bot has restarted throughout this thread
-(crash-looking restarts, manual restarts, dashboard-driven confusion
-now separately fixed), this was a real, recurring loss of training
-continuity, not a theoretical edge case.
+Requested directly: "ต้องการให้ระบบตรวจจับสภาพคล่อง liquidity เพื่อช่วยตัดสินใจเทรด"
+(want the system to detect liquidity to help trade decisions), narrowed
+after inspection to: activate the real order-book depth signal that
+HFT-1 through HFT-6 (`docs/architecture.md` §45) already built and
+fully tested, but deliberately left inert. Confirmed via fresh clone +
+grep across `agents/`, `ranking/`, `decision/`, `execution/`, `risk/`
+that this repo already has three separate "liquidity" concepts (SMC
+liquidity pools for TP targeting, a volume+spread proxy in the scanner
+ranking factor, and this real depth-based HFT flow signal) plus one
+confirmed gap (no pre-trade slippage/depth guard in `execution/` or
+`risk/` — out of scope for this patch, `execution_orchestrator.py`'s
+`_compute_slippage()` remains post-fill measurement only, unchanged).
 
-Delivered as a second commit on the rotation branch rather than a new
-sibling branch: both touch `training_lane_runner.py`'s `_cycle()`/
-`__init__` significantly, and stacking avoids a real code-level merge
-conflict Kaew would otherwise have to resolve by hand. Import/merge
-this bundle as one PR containing both commits.
+Two explicit choices confirmed before writing any code:
+- `HFT_FLOW_LIVE_WEIGHT = 5.0` (the conservative value HFT-6 already
+  named for live use, not HFT-5's own 20.0 paper-testing example)
+- `HFT_FLOW_CONTRADICTION_ENABLED = true` alongside it, not staged separately
 
-Track A only (Python backend). No `dashboard_src/` changes.
+Applied to the currently-running `EXECUTION_MODE=paper` deployment —
+this is exactly the safe lane HFT-6's own docstring says this evidence
+should be gathered in before any live-money config profile.
+
+Track A only (Python backend). No `dashboard_src/`/frontend changes,
+no database schema changes.
 
 ## Context
 
-`TrainingLaneRunner._new_engine()` always did
-`PaperAccount(balance=self._starting_balance)` — no loading from
-anywhere. `PaperAccount`'s own module docstring says "no DB
-dependency," which was true and remains true; the module was simply
-never given anything to load from in the first place.
+`decision/confidence_engine.py`'s `DEFAULT_WEIGHTS["hft_flow"]` has been
+hardcoded to `0.0` since HFT-5, and `config/settings.py::HFT_FLOW_LIVE_WEIGHT`
+existed only as "a named, auditable config value... nothing in this
+codebase reads it automatically" — HFT-6's own scope was deliberately
+"config value + docs only, no other new logic." The documented
+"Enabling for live" procedure (`docs/architecture.md` §45) required a
+manual, untested, one-off edit at whichever `ConfidenceEngine()` call
+site an operator was using. Verified by inspection that
+`main.py:414`'s `confidence_engine = ConfidenceEngine()` is the single
+live construction site in the entire repo (injected into
+`PortfolioSignalProvider` via `build_strategy()`, covering both the
+legacy single-symbol loop and the multi-symbol `ExecutionScheduler`
+path) — `pipeline/brain_pipeline_v13.py`'s own `ConfidenceEngine(weights=weights)`
+is dead code, imported by nothing else. `.env.example` never listed
+`HFT_WS_ENABLED`, `HFT_FLOW_LIVE_WEIGHT`, or `HFT_FLOW_CONTRADICTION_ENABLED`
+at all, so none of this was discoverable from the VPS without reading
+source.
 
 ## What changed
 
 | File | Change |
 |---|---|
-| `paper/paper_account.py` | `+to_state_dict()`/`+from_state_dict()` — full internal state (balance, margin, trade counts, day-PnL tracking, a capped equity-curve tail), not just the read-only display fields `to_dict()` already exposed. `from_state_dict()` is defensive against missing **and malformed** fields (a dedicated test caught an early version of this that still raised on a garbage string value — fixed before delivery, not after). |
-| `paper/paper_position.py` | `+to_state_dict()`/`+from_state_dict()` on `PaperPosition` — includes `opened_at` and `bars_open` (not just the entry/SL/TP/quantity fields) so a restored open position keeps an accurate `TIMEOUT_BARS` countdown and accurate `duration_s` when it eventually closes, rather than silently resetting either. Deliberately raises on missing required fields (unlike the account's version) — the caller catches this per-position. |
-| `paper/paper_execution.py` | `+to_state_dict()`/`+from_state_dict()` on `PaperExecutionEngine` — account plus any open position(s). Deliberately does **not** persist `self._closed` (this session's in-memory closed-trade cache) — the durable closed-trade record already lives in `research/dataset_builder.py`'s captured rows regardless; restoring the in-memory cache too would be redundant, not a source of truth. |
-| `database/schema_v13.sql` | `+training_lane_state` table — single-row (`CHECK (id = 1)`), one opaque JSON blob column. Deliberately not normalized into typed columns: nothing ever queries into this blob's fields with SQL, and the blob's shape is owned by the three classes' own `to_state_dict()` methods, not by this schema. |
-| `training_lane/state_store.py` (new) | `TrainingLaneStateStore` (thin `ManagedConn`-per-call wrapper, mirrors `research/feature_store.py`'s pattern) plus `get_training_lane_state_store()`/`reset_training_lane_state_store()` singleton accessors (mirrors `get_dataset_builder()`/`get_trade_journal_v2()`'s established pattern). |
-| `training_lane/training_lane_runner.py` | `__init__` attempts `_restore_state()` right after building the fresh engine — replaces it only on a clean restore, never raises, never a precondition to run. `_cycle()` calls `_save_state()` at the end **every cycle** (not just on a graceful `stop()`) — deliberate: this project's restarts have far more often looked like a closed terminal than a clean Ctrl+C, so "never more than one cycle stale" only holds if saving doesn't depend on a graceful exit path. New `status()` field: `restored_from_prior_run`. |
+| `config/settings.py` | `+HFT_FLOW_LIVE_ENABLED: bool` (default `False`) — the actual opt-in switch, separate from `HFT_FLOW_LIVE_WEIGHT` so a candidate weight can sit in config without silently taking effect. Updated the now-stale "nothing reads it automatically" comment on `HFT_FLOW_LIVE_WEIGHT`. |
+| `decision/confidence_engine.py` | `+resolve_confidence_weights()` — returns `DEFAULT_WEIGHTS` untouched unless `HFT_FLOW_LIVE_ENABLED` is `True`, else a copy with `hft_flow` set to `HFT_FLOW_LIVE_WEIGHT`. Never mutates the shared `DEFAULT_WEIGHTS` constant. Module docstring's "HFT Flow integration" section updated to document it. |
+| `main.py` | `build_system()`'s Decision Layer: `ConfidenceEngine()` → `ConfidenceEngine(weights=resolve_confidence_weights())`, plus a startup log line (only when the live weight is active) echoing `HFT_FLOW_LIVE_WEIGHT`/`HFT_FLOW_CONTRADICTION_ENABLED`/`HFT_WS_ENABLED` together, so an operator can see at a glance whether the *whole* chain — not just this one flag — is actually live. |
+| `.env.example` | New "HFT Flow" section documenting all four previously-undiscoverable flags, each at its existing safe default. |
+| `tests/test_hft_flow_live_enable_switch.py` | New, 6 tests: switch off (returns `DEFAULT_WEIGHTS`), switch on (applies live weight), custom weight value, `DEFAULT_WEIGHTS` never mutated, `ConfidenceEngine` construction with resolved weights both ways, and the new setting's shipped default. |
 
-**Not touched**: `paper/paper_execution.py`'s `tick()`/`execute()` core
-logic, `PaperPosition`'s SL/TP/timeout logic — all unchanged; this
-phase is purely about what gets reconstructed at startup, not how any
-of it behaves once running.
-
-## A real bug this phase's own tests caught before delivery
-
-`PaperAccount.from_state_dict()`'s first draft called `float(...)`/
-`int(...)` directly on saved fields with no exception handling around
-the coercion itself — a genuinely corrupted saved value (e.g.
-`"balance": "not-a-number"`) would raise immediately, contradicting the
-method's own documented "never raises" contract.
-`TestPaperAccountStateRoundtrip::test_from_state_dict_never_raises_on_garbage_values`
-caught this before delivery; fixed with small `_f()`/`_i()` safe-coercion
-helpers used throughout.
+No changes to `RiskEngine`, `ExecutionCoordinator`,
+`execution/ceo_gated_signal_provider.py`, `commander/control_state.py`,
+journal schema, or `database/db.py` — verified by direct inspection,
+matching HFT-1 through HFT-6's own scope boundary.
 
 ## Testing
 
-- `pytest tests/`: **2863 passed** (2842 true baseline on this branch,
-  independently re-measured via `git stash -u` — 2842 + 21 new = 2863
-  exactly), 0 failed, 45 deselected.
-- 13 new tests in `tests/test_training_lane_runner.py`
-  (`TestRestoreOnRestart`, 8; `TestPaperAccountStateRoundtrip`, 3;
-  `TestPaperPositionStateRoundtrip`, 2) — covers: nothing-to-restore on
-  first run, a flat account surviving a restart, an **open position**
-  surviving a restart with all fields intact, that a restored position
-  can still genuinely close (hit TP) exactly as if never restarted, bust
-  count and rotation index surviving a restart, corrupted saved state
-  and a state-store I/O failure both falling back to a fresh account
-  without raising, and the new `status()` field.
-- 8 new tests in `tests/test_training_lane_state_store.py` — save/load
-  roundtrip, overwrite-not-duplicate (single-row enforcement), two
-  store instances against the same file seeing each other's writes,
-  I/O-failure-never-raises for both save and load, and the singleton
-  accessor.
-- **Also had to fix a real test-isolation bug found while writing these
-  tests**: `_make_runner()`'s test helper, before this phase, had no
-  `state_store` parameter at all — adding restore-on-construction meant
-  every existing test in the file (which never expected persistence)
-  started silently sharing the real production `db_path`'s singleton
-  store, causing one test's saved state to leak into and corrupt the
-  next test's "fresh" runner. Fixed with a `_NoOpStateStore` test fake
-  now used as `_make_runner()`'s default, so persistence stays fully
-  opt-in per test — every pre-existing test in the file was re-verified
-  passing after this fix, not just the new ones.
-- `ruff check .`: clean. `vulture . --min-confidence 80`: 0 findings.
-  `python3 -c "import main"`: OK.
-- Independent second-clone verification: see delivery message.
+- New: 6/6 passed (`tests/test_hft_flow_live_enable_switch.py`)
+- Regression, HFT-suite: 156/156 passed (`test_hft_flow_live_weight_config.py`,
+  `test_hft_shadow_mode.py`, `test_phase3.py`, `test_hft_flow_scorer.py`,
+  `test_hft_flow_confidence_integration.py`, plus the new file)
+- Full backend suite: 2922 passed, 45 deselected — same 3 pre-existing
+  `tests/test_dashboard_serving.py` failures (no frontend build present
+  in this environment; confirmed unrelated, present on unmodified `main`)
+- `ruff check`: clean on all 4 touched files
+- `vulture --min-confidence 80`: clean on all 4 touched files (the one
+  finding, `main.py:76` unused `frame` arg, is a pre-existing standard
+  signal-handler parameter, not part of this diff)
+- `python3 -c "import main"`: succeeds
 
-## What this does not fix / does not do
+## Activation (operator action required — not automatic)
 
-- Does not persist `PaperExecutionEngine._closed` (in-memory closed-trade
-  cache) or `PaperAccount`'s full unbounded equity curve (capped to the
-  most recent 500 points) — neither is the source of truth for training
-  data (that's `research/dataset_builder.py`'s durable rows, already
-  safe regardless of this phase), so this was a deliberate scope
-  boundary, not an oversight.
-- Does not persist anything about the *live* lane — this phase is
-  entirely about the background training lane's own continuity.
-- Does not add a migration script — `training_lane_state` is a purely
-  additive new table; `database/db.py`'s existing `_apply_schema()`
-  (idempotent `CREATE TABLE IF NOT EXISTS`, applied on every connection)
-  already creates it automatically for both fresh and existing
-  databases, including Kaew's live one, with no separate step needed.
+Add to the live-running `.env` on the VPS, then restart:
+```
+HFT_WS_ENABLED=true
+HFT_FLOW_LIVE_ENABLED=true
+HFT_FLOW_CONTRADICTION_ENABLED=true
+```
+`HFT_FLOW_LIVE_WEIGHT` already defaults to `5.0` — no need to add it
+unless a different value is wanted. See `MIGRATION.md` for what to
+expect after restart.

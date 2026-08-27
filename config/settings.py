@@ -712,15 +712,10 @@ class Settings(BaseSettings):
 
     # ── V16 Phase 4C Track B: HFT Flow — HFT-6 Low-weight Live ─────────────
     # A named, auditable config value for the weight to use once HFT flow
-    # graduates from paper validation (HFT-5) to controlled live use. This
-    # setting exists purely as a documented value — nothing in this
-    # codebase reads it automatically. It is NOT wired into
-    # ConfidenceEngine's construction anywhere, and DEFAULT_WEIGHTS in
-    # decision/confidence_engine.py still hardcodes hft_flow at 0.0
-    # regardless of this setting's value. Enabling it for live is a
-    # deliberate, explicit operational step — see docs/architecture.md's
-    # HFT Flow Trend Following section ("Enabling for live") for the
-    # exact one-line change required, and do it only after HFT-5's paper
+    # graduates from paper validation (HFT-5) to controlled live use.
+    # Enabling it for live is a deliberate, explicit operational step —
+    # see docs/architecture.md's HFT Flow Trend Following section
+    # ("Enabling for live") — and should only be done after HFT-5's paper
     # validation has produced enough evidence to justify it.
     #
     # Default of 5.0 (vs. HFT-5's own paper-testing examples of 20.0) is
@@ -728,6 +723,20 @@ class Settings(BaseSettings):
     # even if this value is mistakenly applied, it can only ever nudge an
     # already-close decision, never dominate SMC/Volume/OI/Funding/Regime.
     HFT_FLOW_LIVE_WEIGHT: float = Field(default=5.0, alias="HFT_FLOW_LIVE_WEIGHT")
+    # HFT-6b: the actual switch. This setting alone (default False) has
+    # zero automatic effect anywhere — DEFAULT_WEIGHTS in
+    # decision/confidence_engine.py still hardcodes hft_flow at 0.0.
+    # Only when this is explicitly set True does
+    # decision/confidence_engine.py::resolve_confidence_weights() apply
+    # HFT_FLOW_LIVE_WEIGHT to the hft_flow slot main.py's ConfidenceEngine
+    # is constructed with. Kept as its own separate flag (rather than
+    # inferring "enabled" from HFT_FLOW_LIVE_WEIGHT != 0) so an operator
+    # can hold a candidate weight in config without it silently taking
+    # effect, and so the on/off state is greppable in one place. Also
+    # requires HFT_WS_ENABLED=True to have any real effect — without it,
+    # market_context never carries live hft_flow data, so this weight has
+    # nothing to multiply against.
+    HFT_FLOW_LIVE_ENABLED: bool = Field(default=False, alias="HFT_FLOW_LIVE_ENABLED")
 
     model_config = {
         "env_file": ".env",
