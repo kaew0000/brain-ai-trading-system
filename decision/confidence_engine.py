@@ -36,6 +36,15 @@ Two independent, separately-gated mechanisms, both off by default:
    > 0) — with HFT_WS_ENABLED off (the default), that's never true, so
    `breakdown`'s key set is byte-identical to before this phase.
 
+   HFT-6b: `resolve_confidence_weights()` (below) is the supported way to
+   raise this weight. It returns DEFAULT_WEIGHTS untouched unless
+   settings.HFT_FLOW_LIVE_ENABLED is explicitly True, in which case it
+   returns a copy with "hft_flow" set to settings.HFT_FLOW_LIVE_WEIGHT.
+   main.py's build_system() calls this when constructing the app's one
+   ConfidenceEngine instance. Both settings default to their existing
+   HFT-6 values (False / 5.0), so this remains fully inert until an
+   operator opts in via .env — see .env.example's HFT Flow section.
+
 2. Contradiction penalty/block (design review Section 9's Hybrid Model
    C) — gated separately behind settings.HFT_FLOW_CONTRADICTION_ENABLED
    (default False). When enabled: a strongly-opposing hft_flow reading
@@ -102,6 +111,32 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "hft_flow":  0.0,   # V16 Phase 4C Track B, HFT-5 — off by default, see
                         # module docstring's "HFT Flow integration" section
 }
+
+
+def resolve_confidence_weights() -> dict[str, float]:
+    """HFT-6b: the documented, supported way to enable HFT flow's live
+    weight (docs/architecture.md section 45, "Enabling for live").
+
+    Returns DEFAULT_WEIGHTS unchanged unless settings.HFT_FLOW_LIVE_ENABLED
+    is explicitly True — matching every other HFT flag in this codebase
+    (HFT_WS_ENABLED, HFT_FLOW_CONTRADICTION_ENABLED): off by default,
+    explicit opt-in only, no automatic inference from related settings.
+
+    Returns a new dict; DEFAULT_WEIGHTS itself is never mutated (relied on
+    by tests/test_hft_flow_live_weight_config.py and
+    tests/test_hft_shadow_mode.py, which assert it stays {"hft_flow": 0.0}
+    regardless of what any caller does with the returned copy).
+
+    Callers still need settings.HFT_WS_ENABLED=True for this to have any
+    real effect — without it, market_context never carries live hft_flow
+    data, so ConfidenceEngine's hft_flow_active gate stays False and the
+    raised weight has nothing to multiply against (see score()'s own
+    hft_flow_active check).
+    """
+    if not settings.HFT_FLOW_LIVE_ENABLED:
+        return DEFAULT_WEIGHTS
+    return {**DEFAULT_WEIGHTS, "hft_flow": settings.HFT_FLOW_LIVE_WEIGHT}
+
 
 # ── Action thresholds ─────────────────────────────────────────────────────────
 # W14-1 Item 13: now sourced from settings.CONFIDENCE_TRADE_THRESHOLD /

@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## [Unreleased] — HFT Flow Enabling-for-Live Switch (HFT-6b)
+
+Request: activate the real order-book depth signal HFT-1 through HFT-6
+already built (fully tested, deliberately left inert) into live
+trading decisions, in the currently-running paper-mode deployment, at
+the conservative `HFT_FLOW_LIVE_WEIGHT=5.0` with the contradiction
+penalty/block enabled alongside it. See PATCH_NOTES.md and
+`docs/architecture.md` §51 for the full write-up, including the
+inspection that ruled out three other pre-existing "liquidity"
+mechanisms in this codebase before scoping this change.
+
+### Added
+- `config/settings.py::HFT_FLOW_LIVE_ENABLED` (default `False`) — the
+  opt-in switch that makes `HFT_FLOW_LIVE_WEIGHT` take effect.
+- `decision/confidence_engine.py::resolve_confidence_weights()` — the
+  documented, tested "Enabling for live" mechanism as a real function
+  instead of a manual one-off edit.
+- `.env.example`: documented `HFT_WS_ENABLED`, `HFT_FLOW_LIVE_ENABLED`,
+  `HFT_FLOW_LIVE_WEIGHT`, `HFT_FLOW_CONTRADICTION_ENABLED` (previously
+  undiscoverable without reading source).
+- `tests/test_hft_flow_live_enable_switch.py` — 6 new tests.
+
+### Changed
+- `main.py::build_system()` constructs the app's one `ConfidenceEngine`
+  with `resolve_confidence_weights()` instead of the bare default, plus
+  a startup log line when the live weight is active.
+
 ## [Unreleased] — AI Self-Improvement Governance Layer, Phase 1
 
 Request: let the system learn/self-tune automatically, but hold every
