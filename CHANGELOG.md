@@ -1,5 +1,53 @@
 # CHANGELOG
 
+## [Unreleased] — AI Self-Improvement Governance Layer, Phase 1
+
+Request: let the system learn/self-tune automatically, but hold every
+change for explicit human confirmation, with a log of what changed
+sent to a second "review" agent that opines on whether it looks good
+before the human decides. Scoped into a 6-phase roadmap (G1-G6) before
+any code was written. **This is Phase 1 only: G1 (proposal record) +
+G3 (deterministic Review Agent)**, plus a lane-breakdown transparency
+addition surfaced during scoping. See PATCH_NOTES.md and
+`docs/architecture.md` §48 for the full write-up.
+
+### Added
+- `update_proposals` table — one row per self-improvement proposal
+  (model promotion, agent weight, recommendation param, strategy
+  selection, or logic change). Starts empty; nothing writes to it yet
+  in this phase.
+- `governance/` package: `UpdateProposal` (record), `ProposalStore`
+  (create/get/list/set_review/set_status — always lands `pending`),
+  `compute_lane_breakdown()` (surfaces how much of a model's training
+  data was real `LIVE` trades vs. the `TRAINING`/`PAPER` paper-account
+  lanes — a gap found during scoping: `research/feature_store.py::
+  get_training_rows()` has no lane filter at all, so every nightly
+  retrain today silently mixes them with zero visibility).
+- `agents/update_review_agent.py::UpdateReviewAgent` — deterministic
+  (no LLM call), scores `model_promotion` proposals for real via a
+  hard gate identical to `ModelRegistry.should_promote()`'s rule plus
+  a weighted composite score; every other proposal type is explicitly
+  left unscored (no honest metrics source for them yet) rather than
+  estimated.
+- 50 new tests (`tests/test_proposal_store.py`,
+  `tests/test_update_review_agent.py`,
+  `tests/test_lane_breakdown.py`), including a direct assertion that
+  the new hard-gate logic agrees with a real `ModelRegistry.
+  should_promote()` call.
+- 7 new `REVIEW_SCORE_*`/`REVIEW_MIN_SAMPLE_SIZE` settings in
+  `config/settings.py` for the Review Agent's scoring rubric.
+
+### Changed
+Nothing. This phase is 100% additive — no existing table, setting,
+function signature, or behavior was modified. See MIGRATION.md.
+
+### Known follow-up
+G2 (wire `run_nightly_retrain()` to actually create a proposal instead
+of auto-promoting directly) and G4 (dashboard approval UI) are the
+next phase and ship together — not part of this delivery. `ml/
+learning_mode.py::run_nightly_retrain()` still auto-promotes exactly
+as before this phase.
+
 ## [Unreleased] — Training Lane Restore-on-Restart
 
 Root cause: `TrainingLaneRunner._new_engine()` always built a fresh

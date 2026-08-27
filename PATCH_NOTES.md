@@ -25,7 +25,7 @@ this bundle as one PR containing both commits.
 
 Track A only (Python backend). No `dashboard_src/` changes.
 
-## Root cause
+## Context
 
 `TrainingLaneRunner._new_engine()` always did
 `PaperAccount(balance=self._starting_balance)` — no loading from

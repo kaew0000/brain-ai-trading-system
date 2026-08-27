@@ -555,4 +555,3 @@ CREATE TABLE IF NOT EXISTS training_lane_state (
     updated_at TEXT    NOT NULL,
     state_json TEXT    NOT NULL
 );
-
