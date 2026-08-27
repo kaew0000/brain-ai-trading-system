@@ -76,9 +76,65 @@ class PaperExecutionEngine:
         with self._lock:
             return list(self._closed)
 
-    def execute(self, decision, risk_pct: float = 0.01) -> dict:
+    # ── State persistence (V16 Phase 4C §49 — TrainingLaneRunner restore-on-restart) ─
+    # Deliberately does NOT include self._closed (this session's in-memory
+    # closed-trade cache) — the durable record of every closed trade
+    # already lives in research/dataset_builder.py's captured rows
+    # regardless of this engine's own in-memory history, so restoring
+    # _closed here would be redundant, not a source of truth. What DOES
+    # need restoring is the account and any still-OPEN position — those
+    # would otherwise silently vanish (and that trade's eventual outcome
+    # would never get captured at all) on every process restart.
+
+    def to_state_dict(self) -> dict:
+        with self._lock:
+            return {
+                "account":   self.account.to_state_dict(),
+                "positions": [p.to_state_dict() for p in self._open],
+            }
+
+    @classmethod
+    def from_state_dict(cls, state: dict, max_open: int = 1) -> "PaperExecutionEngine":
+        """Reconstructs an engine from to_state_dict()'s output. Never
+        raises: an account that fails to restore falls back to
+        PaperAccount's own from_state_dict() defensiveness; any single
+        position that fails to restore is logged and skipped (not fatal
+        to the rest of the restore) — matches this whole subsystem's
+        established "a restore hiccup should degrade, never crash"
+        posture."""
+        account = PaperAccount.from_state_dict(state.get("account") or {})
+        engine = cls(account=account, max_open=max_open)
+        for pos_state in state.get("positions") or []:
+            try:
+                engine._open.append(PaperPosition.from_state_dict(pos_state))
+            except Exception as exc:
+                logger.error(
+                    f"PaperExecutionEngine.from_state_dict: skipping one "
+                    f"position that failed to restore: {exc}"
+                )
+        return engine
+
+    def execute(self, decision, risk_pct: float = 0.01, symbol: str | None = None) -> dict:
         """
         Open a paper position from a decision object.
+
+        `symbol` lets a caller open a position for a symbol other than the
+        globally-configured `settings.SYMBOL` — added for
+        TrainingLaneRunner's multi-symbol rotation mode (V16 Phase 4C
+        Track C), so a single PaperExecutionEngine/PaperAccount can hold
+        positions across different symbols over its lifetime rather than
+        being permanently tied to one. Defaults to `settings.SYMBOL` when
+        omitted, so every pre-existing caller (execution/execution_factory.py's
+        whole-bot EXECUTION_MODE=paper wiring) keeps its exact current
+        behavior unchanged.
+
+        Note: the 0.001 minimum-quantity floor below is a generic safety
+        floor, not a real per-symbol exchange minimum (no per-symbol
+        min-qty lookup exists in this codebase to consult — see
+        PATCH_NOTES.md for this phase). Fine for this engine's purpose
+        (paper/training data, not real order placement), but not a
+        substitute for real exchange filters if this engine is ever used
+        somewhere that matters.
 
         Returns a result dict (mirrors TradeManager.execute_trade() shape).
         """
@@ -101,14 +157,14 @@ class PaperExecutionEngine:
 
             risk_usdt = bal * risk_pct
             quantity  = round(risk_usdt / risk_distance, 6)
-            quantity  = max(quantity, 0.001)          # BTC min
+            quantity  = max(quantity, 0.001)          # generic min-qty floor — see execute()'s docstring
 
             notional = entry * quantity
             if not self.account.reserve_margin(notional):
                 return {"success": False, "reason": "insufficient margin"}
 
             pos = PaperPosition(
-                symbol       = settings.SYMBOL,
+                symbol       = symbol or settings.SYMBOL,
                 direction    = decision.action,
                 entry_price  = entry,
                 stop_loss    = sl,

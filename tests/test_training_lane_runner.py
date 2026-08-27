@@ -27,6 +27,8 @@ import pytest
 
 from paper.paper_account import PaperAccount
 from paper.paper_execution import PaperExecutionEngine
+from paper.paper_position import PaperPosition
+from training_lane.state_store import TrainingLaneStateStore
 from training_lane.training_lane_runner import (
     TRAINING_LANE,
     TrainingLaneRunner,
@@ -84,7 +86,68 @@ class _FakeDataProvider:
         return price
 
 
-def _make_runner(monkeypatch, signals, prices, starting_balance=100.0):
+class _FakeRankedOpportunity:
+    def __init__(self, symbol):
+        self.symbol = symbol
+
+
+class _FakeRanker:
+    """Duck-typed stand-in for ranking.opportunity_ranker.OpportunityRanker
+    — TrainingLaneRunner only ever calls .rank(), never touches a
+    MarketScanner directly, so this is all a test needs (see
+    TrainingLaneRunner's constructor docstring)."""
+
+    def __init__(self, symbols_per_call):
+        """symbols_per_call: list of lists — each .rank() call returns
+        the next list in sequence (empty list allowed, to test the
+        empty-ranking fallback); the last list repeats once exhausted."""
+        self._sequence = [list(s) for s in symbols_per_call]
+        self._i = 0
+        self.call_count = 0
+
+    def rank(self):
+        self.call_count += 1
+        i = min(self._i, len(self._sequence) - 1)
+        symbols = self._sequence[i]
+        self._i += 1
+        return [_FakeRankedOpportunity(s) for s in symbols]
+
+
+class _RaisingRanker:
+    def rank(self):
+        raise RuntimeError("scanner cache corrupted")
+
+
+class _NoOpStateStore:
+    """Default state_store for _make_runner() — every existing test in
+    this file (before V16 Phase 4C §49's restore-on-restart addition)
+    exercises TrainingLaneRunner with no expectation of persistence at
+    all, and must stay that way: without this, TrainingLaneRunner.__init__
+    would fall back to get_training_lane_state_store()'s real shared
+    singleton (pointed at the default production db_path), and one
+    test's _save_state() would silently leak into and contaminate the
+    next test's fresh runner via _restore_state() — exactly the kind of
+    cross-test pollution this project's testing conventions guard
+    against everywhere else. Tests that specifically exercise restore/
+    save behavior (see TestRestoreOnRestart below) pass their own
+    temp-file-backed real TrainingLaneStateStore explicitly instead."""
+
+    def load_state(self):
+        return None
+
+    def save_state(self, _state):
+        pass
+
+
+def _make_runner(
+    monkeypatch,
+    signals,
+    prices,
+    starting_balance=100.0,
+    opportunity_ranker=None,
+    multi_symbol_enabled=None,
+    state_store=None,
+):
     """Builds a TrainingLaneRunner with build_strategy() stubbed out to
     return a scripted sequence of signals, and the data_provider stubbed
     to a scripted price sequence — no network, no real strategy engine
@@ -113,6 +176,9 @@ def _make_runner(monkeypatch, signals, prices, starting_balance=100.0):
         symbol="BTCUSDT",
         starting_balance=starting_balance,
         poll_interval_seconds=0.01,
+        opportunity_ranker=opportunity_ranker,
+        multi_symbol_enabled=multi_symbol_enabled,
+        state_store=state_store or _NoOpStateStore(),
     )
     return runner
 
@@ -420,3 +486,374 @@ class TestStatus:
         runner._cycle()  # open
         result = runner.status()
         assert isinstance(result["open_position"], dict)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 7 — Multi-symbol rotation (V16 Phase 4C Track C addition)
+# ══════════════════════════════════════════════════════════════════════
+
+class TestMultiSymbolDisabledByDefault:
+    """Every existing behavior (tests 1-6 above) must be provably
+    unaffected by this addition — these tests pin that down explicitly
+    rather than just relying on the pre-existing tests still passing."""
+
+    def test_multi_symbol_off_by_default(self, monkeypatch):
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0])
+        assert runner._multi_symbol_enabled is False
+        assert runner._ranker is None
+
+    def test_ranker_supplied_but_flag_off_is_still_ignored(self, monkeypatch):
+        """Passing a ranker alone must not turn rotation on — the flag
+        is the actual gate, matching every other opt-in feature in this
+        codebase (explicit True/True, not "presence implies enabled")."""
+        ranker = _FakeRanker([["ETHUSDT"]])
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            opportunity_ranker=ranker, multi_symbol_enabled=False,
+        )
+        assert runner._ranker is None
+        assert runner._select_symbol() == "BTCUSDT"
+        assert ranker.call_count == 0  # never even called
+
+    def test_settings_defaults(self):
+        from config.settings import settings
+        assert settings.BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED is False
+        assert settings.BACKGROUND_TRAINING_SYMBOL_POOL_SIZE == 10
+
+    def test_status_reports_multi_symbol_enabled_field(self, monkeypatch):
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0])
+        assert runner.status()["multi_symbol_enabled"] is False
+
+
+class TestSelectSymbolRotation:
+    def test_rotates_through_ranked_candidates_in_order(self, monkeypatch):
+        ranker = _FakeRanker([["ETHUSDT", "SOLUSDT", "ARBUSDT"]])
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            opportunity_ranker=ranker, multi_symbol_enabled=True,
+        )
+        picked = [runner._select_symbol() for _ in range(5)]
+        # Wraps around after exhausting the 3 candidates.
+        assert picked == ["ETHUSDT", "SOLUSDT", "ARBUSDT", "ETHUSDT", "SOLUSDT"]
+
+    def test_falls_back_to_fixed_symbol_when_ranking_empty(self, monkeypatch):
+        ranker = _FakeRanker([[]])  # "scanner cache is empty" case
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            opportunity_ranker=ranker, multi_symbol_enabled=True,
+        )
+        assert runner._select_symbol() == "BTCUSDT"
+
+    def test_falls_back_to_fixed_symbol_when_ranker_raises(self, monkeypatch):
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            opportunity_ranker=_RaisingRanker(), multi_symbol_enabled=True,
+        )
+        assert runner._select_symbol() == "BTCUSDT"  # never raises
+
+    def test_no_ranker_falls_back_even_with_flag_on(self, monkeypatch):
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            opportunity_ranker=None, multi_symbol_enabled=True,
+        )
+        assert runner._select_symbol() == "BTCUSDT"
+
+
+class TestCycleUsesRotatedSymbol:
+    def test_open_position_tagged_with_rotated_symbol_not_fixed_symbol(self, monkeypatch):
+        ranker = _FakeRanker([["ETHUSDT"]])
+        runner = _make_runner(
+            monkeypatch,
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)],
+            prices=[100.0],
+            opportunity_ranker=ranker, multi_symbol_enabled=True,
+        )
+        runner._cycle()
+        assert runner.symbol == "ETHUSDT"
+        open_position = runner._engine.open_positions[0]
+        assert open_position.symbol == "ETHUSDT"
+
+    def test_symbol_does_not_change_while_a_position_is_open(self, monkeypatch):
+        """Regression guard: rotation must only happen while flat. A
+        position opened on ETHUSDT must stay ETHUSDT for its whole
+        life even if the ranker's top candidate changes mid-position —
+        switching would corrupt PnL tracking (tick() applies one mark
+        price to every open position)."""
+        ranker = _FakeRanker([["ETHUSDT"], ["SOLUSDT"], ["ARBUSDT"]])
+        runner = _make_runner(
+            monkeypatch,
+            # LONG opens on cycle 1; None on cycle 2 means "still open,
+            # no new entry attempted" — position stays open across both.
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=50.0, take_profit=999.0), None],
+            prices=[100.0, 101.0],  # 101 doesn't hit SL(50) or TP(999) — stays open
+            opportunity_ranker=ranker, multi_symbol_enabled=True,
+        )
+        runner._cycle()  # opens on ETHUSDT (ranker call #1)
+        assert runner.symbol == "ETHUSDT"
+        runner._cycle()  # still open — must NOT rotate to SOLUSDT
+        assert runner.symbol == "ETHUSDT"
+        assert ranker.call_count == 1  # rotation only queried once, while flat
+
+    def test_rotates_to_a_new_symbol_after_position_closes(self, monkeypatch):
+        ranker = _FakeRanker([["ETHUSDT"], ["SOLUSDT"]])
+        runner = _make_runner(
+            monkeypatch,
+            signals=[
+                _FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0),
+                _FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0),
+            ],
+            prices=[100.0, 111.0],  # cycle 2's mark hits TP(110) -> closes
+            opportunity_ranker=ranker, multi_symbol_enabled=True,
+        )
+        runner._cycle()  # opens on ETHUSDT
+        assert runner.symbol == "ETHUSDT"
+        runner._cycle()  # closes (TP hit) then reselects+reopens same cycle
+        assert runner.symbol == "SOLUSDT"
+        assert runner._engine.open_positions[0].symbol == "SOLUSDT"
+
+
+class TestPaperExecutionEngineSymbolParameter:
+    """Regression coverage for paper/paper_execution.py's execute() —
+    the actual blocker found during design review: it hardcoded
+    symbol=settings.SYMBOL regardless of what was asked for."""
+
+    def test_execute_without_symbol_defaults_to_settings_symbol(self):
+        from config.settings import settings
+
+        engine = PaperExecutionEngine(account=PaperAccount(balance=1000.0))
+        decision = _to_paper_decision(_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0))
+        engine.execute(decision)
+        assert engine.open_positions[0].symbol == settings.SYMBOL
+
+    def test_execute_with_explicit_symbol_uses_it(self):
+        engine = PaperExecutionEngine(account=PaperAccount(balance=1000.0))
+        decision = _to_paper_decision(_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0))
+        engine.execute(decision, symbol="ETHUSDT")
+        assert engine.open_positions[0].symbol == "ETHUSDT"
+
+    def test_closed_trade_carries_the_symbol_it_was_opened_with(self):
+        engine = PaperExecutionEngine(account=PaperAccount(balance=1000.0))
+        decision = _to_paper_decision(_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0))
+        engine.execute(decision, symbol="SOLUSDT")
+        closed = engine.tick(111.0)  # hits take_profit=110
+        assert len(closed) == 1
+        assert closed[0].to_dict()["symbol"] == "SOLUSDT"
+
+
+class TestMainPyWiring:
+    """Mirrors TestBootBehavior's ast-based approach (checking main.py's
+    source directly rather than executing main.py's whole bootstrap) for
+    the new wiring added in this phase."""
+
+    def test_main_py_passes_opportunity_ranker_to_training_lane_runner(self):
+        main_py_path = os.path.join(REPO_ROOT, "main.py")
+        with open(main_py_path, encoding="utf-8") as f:
+            source = f.read()
+        tree = ast.parse(source)
+
+        found_call = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "TrainingLaneRunner"
+            ):
+                found_call = True
+                kwarg_names = {kw.arg for kw in node.keywords}
+                assert "opportunity_ranker" in kwarg_names, (
+                    "main.py's TrainingLaneRunner(...) call must pass "
+                    "opportunity_ranker= for multi-symbol rotation to be "
+                    "reachable at all in production"
+                )
+        assert found_call, "main.py no longer constructs TrainingLaneRunner"
+
+    def test_main_py_gates_ranker_construction_on_multi_symbol_flag(self):
+        main_py_path = os.path.join(REPO_ROOT, "main.py")
+        with open(main_py_path, encoding="utf-8") as f:
+            source = f.read()
+        assert "BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED" in source
+        assert "BACKGROUND_TRAINING_SYMBOL_POOL_SIZE" in source
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 8 — Restore-on-restart (V16 Phase 4C §49 addition)
+# ══════════════════════════════════════════════════════════════════════
+
+class TestRestoreOnRestart:
+    def test_first_ever_run_has_nothing_to_restore(self, monkeypatch, db):
+        store = TrainingLaneStateStore(db_path=db)
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0], state_store=store,
+        )
+        assert runner.restored_from_prior_run is False
+        assert runner._engine.account.balance == 100.0
+
+    def test_flat_account_state_survives_a_restart(self, monkeypatch, db):
+        store = TrainingLaneStateStore(db_path=db)
+        first = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            starting_balance=100.0, state_store=store,
+        )
+        first._cycle()  # no signal -> stays flat, but still saves
+
+        second = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            starting_balance=100.0, state_store=store,
+        )
+        assert second.restored_from_prior_run is True
+        assert second._engine.account.balance == 100.0
+        assert second._engine.open_positions == []
+
+    def test_open_position_survives_a_restart(self, monkeypatch, db):
+        store = TrainingLaneStateStore(db_path=db)
+        first = _make_runner(
+            monkeypatch,
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)],
+            prices=[100.0],
+            state_store=store,
+        )
+        first._cycle()  # opens a position, saves at the end
+        assert len(first._engine.open_positions) == 1
+        opened_symbol = first._engine.open_positions[0].symbol
+        opened_entry = first._engine.open_positions[0].entry_price
+
+        # Simulate a full process restart: build a brand new runner
+        # (own fresh engine/account/thread state, same underlying store).
+        second = _make_runner(
+            monkeypatch, signals=[], prices=[100.0], state_store=store,
+        )
+        assert second.restored_from_prior_run is True
+        assert len(second._engine.open_positions) == 1
+        restored = second._engine.open_positions[0]
+        assert restored.symbol == opened_symbol
+        assert restored.entry_price == opened_entry
+        assert restored.stop_loss == 95.0
+        assert restored.take_profit == 110.0
+
+    def test_restored_position_can_still_close_normally(self, monkeypatch, db):
+        """Not just "the fields look right" — the restored position must
+        genuinely still function: hitting its take_profit on the next
+        tick after restart must close it and capture a trade, exactly as
+        if the process had never restarted at all."""
+        store = TrainingLaneStateStore(db_path=db)
+        first = _make_runner(
+            monkeypatch,
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)],
+            prices=[100.0],
+            state_store=store,
+        )
+        first._cycle()  # opens
+
+        second = _make_runner(
+            monkeypatch, signals=[None], prices=[111.0], state_store=store,
+        )
+        second._cycle()  # should hit take_profit=110 and close
+        assert second._engine.open_positions == []
+        assert second._engine.account.balance > 100.0  # realised a win
+
+    def test_bust_count_and_rotation_index_survive_a_restart(self, monkeypatch, db):
+        store = TrainingLaneStateStore(db_path=db)
+        ranker = _FakeRanker([["ETHUSDT", "SOLUSDT", "ARBUSDT"]])
+        first = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            opportunity_ranker=ranker, multi_symbol_enabled=True,
+            state_store=store,
+        )
+        first._bust_count = 3
+        first._rotation_index = 2
+        first._save_state()
+
+        second = _make_runner(
+            monkeypatch, signals=[], prices=[100.0],
+            opportunity_ranker=_FakeRanker([["ETHUSDT"]]), multi_symbol_enabled=True,
+            state_store=store,
+        )
+        assert second._bust_count == 3
+        assert second._rotation_index == 2
+
+    def test_corrupted_saved_state_falls_back_to_fresh_without_raising(self, monkeypatch, db):
+        store = TrainingLaneStateStore(db_path=db)
+        store.save_state({"engine": {"account": "not-a-dict-at-all"}})
+
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0], state_store=store,
+        )
+        # Must not raise, and must fall back to a usable fresh account.
+        assert runner._engine.account.balance == 100.0
+
+    def test_state_store_failure_falls_back_to_fresh_without_raising(self, monkeypatch):
+        class _RaisingStore:
+            def load_state(self):
+                raise RuntimeError("disk on fire")
+
+            def save_state(self, _state):
+                raise RuntimeError("disk on fire")
+
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0], state_store=_RaisingStore(),
+        )
+        assert runner.restored_from_prior_run is False
+        assert runner._engine.account.balance == 100.0
+        runner._cycle()  # save_state() raising mid-cycle must not propagate
+
+    def test_status_reports_restored_from_prior_run_field(self, monkeypatch, db):
+        store = TrainingLaneStateStore(db_path=db)
+        runner = _make_runner(
+            monkeypatch, signals=[], prices=[100.0], state_store=store,
+        )
+        assert runner.status()["restored_from_prior_run"] is False
+
+
+class TestPaperAccountStateRoundtrip:
+    """Unit-level coverage for PaperAccount.to_state_dict()/
+    from_state_dict() directly, independent of TrainingLaneRunner."""
+
+    def test_roundtrip_preserves_balance_and_margin(self):
+        acct = PaperAccount(balance=250.0, leverage=3)
+        acct.reserve_margin(500.0)
+        acct.realise_pnl(12.5)
+
+        restored = PaperAccount.from_state_dict(acct.to_state_dict())
+        assert restored.balance == acct.balance
+        assert restored.used_margin == acct.used_margin
+        assert restored.leverage == acct.leverage
+        assert restored.day_pnl == acct.day_pnl
+
+    def test_from_state_dict_never_raises_on_empty_dict(self):
+        restored = PaperAccount.from_state_dict({})
+        assert restored.balance >= 0  # some sane default, not a crash
+
+    def test_from_state_dict_never_raises_on_garbage_values(self):
+        restored = PaperAccount.from_state_dict({
+            "balance": "not-a-number", "day_date": "not-a-date",
+        })
+        assert isinstance(restored.balance, float)
+
+
+class TestPaperPositionStateRoundtrip:
+    def test_roundtrip_preserves_all_fields(self):
+        pos = PaperPosition(
+            symbol="ETHUSDT", direction="SHORT", entry_price=3000.0,
+            stop_loss=3100.0, take_profit=2800.0, quantity=0.5, leverage=5,
+            confidence=77, regime="TREND", oi_delta=0.01, funding_rate=0.0002,
+        )
+        restored = PaperPosition.from_state_dict(pos.to_state_dict())
+        assert restored.symbol == pos.symbol
+        assert restored.direction == pos.direction
+        assert restored.entry_price == pos.entry_price
+        assert restored.stop_loss == pos.stop_loss
+        assert restored.take_profit == pos.take_profit
+        assert restored.quantity == pos.quantity
+        assert restored.opened_at == pos.opened_at
+        assert restored.confidence == pos.confidence
+
+    def test_restored_position_sl_tp_still_trigger_correctly(self):
+        pos = PaperPosition(
+            symbol="BTCUSDT", direction="LONG", entry_price=100.0,
+            stop_loss=95.0, take_profit=110.0, quantity=1.0, leverage=5,
+        )
+        restored = PaperPosition.from_state_dict(pos.to_state_dict())
+        closed = restored.update_mark(111.0)
+        assert closed is not None
+        assert closed.result == "WIN"
+

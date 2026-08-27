@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -203,6 +203,84 @@ class PaperAccount:
     def equity_curve(self) -> list[dict]:
         with self._lock:
             return list(self._equity_curve)
+
+    # ── State persistence (V16 Phase 4C — TrainingLaneRunner restore-on-restart) ─
+    # PaperAccount's own module docstring says "no DB dependency" and that
+    # remains true here: this class still never touches a database itself.
+    # It only knows how to serialize/deserialize its own state as a plain
+    # dict; TrainingLaneRunner (training_lane/state_store.py) owns actually
+    # persisting that dict somewhere. Keeps this class exactly as
+    # independently testable as before.
+
+    # Cap how much equity-curve history gets persisted (not how much is
+    # kept in memory during a session) — this is for restore-continuity
+    # display, not the source of truth for closed-trade history, which
+    # research/dataset_builder.py already durably captures per trade
+    # regardless of this cap.
+    _PERSISTED_EQUITY_CURVE_POINTS = 500
+
+    def to_state_dict(self) -> dict:
+        """Full internal state — a superset of to_dict()'s read-only
+        display snapshot. Everything needed for from_state_dict() to
+        reconstruct an equivalent account, not just what's useful to show
+        an operator."""
+        with self._lock:
+            return {
+                "balance":           self._balance,
+                "unrealised":        self._unrealised,
+                "used_margin":       self._used_margin,
+                "leverage":          self._leverage,
+                "total_trades":      self._total_trades,
+                "open_trades":       self._open_trades,
+                "day_start_balance": self._day_start_balance,
+                "day_pnl":           self._day_pnl,
+                "day_date":          self._day_date.isoformat(),
+                "equity_curve":      list(self._equity_curve[-self._PERSISTED_EQUITY_CURVE_POINTS:]),
+            }
+
+    @classmethod
+    def from_state_dict(cls, state: dict) -> "PaperAccount":
+        """Reconstructs an account from to_state_dict()'s output.
+        Defensive by design — falls back to a sensible default for any
+        field that's missing OR malformed (garbage type, not just
+        absent) — forward/backward-compatible with a state dict saved
+        by an older or newer version of this class, and safe against a
+        genuinely corrupted saved row — rather than raising. The caller
+        (training_lane/training_lane_runner.py) treats any restore
+        problem as "start this account fresh", never as fatal."""
+
+        def _f(key, default):
+            try:
+                return float(state.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        def _i(key, default):
+            try:
+                return int(state.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        leverage = state.get("leverage")
+        if not isinstance(leverage, (int, float)):
+            leverage = None
+
+        acct = cls(balance=_f("balance", STARTING_BALANCE), leverage=leverage)
+        with acct._lock:
+            acct._unrealised = _f("unrealised", 0.0)
+            acct._used_margin = _f("used_margin", 0.0)
+            acct._total_trades = _i("total_trades", 0)
+            acct._open_trades = _i("open_trades", 0)
+            acct._day_start_balance = _f("day_start_balance", acct._balance)
+            acct._day_pnl = _f("day_pnl", 0.0)
+            try:
+                acct._day_date = date.fromisoformat(state["day_date"])
+            except Exception:
+                pass  # keep the fresh-construction default (today)
+            equity_curve = state.get("equity_curve")
+            if isinstance(equity_curve, list):
+                acct._equity_curve = list(equity_curve)
+        return acct
 
     # ── Internal ──────────────────────────────────────────────────────────────
 

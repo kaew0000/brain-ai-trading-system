@@ -537,3 +537,21 @@ CREATE TABLE IF NOT EXISTS update_proposals (
 CREATE INDEX IF NOT EXISTS idx_update_proposals_status  ON update_proposals(status);
 CREATE INDEX IF NOT EXISTS idx_update_proposals_type    ON update_proposals(proposal_type);
 CREATE INDEX IF NOT EXISTS idx_update_proposals_created ON update_proposals(created_at);
+
+-- V16 Phase 4C §49 — background training lane (training_lane/
+-- training_lane_runner.py) restore-on-restart. A single-row table
+-- (enforced via the CHECK) holding the lane's last-known full state as
+-- one JSON blob (PaperAccount + any open PaperPosition + the runner's
+-- own bust_count/rotation_index) — see training_lane/state_store.py.
+-- Deliberately one opaque JSON column rather than individual typed
+-- columns: this state's shape is owned by paper/paper_account.py's and
+-- paper/paper_position.py's own to_state_dict() methods, not by this
+-- schema, and both are already defensive about missing/extra fields on
+-- load — a normalized column-per-field table would need a migration
+-- every time either of those classes' internal state grows, for no
+-- real benefit (nothing ever queries into this blob's fields with SQL).
+CREATE TABLE IF NOT EXISTS training_lane_state (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    updated_at TEXT    NOT NULL,
+    state_json TEXT    NOT NULL
+);

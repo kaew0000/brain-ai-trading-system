@@ -682,6 +682,24 @@ def build_system() -> dict:
         try:
             from training_lane.training_lane_runner import TrainingLaneRunner
 
+            # V16 Phase 4C Track C addition: multi-symbol rotation — off
+            # by default (settings.BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED).
+            # Reuses the SAME market_scanner instance constructed above
+            # (its own OpportunityRanker, so its own top_n/pool size
+            # independent of ExecutionScheduler's candidate_limit — but
+            # reading the same underlying scanner cache, not a second
+            # MarketScanner). If SCANNER_ENABLED is off, market_scanner
+            # is None here and this lane simply stays on its original
+            # fixed-symbol behavior — same non-fatal fallback the rest of
+            # this block already relies on.
+            training_lane_ranker = None
+            if settings.BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED and market_scanner is not None:
+                from ranking.opportunity_ranker import OpportunityRanker
+
+                training_lane_ranker = OpportunityRanker(
+                    market_scanner, top_n=settings.BACKGROUND_TRAINING_SYMBOL_POOL_SIZE
+                )
+
             training_lane_runner = TrainingLaneRunner(
                 data_provider=data_provider,
                 regime_engine=regime_engine,
@@ -689,6 +707,7 @@ def build_system() -> dict:
                 volume_engine=volume_engine,
                 context_builder=context_builder,
                 confidence_engine=confidence_engine,
+                opportunity_ranker=training_lane_ranker,
             )
             training_lane_runner.start()
         except Exception as exc:

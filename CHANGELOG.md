@@ -48,6 +48,77 @@ next phase and ship together — not part of this delivery. `ml/
 learning_mode.py::run_nightly_retrain()` still auto-promotes exactly
 as before this phase.
 
+## [Unreleased] — Training Lane Restore-on-Restart
+
+Root cause: `TrainingLaneRunner._new_engine()` always built a fresh
+$100 `PaperAccount` with no loading from anywhere — every process
+restart threw the whole background training lane's state away,
+including silently dropping any genuinely open position's eventual
+WIN/LOSS outcome (never captured, no error, no log). See
+`PATCH_NOTES.md` for the full writeup, including a real bug this
+phase's own tests caught in `PaperAccount.from_state_dict()` before
+delivery (an early version still raised on a corrupted saved value
+despite documenting "never raises").
+
+### Added
+- `paper/paper_account.py`, `paper/paper_position.py`,
+  `paper/paper_execution.py` — `to_state_dict()`/`from_state_dict()` on
+  each, for full-fidelity persistence/restore.
+- `database/schema_v13.sql` — `+training_lane_state` table (single-row
+  JSON blob).
+- `training_lane/state_store.py` (new) — persistence layer + singleton
+  accessor, mirrors `get_dataset_builder()`/`get_trade_journal_v2()`'s
+  pattern.
+- `training_lane_runner.py` — restores at construction, saves every
+  cycle (not just on graceful stop — this project's restarts have more
+  often looked like a closed terminal than a clean Ctrl+C). New
+  `status()` field: `restored_from_prior_run`.
+- 21 new tests (13 in `tests/test_training_lane_runner.py`, 8 in new
+  `tests/test_training_lane_state_store.py`).
+
+### Changed
+- Nothing existing modified in meaning — restore/save is additive
+  on top of the lane's existing behavior; a restore problem of any kind
+  falls back to exactly what happened before this phase (a fresh
+  account), never a hard failure.
+- Also fixed, found while writing this phase's own tests: a
+  cross-test-contamination bug in `tests/test_training_lane_runner.py`'s
+  `_make_runner()` helper (no `state_store` isolation existed before
+  this phase needed one) — every pre-existing test in that file was
+  re-verified passing after the fix.
+
+## [Unreleased] — Multi-Symbol Rotation for the Background Training Lane
+
+Root cause: `training_lane/training_lane_runner.py`'s background paper-
+training lane (PR #76/#78) traded exactly one hardcoded symbol
+(`settings.SYMBOL`) forever, while the live `portfolio_signal_provider`
+lane trades across the full ~527-symbol scanner universe — a real
+train/serve mismatch for any model eventually trained on this lane's
+data. Fixing the training lane's own symbol-selection logic wasn't
+sufficient on its own: `paper/paper_execution.py`'s
+`PaperExecutionEngine.execute()` separately hardcoded
+`symbol=settings.SYMBOL` on every position it opened, ignoring whatever
+symbol the caller asked for — found by reading `execute()`'s body
+directly before writing any fix. See `PATCH_NOTES.md` for the full
+writeup.
+
+### Added
+- `paper/paper_execution.py` — `execute()` gains an optional `symbol=`
+  parameter (defaults to `settings.SYMBOL`, so every existing caller is
+  unaffected).
+- `training_lane/training_lane_runner.py` — `_select_symbol()`
+  round-robins through scanner-ranked candidates when
+  `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED` is on; rotation only ever
+  happens while flat, never mid-position.
+- `config/settings.py` — `BACKGROUND_TRAINING_MULTI_SYMBOL_ENABLED`
+  (default `false`), `BACKGROUND_TRAINING_SYMBOL_POOL_SIZE` (default `10`).
+- 34 new tests (`tests/test_training_lane_runner.py`).
+
+### Changed
+- Nothing existing modified in meaning. Every new flag defaults to
+  preserving today's exact behavior; `execute()`'s new parameter is
+  optional and defaults to the prior hardcoded value.
+
 ## [Unreleased] — Training-Lane Visibility + Boot-Enabled 24/7 Background Training
 
 Reported symptom: Train Monitor showing every row `BLOCKED`. Traced
