@@ -244,7 +244,7 @@ class BrainTradingEnv(gym.Env):
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         """Reset environment for new episode."""
-        super().reset(seed=seed)
+        super().reset(seed=seed, options=options)
 
         self.balance = self.initial_balance
         self.equity = self.initial_balance
