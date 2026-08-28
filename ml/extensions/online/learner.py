@@ -15,7 +15,6 @@ Usage:
     prediction = learner.predict(x_features)  # Real-time prediction
 """
 
-import os
 import json
 import pickle
 import logging
@@ -25,7 +24,6 @@ from dataclasses import dataclass, asdict
 from collections import deque
 from datetime import datetime
 
-import numpy as np
 
 # River imports
 from river import (
@@ -35,8 +33,6 @@ from river import (
     tree,
     ensemble,
     metrics as river_metrics,
-    drift,
-    stats,
 )
 from river.drift import ADWIN
 
@@ -318,7 +314,7 @@ class OnlineLearner:
         for name, metric in self.metrics.items():
             try:
                 metrics_dict[name] = metric.get()
-            except:
+            except Exception:
                 metrics_dict[name] = 0.0
 
         metrics_dict["n_samples"] = self.n_samples

@@ -7,20 +7,12 @@ Run this after installing requirements.
 """
 
 import numpy as np
-import pandas as pd
-from datetime import datetime, timedelta
 
 # Import extensions components
 from ml.extensions import (
     ExtensionsOrchestrator,
     ExtensionsConfig,
-    BrainTradingEnv,
-    RLAdapter,
-    OnlineLearner,
     OnlineModelConfig,
-    HPOManager,
-    HPOConfig,
-    ParamSpace,
     StrategyOptimizer,
 )
 
@@ -175,7 +167,7 @@ def main():
         total_timesteps=2000,  # น้อยๆ สำหรับ demo
         patience=3,
     )
-    print(f"    Training complete. Model saved.")
+    print("    Training complete. Model saved.")
 
     # 5. Phase 3: Online Learning Setup
     print("\n[5] Phase 3: Setting up Online Learning...")

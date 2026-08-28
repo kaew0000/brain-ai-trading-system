@@ -17,10 +17,9 @@ Usage:
     action = adapter.predict(observation)
 """
 
-import os
 import json
 import logging
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple
 from pathlib import Path
 from datetime import datetime
 
@@ -30,11 +29,8 @@ import gymnasium as gym
 # Stable-Baselines3
 from stable_baselines3 import PPO, SAC, A2C
 from stable_baselines3.common.callbacks import (
-    BaseCallback, EvalCallback, CheckpointCallback, 
-    StopTrainingOnRewardThreshold, StopTrainingOnNoModelImprovement
+    BaseCallback, EvalCallback
 )
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 import torch

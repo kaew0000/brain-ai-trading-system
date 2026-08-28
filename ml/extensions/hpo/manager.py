@@ -17,16 +17,13 @@ Usage:
     strategy = my_strategy(**best_params)
 """
 
-import os
 import json
 import logging
-from typing import Dict, List, Optional, Callable, Any, Tuple, Literal
+from typing import Dict, List, Optional, Callable, Any, Literal
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
-from functools import partial
 
-import numpy as np
 
 # Optuna imports
 import optuna

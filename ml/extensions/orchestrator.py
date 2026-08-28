@@ -23,7 +23,6 @@ Usage:
     action = bundle.get_action(observation)
 """
 
-import os
 import json
 import logging
 from typing import Dict, List, Optional, Callable, Any, Union
