@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## [Unreleased] — ML Extensions Integration Layer (observe-only)
+
+Request: continue building from PR #82 (RL/HPO/Online-Learning
+extensions subpackage), using a supplied draft integration bundle as a
+starting point. The draft's four adapters invented APIs that don't
+exist in this repo (a fictional ensemble engine, a fictional direct
+order-submission method, a fictional generic data pipeline, a
+fictional Auto-Config Engine) — all four were rewritten from scratch
+against the real `CEOAgent`/`ExecutionOrchestrator`/`BrainTradingEnv`/
+`BinanceDataProvider` APIs. Scoped, after confirming with the operator,
+to **observe-only**: an `MLExtensionsAgent` registered with `CEOAgent`
+under a key deliberately outside `CEOAgent.WEIGHTS`, so it has zero
+effect on any real trading decision this phase. See PATCH_NOTES.md and
+`docs/architecture.md` §52 (PR #82 backfill) and §53 (this phase) for
+the full write-up.
+
+### Added
+- `ml/extensions_integration/` — `RLDataPipelineAdapter`,
+  `PortfolioStateAdapter`, `MLExtensionsAgent`, `ConfigBridge`,
+  `SystemIntegrator`.
+- `api/ml_extensions_api.py` — 5 read-only `/api/ml_extensions/*`
+  monitoring endpoints.
+- `config/settings.py::ML_EXTENSIONS_ENABLED` (default `False`).
+- `.env.example`: documented the new flag.
+- `tests/test_ml_extensions_data_adapter.py`,
+  `tests/test_ml_extensions_agent.py`,
+  `tests/test_ml_extensions_integration.py` — 45 new tests, including
+  an automated proof that a worst-case, maximally-confident
+  `ml_extensions` agent cannot influence `CEOAgent.WEIGHTS` or the
+  decided action.
+
+### Changed
+- `api/app.py` — registered the new router (existing auth coverage,
+  no changes to `api/auth.py`).
+- `main.py::build_system()` — new config-gated, non-fatal wiring block
+  after `agent_layer = build_agent_layer(...)`; `_start_api_server()`
+  threads the result through to `api.app`'s shared state store, same
+  pattern already used for `training_lane_runner`.
+
 ## [Unreleased] — HFT Flow Enabling-for-Live Switch (HFT-6b)
 
 Request: activate the real order-book depth signal HFT-1 through HFT-6

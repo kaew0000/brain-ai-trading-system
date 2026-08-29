@@ -5204,3 +5204,183 @@ guard identified as gap (4) above — no changes to `RiskEngine`,
 `ExecutionCoordinator`, `execution/ceo_gated_signal_provider.py`,
 `commander/control_state.py`, journal schema, or `database/db.py`,
 verified by direct inspection.
+
+## 52. RL/HPO/Online-Learning Extensions Subpackage — PR #82 (backfill, 2026-08-28)
+
+**Backfill note.** PR #82 (`feat/ml-extensions-rl-hpo-online-learning`,
+merged `ac913b5`) added `ml/extensions/` but its own commits touched no
+documentation file — no entry here, no `CLAUDE.md` mention, no
+`PATCH_NOTES.md`/`MIGRATION.md` for that PR. Documented here, after the
+fact, by §53's integration work below (which needed to fully understand
+this subpackage's real contract before wiring anything to it).
+
+**What it is.** A self-contained, additive subpackage:
+`ml/extensions/rl/` (Stable-Baselines3 `RLAdapter` + `BrainTradingEnv`,
+a Gymnasium env), `ml/extensions/online/` (River `OnlineLearner` /
+`MultiSymbolOnlineLearner`), `ml/extensions/hpo/` (Optuna `HPOManager`),
+and `ml/extensions/orchestrator.py`'s `ExtensionsOrchestrator` tying the
+three together behind `get_action()`. Optional dependencies only
+(`ml/extensions/requirements.txt`: gymnasium, stable-baselines3, torch,
+river, optuna — none in the project's main `requirements.txt`); nothing
+in `ml/`, `learning/`, or elsewhere imports this package, so a
+deployment without those extras installed is entirely unaffected.
+
+**Confirmed by inspection, not assumed:** `BrainTradingEnv` does not
+consume Brain Bot's production data layer directly — it requires a
+caller-supplied `data_pipeline` object exposing exactly
+`get_features(window)` / `reset()` / `step()` / `get_current_price()` /
+`is_done()` (see `ml/extensions/rl/env.py` and its own
+`ml/extensions/example.py::MockDataPipeline`), and hardcodes
+`n_features = 20`. This is the exact contract §53's
+`RLDataPipelineAdapter` implements.
+
+## 53. ML Extensions Integration Layer — observe-only (2026-08-29)
+
+**Request.** "สร้างต่อจาก PR ในภาพ" (continue building from the PR shown
+in the screenshot — PR #82, §52 above), building on a draft
+`brain_integration_bundle.zip` supplied as a starting point.
+
+**Root cause / why the draft couldn't be merged as-is.** The draft
+bundle's four adapters were written without inspecting this repo and
+invented APIs that don't exist here: a fictional
+`decision.ensemble_decision_engine` with `.add_vote()`/`.resolve()` (the
+real ensemble is `agents/ceo_agent.py`'s `CEOAgent`, agents implement
+`BaseAgent.analyse() -> AgentReport`); a fictional
+`executor.submit_order()`/`.cancel_order()` (the real
+`ExecutionOrchestrator.execute()` takes a full `OrchestratedDecision` +
+`PortfolioState` + balance, not a raw order dict — calling it directly
+from an ML signal would bypass Scanner→Ranking→Portfolio→Risk→Decision→
+Execution entirely); a fictional generic `data_pipeline.get_ohlcv()`/
+`.portfolio` dict (see §52's real contract instead); and a fictional
+"Auto-Config Engine" with a config-change audit log (repo-wide grep:
+zero matches for `auto_config`/`autoconfig` anywhere). The draft also
+assumed a `class BrainBot: __init__/start()` shape; `main.py`'s `main()`
+is procedural (`agent_layer = build_agent_layer(...)`, a returned
+`components` dict) — no such class exists in this repo.
+
+**Key architectural finding.** Traced `CEOAgent.decide()`: the
+weighted-vote loop only ever iterates `weights.items()` (==
+`CEOAgent.WEIGHTS`, a fixed 6-key dict — `smc`/`futures`/`regime`/
+`risk`/`journal`/`confidence_engine` — or its dynamic-blend variant,
+itself only ever derived from `WEIGHTS`' own keys via
+`_effective_weights()`). An agent registered under a 7th key via
+`CEOAgent.register_agent()` still runs every cycle — logged to
+telemetry, the reasoning stream, and the dashboard's `agent_reports` —
+but its signal/confidence can never enter `long_score`/`short_score`
+and can never change `action`. `agents/__init__.py`'s
+`build_agent_layer()` already relies on exactly this pattern for
+`"trader"` (registered with `CEOAgent`, absent from `WEIGHTS`) — not a
+new trick, the existing convention, reused deliberately. Confirmed with
+a worst-case test: a stub agent that always reports `LONG` at 100%
+confidence, registered under `"ml_extensions"`, leaves `CEOAgent.WEIGHTS`
+and the resulting `action` unchanged (`tests/test_ml_extensions_agent.py::
+TestCEOAgentIsolation`).
+
+**Scope decision (asked, not assumed).** Given real order-execution
+wiring would mean either (a) editing `CEOAgent.WEIGHTS` — a rebalance of
+production decision weights — or (b) calling `ExecutionOrchestrator`
+directly and bypassing the core pipeline, both carrying real
+capital-safety weight, this was presented to the operator as an
+explicit choice rather than defaulted silently. Confirmed: **observe-only
+this phase** — adapters + a monitoring API only, zero effect on any real
+CEO vote or execution. Live-vote wiring (option (a) above) is
+explicitly deferred to a separate, future, human-approved phase — same
+governance-gated posture this project already uses for anything that
+can move real capital (§48's proposal-review layer).
+
+**What changed.**
+
+| File | Change |
+|---|---|
+| `ml/extensions_integration/data_adapter.py` | New. `RLDataPipelineAdapter` — implements `BrainTradingEnv`'s exact 5-method contract over real OHLCV (`data/binance_provider.py::BinanceDataProvider.get_ohlcv()`, fetched once, walked in-memory). `compute_feature_frame()` — 20 named, deterministic pandas technical-indicator columns (returns/volatility/volume-ratio/RSI/MACD/Bollinger/ATR family), matching `BrainTradingEnv`'s hardcoded `n_features=20` without editing that file. Also `get_online_features()` for River. |
+| `ml/extensions_integration/portfolio_adapter.py` | New. `PortfolioStateAdapter` — combines `portfolio/portfolio_state.py::PortfolioState` (position/PnL/risk) and `data/binance_provider.py`'s account balance into the `{"equity", "position", ...}` dict `TradingPolicy.get_action()` expects. Documented limitation: `position` is `PortfolioState.risk_used` used as the closest existing proxy — this repo has no literal net-position-ratio field. Never raises; degrades to zeroed defaults. |
+| `ml/extensions_integration/ml_extensions_agent.py` | New. `MLExtensionsAgent(BaseAgent)` — observe-only; see "Key architectural finding" above. `analyse()` never raises (`BaseAgent.run()` re-raises verbatim, and `CEOAgent.decide()` itself already wraps each agent's `run()` in its own try/except — this is deliberate belt-and-suspenders on top of that). |
+| `ml/extensions_integration/config_bridge.py` | New. `ConfigBridge` — reuses `settings.symbol_list` (the one canonical symbol fallback) rather than re-deriving it; builds `ExtensionsConfig` from real settings only (no invented Auto-Config Engine — see root-cause note above). |
+| `ml/extensions_integration/system_integrator.py` | New. `SystemIntegrator.wire_all()` — single entry point; config-gated, non-fatal (mirrors `main.py`'s existing `ExecutionScheduler`/`TrainingLaneRunner` best-effort pattern exactly). Defers every optional heavy import (`ExtensionsOrchestrator`, and transitively gymnasium/stable-baselines3/torch/river/optuna) inside methods, never at module top level, so `import ml.extensions_integration` always succeeds regardless of whether those optional packages are installed. |
+| `api/ml_extensions_api.py` | New. `/api/ml_extensions/{status,rl/status,online/metrics,hpo/status,agent/last-report}` — read-only, mirrors `api/execution_api.py`'s `_ok()`/honest-empty-payload convention exactly. Reads via `api.app`'s existing generic `get_state("ml_extensions", ...)` slot — no new state-store mechanism. |
+| `api/app.py` | `+1` import, `+1` `app.include_router(_ml_extensions_router)` — covered by the existing prefix-generic `_auth_middleware`, no auth changes. |
+| `main.py` | `_start_api_server()`: `+ml_extensions_components` param, `+1` `set_state()` call (mirrors `training_lane_runner` exactly). `build_system()`: new config-gated, try/except-wrapped block right after `agent_layer = build_agent_layer(...)`, using the real `live_portfolio_state`/`data_provider` already in scope; `+1` key in the returned `components` dict; `+1` kwarg threaded into the `_start_api_server(...)` call site. |
+| `config/settings.py` | New `ML_EXTENSIONS_ENABLED: bool` (default `False`) — same off-by-default posture as `SCHEDULER_ENABLED`/`CEO_MULTI_SYMBOL_ENABLED`/`HFT_FLOW_LIVE_ENABLED`. |
+| `.env.example` | New "ML Extensions Integration Layer" section. |
+| `tests/test_ml_extensions_data_adapter.py` | New, 14 tests — feature-frame shape/no-NaN/zero-division guards, the 5-method contract, padding, `from_provider()`. |
+| `tests/test_ml_extensions_agent.py` | New, 12 tests — graceful degradation, action→signal mapping, never-raises, and the `CEOAgent.WEIGHTS` isolation proof (including the worst-case screaming-LONG-at-100%-confidence stub). |
+| `tests/test_ml_extensions_integration.py` | New, 19 tests — `ConfigBridge`, `SystemIntegrator.wire_all()` (disabled/enabled/never-raises), `PortfolioStateAdapter`, and all 5 new API endpoints via `TestClient`. |
+
+No changes to `ml/extensions/` itself (PR #82's files are untouched —
+additive-only), `agents/ceo_agent.py`, `execution/`, `risk/`, journal
+schema, or `database/db.py`.
+
+**Tests.** 45 new, all passed. Full backend suite: 2961 passed, 45
+deselected — same 3 pre-existing `tests/test_dashboard_serving.py`
+failures (no frontend build present in this environment, confirmed
+unrelated and present on unmodified `main`). ruff and vulture clean on
+all touched files. `python3 -c "import main"` succeeds. The real
+`ExtensionsOrchestrator`/`RLAdapter`/`HPOManager`/`OnlineLearner` were
+installed and exercised directly (not just mocked) to confirm the
+integration layer's assumptions against actual behavior, in addition to
+the mocked unit tests listed above.
+
+**Explicitly out of scope / not built, deferred to a future phase:**
+wiring `ml_extensions` into `CEOAgent.WEIGHTS` as a real vote; any
+direct `ExecutionOrchestrator` call from an ML signal; RL training runs
+against live/historical data (this phase ships the data adapter, not a
+trained model — `orch.rl_adapter`/`orch.online_learner`/
+`orch.hpo_manager` all start `None` until `train_rl()`/
+`start_online_learning()`/`optimize_strategy()` are explicitly called,
+none of which this phase calls); an Auto-Config Engine (doesn't exist
+yet — see root-cause note above).
+
+**Post-commit fix, caught by CI, not by local testing.** This layer
+originally lived at `ml/extensions/integration/` — nested *inside*
+`ml/extensions/`. Locally, all 45 tests passed, because this
+sandbox had `ml/extensions/`'s optional dependencies (gymnasium,
+stable-baselines3, torch, river, optuna) installed globally already
+(from smoke-testing the real `ExtensionsOrchestrator` directly — see
+above). That masked a real bug: `ml/extensions/__init__.py` (PR #82's
+own file, unmodified by this phase) eagerly imports `.rl`/`.online`/
+`.hpo`/`.orchestrator` at its own module top level — contrary to that
+same file's own docstring claim that "none of these optional
+dependencies are imported unless this subpackage is explicitly used."
+Since Python always executes a package's `__init__.py` before any of
+its submodules, `import ml.extensions.integration.<anything>` pulled in
+that entire optional stack regardless of what this layer's own files
+imported (which was already correctly deferred). CI — which correctly
+installs only the base `requirements.txt`, not
+`ml/extensions/requirements.txt` — failed to even collect any of this
+layer's 3 test files as a result (`ModuleNotFoundError`, exit code 2).
+
+**Fix:** moved the package from `ml/extensions/integration/` to
+`ml/extensions_integration/` — a sibling of `ml/extensions/` under
+`ml/`, not a child of it. Zero other code changes needed: none of this
+layer's own files ever imported `ml.extensions.*` at their own top
+level to begin with (the whole point of the earlier deferred-import
+design); the only problem was the directory nesting itself.
+
+**Second, distinct bug this surfaced, in this phase's own tests, not
+production code:** 4 of the 45 tests genuinely exercise `wire_all()`'s
+success path (`ExtensionsConfig`/`ExtensionsOrchestrator` actually
+constructing), which itself genuinely requires gymnasium — that's real,
+not a bug, since `ExtensionsConfig` is only importable through
+`ml/extensions/orchestrator.py`, itself only reachable through
+`ml/extensions/__init__.py`'s eager chain. These 4 were written and
+passed locally only because this sandbox happened to have the optional
+stack installed already. Fixed by gating them with
+`pytest.importorskip("gymnasium")` — they skip cleanly (not fail) in
+any environment without `ml/extensions/requirements.txt` installed,
+including CI, and still fully exercise the happy path in an environment
+that has it. Also added one new regression test,
+`test_degrades_gracefully_when_gymnasium_not_installed`, which
+monkeypatches the import to fail regardless of what's actually
+installed — the one test in this layer that specifically proves
+`wire_all()` degrades to `{"enabled": False, "error": ...}` rather than
+raising when the optional stack is genuinely absent, which is exactly
+the scenario CI is running in.
+
+Re-verified this time by genuinely uninstalling gymnasium/
+stable-baselines3/torch/river/optuna from the sandbox (not just
+reasoning about it): 42 passed, 4 skipped (0 errors) across this
+layer's 3 test files; full backend suite 2958 passed, 4 skipped, 45
+deselected — same 3 pre-existing, unrelated `test_dashboard_serving.py`
+failures as before. ruff and vulture clean. `ml/extensions/` itself
+remains completely untouched throughout.
+

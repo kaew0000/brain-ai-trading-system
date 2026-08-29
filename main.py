@@ -190,7 +190,7 @@ def _run_world_runtime_manager(components: dict) -> None:
 
 # ── Dashboard / API server ────────────────────────────────────────────────────
 
-def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent_layer=None, risk_engine=None, portfolio_state=None, trade_lifecycle=None, reconciliation_engine=None, training_lane_runner=None, host: str = "0.0.0.0", port: int = 8000) -> None:
+def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent_layer=None, risk_engine=None, portfolio_state=None, trade_lifecycle=None, reconciliation_engine=None, training_lane_runner=None, ml_extensions_components=None, host: str = "0.0.0.0", port: int = 8000) -> None:
     """
     Start the FastAPI dashboard server in a daemon background thread.
     Runs alongside the trading loop — does not block main.
@@ -239,6 +239,14 @@ def _start_api_server(journal, bus, paper_engine=None, data_provider=None, agent
     # handles the pre-this-phase case for any caller still on an older
     # build).
     _api_module.set_state("training_lane_runner", training_lane_runner)
+    # V16 ML Extensions Integration Layer (observe-only) — see
+    # components["ml_extensions"] in build_system()/main() below. None
+    # when ML_EXTENSIONS_ENABLED is off or wiring failed (main.py's own
+    # guarded best-effort construction) — set_state stores None in that
+    # case too, deliberately, same convention as training_lane_runner
+    # above, so GET /api/ml_extensions/status can tell "disabled/failed"
+    # apart from "never wired at all".
+    _api_module.set_state("ml_extensions", ml_extensions_components)
     from api.app import app
 
     config = uvicorn.Config(
@@ -752,6 +760,34 @@ def build_system() -> dict:
     # _read_bot() and system_health/order_state.py for why this matters.
     live_portfolio_state = execution_scheduler.portfolio_state if execution_scheduler else None
 
+    # ── ML Extensions Integration Layer (observe-only) ──────────────────────
+    # V16 ML Extensions Integration Layer — wires ml/extensions/'s RL/HPO/
+    # Online-Learning subpackage (PR #82) into the live agent layer for
+    # dashboard visibility only. Off by default (ML_EXTENSIONS_ENABLED).
+    # Registers under CEOAgent's "ml_extensions" key, which is deliberately
+    # NOT one of CEOAgent.WEIGHTS' keys, so it cannot affect LONG/SHORT/WAIT
+    # — see ml/extensions_integration/ml_extensions_agent.py's module
+    # docstring for the full reasoning. Same non-fatal best-effort pattern
+    # as ExecutionScheduler/TrainingLaneRunner above: any failure here
+    # (including the optional gymnasium/stable-baselines3/torch/river/
+    # optuna dependencies simply not being installed) is caught and logged,
+    # never raised — a fresh deployment with the flag off, or without those
+    # optional packages, behaves exactly as before this phase.
+    ml_extensions_components = None
+    if settings.ML_EXTENSIONS_ENABLED:
+        try:
+            from ml.extensions_integration import SystemIntegrator
+
+            ml_integrator = SystemIntegrator(
+                ceo_agent=agent_layer["ceo"],
+                data_provider=data_provider,
+                portfolio_state=live_portfolio_state,
+            )
+            ml_extensions_components = ml_integrator.wire_all()
+        except Exception as exc:
+            logger.error(f"ML Extensions integration failed to start (non-fatal): {exc}")
+            ml_extensions_components = None
+
     logger.info("=" * 62)
 
     return {
@@ -779,6 +815,7 @@ def build_system() -> dict:
         "order_timeline":        order_timeline,
         "training_lane_runner":  training_lane_runner,
         "exchange_manager":      exchange_manager,
+        "ml_extensions":         ml_extensions_components,
         "current_mission_id":    None,
     }
 
@@ -1979,6 +2016,7 @@ def main() -> None:
         data_provider = components["data_provider"],
         agent_layer   = components["agent_layer"],
         training_lane_runner = components.get("training_lane_runner"),
+        ml_extensions_components = components.get("ml_extensions"),
         risk_engine   = components["risk_engine"],
         portfolio_state       = components["portfolio_state"],
         trade_lifecycle       = components["trade_lifecycle"],

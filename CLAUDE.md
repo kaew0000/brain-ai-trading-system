@@ -70,6 +70,17 @@ Completed
   new `learning/` package, Track A, READ ONLY: dataset builder,
   symbol/regime/agent/feature statistics, performance tracker, pattern
   miner, recommendation engine, immutable snapshots, JSON reports)
+- RL/HPO/Online-Learning Extensions Subpackage (architecture.md §52 —
+  `ml/extensions/`: Stable-Baselines3 RL, River online learning, Optuna
+  HPO, behind an `ExtensionsOrchestrator`; optional deps only, nothing
+  else in the repo imports it; merged as PR #82, not documented in this
+  file or architecture.md by that PR — backfilled here)
+- ML Extensions Integration Layer — observe-only (architecture.md §53 —
+  `ml/extensions_integration/`: real data/portfolio adapters + an
+  `MLExtensionsAgent` registered with `CEOAgent` under a key deliberately
+  outside `CEOAgent.WEIGHTS`, so it has zero effect on any real trading
+  decision this phase; `ML_EXTENSIONS_ENABLED`, off by default; a
+  read-only `/api/ml_extensions/*` monitoring API)
 
 In Progress
 

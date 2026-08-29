@@ -96,6 +96,7 @@ from api.portfolio_ws import check_and_broadcast as _portfolio_ws_check
 # docstring for design rationale (same additive-router pattern as
 # Phase 2C above).
 from api.execution_api import router as _execution_router
+from api.ml_extensions_api import router as _ml_extensions_router
 
 # V16 Phase 4B Step 3D — Lifecycle API. Same additive-router pattern.
 from api.lifecycle_api import router as _lifecycle_router
@@ -501,6 +502,13 @@ app.include_router(_workspace_router)
 # covered by the same prefix-generic _auth_middleware — no auth changes
 # needed here either.
 app.include_router(_account_router)
+
+# V16 ML Extensions Integration Layer (observe-only) — /api/ml_extensions/*
+# is covered by the same prefix-generic _auth_middleware — no auth
+# changes needed here either. Reads only whatever main.py's
+# SystemIntegrator.wire_all() stored via set_state("ml_extensions", ...);
+# answers a 200 "not wired" payload when ML_EXTENSIONS_ENABLED=false.
+app.include_router(_ml_extensions_router)
 
 
 # ── P1-A: Dashboard authentication ─────────────────────────────────────────

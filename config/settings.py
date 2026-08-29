@@ -738,6 +738,22 @@ class Settings(BaseSettings):
     # nothing to multiply against.
     HFT_FLOW_LIVE_ENABLED: bool = Field(default=False, alias="HFT_FLOW_LIVE_ENABLED")
 
+    # V16 ML Extensions Integration Layer — off by default, same posture
+    # as SCHEDULER_ENABLED/CEO_MULTI_SYMBOL_ENABLED/HFT_FLOW_LIVE_ENABLED
+    # above. When True, main.py's build_system() wires
+    # ml.extensions_integration.SystemIntegrator, which registers an
+    # observe-only MLExtensionsAgent with CEOAgent under the
+    # "ml_extensions" key — a key deliberately absent from
+    # CEOAgent.WEIGHTS (agents/ceo_agent.py), so it can be enabled with
+    # zero effect on any real trading decision. See
+    # ml/extensions_integration/ml_extensions_agent.py's module
+    # docstring for the full reasoning. Also requires ml/extensions/'s
+    # optional dependencies (gymnasium, stable-baselines3, torch, river,
+    # optuna — see ml/extensions/requirements.txt) to be installed;
+    # if they aren't, wiring fails non-fatally and this behaves exactly
+    # as if the flag were False.
+    ML_EXTENSIONS_ENABLED: bool = Field(default=False, alias="ML_EXTENSIONS_ENABLED")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
