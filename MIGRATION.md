@@ -1,55 +1,72 @@
-# MIGRATION — V16 Phase 4C §51: HFT Flow Enabling-for-Live Switch (HFT-6b)
+# MIGRATION — V16 ML Extensions Integration Layer (observe-only)
 
 ## Do you need to do anything?
 
 **Only if you want the feature active.** This patch is purely additive
-and off by default — `HFT_FLOW_LIVE_ENABLED` defaults to `False`, so
-`resolve_confidence_weights()` returns the exact same `DEFAULT_WEIGHTS`
-object as before. An existing `.env` with none of the new keys sees
-byte-identical behavior after updating.
+and off by default — `ML_EXTENSIONS_ENABLED` defaults to `False`, so
+`build_system()` skips the entire integration block and every existing
+component (`CEOAgent`, `ExecutionOrchestrator`, the dashboard) is
+byte-identical to before this phase. An existing `.env` with none of
+the new keys sees no behavior change at all.
 
-To activate on this `EXECUTION_MODE=paper` deployment, add to `.env`
-and restart:
-```
-HFT_WS_ENABLED=true
-HFT_FLOW_LIVE_ENABLED=true
-HFT_FLOW_CONTRADICTION_ENABLED=true
-```
-`HFT_FLOW_LIVE_WEIGHT` already defaults to `5.0` — add it only if a
-different value is wanted.
+To activate:
+1. Install `ml/extensions/`'s optional dependencies:
+   ```
+   pip install -r ml/extensions/requirements.txt
+   ```
+   (gymnasium, stable-baselines3, torch, river, optuna — not part of
+   the main `requirements.txt`; a fresh production deployment does not
+   have these unless installed explicitly.)
+2. Add to `.env` and restart:
+   ```
+   ML_EXTENSIONS_ENABLED=true
+   ```
 
 ## What to expect after activating
 
-- Startup log will show `[5/9] HFT flow LIVE weight active: hft_flow=5.0
-  (contradiction_enabled=True, ws_enabled=True)`.
-- The Binance WS depth/trade client (`data/binance_ws_client.py`) starts
-  connecting on boot — one additional persistent WebSocket connection
-  per traded symbol, same connection pattern already used for the
-  existing dashboard broadcast task (no new thread/process).
-- `/api/signals`' `raw_features`/breakdown surface will start showing a
-  non-zero `"hft_flow"` entry in `ConfidenceResult.breakdown` whenever
-  real WS depth data is present with `feature_confidence > 0`. Before
-  that data is present (e.g. briefly after a fresh boot/reconnect), the
-  key is simply absent — same fail-safe behavior as before this patch.
-- Confidence weights auto-rescale to sum to 100
-  (`_normalise_weights()` divides proportionally) — smc/volume/oi/funding/regime
-  each shrink by roughly 4.5% relative to their current share (a 105→100
-  rescale), not zero out. `hft_flow` itself lands at roughly 4.8% of
-  total confidence, matching the "~5%" design intent documented on
-  `HFT_FLOW_LIVE_WEIGHT`.
-- The contradiction mechanism can now reduce confidence, or — only on a
-  strongly extreme opposing reading — force a hard `BLOCKED` action.
-  Watch the dashboard's Signal Panel block-reason field for this new
-  possible reason alongside the existing `FUTURES_BLOCK_LONG/SHORT` and
-  `FUNDING_BLOCK_LONG/SHORT` ones.
-- If `HFT_WS_ENABLED=true` but the WS client can't connect or sync
-  (network issue, Binance-side outage), `feature_confidence` stays `0`
-  and `hft_flow` silently contributes nothing — the pre-existing
-  fail-safe from HFT-1 through HFT-4, unchanged by this patch.
+- Startup: `build_system()` constructs an `ExtensionsOrchestrator` and
+  registers an `MLExtensionsAgent` with the live `CEOAgent` under the
+  key `"ml_extensions"`. This key is **not** one of `CEOAgent.WEIGHTS`'
+  6 keys — the agent runs every cycle (visible in telemetry, the
+  reasoning stream, and the dashboard's agent panel) but cannot change
+  `LONG`/`SHORT`/`WAIT` or any confidence score. Verified with a
+  worst-case automated test (a stub agent reporting `LONG` at 100%
+  confidence under this same key changes nothing about the decided
+  action).
+- `GET /api/ml_extensions/status` will report `enabled: true,
+  agent_registered: true`.
+- `GET /api/ml_extensions/rl/status`, `/online/metrics`, `/hpo/status`
+  will all report `ready: false` until `train_rl()` /
+  `start_online_learning()` / `optimize_strategy()` are explicitly
+  called on the orchestrator — **this phase does not train or run any
+  model**, it only wires the plumbing. Calling those training methods
+  is separate, future work.
+- `GET /api/ml_extensions/agent/last-report` shows the most recent
+  `AgentReport` from `MLExtensionsAgent` — signal `NEUTRAL` (action 0)
+  until a real RL/online model exists, since `ExtensionsOrchestrator.
+  get_action()` gracefully returns `HOLD` with no trained components.
+- No data is fetched from Binance until the integration is enabled AND
+  a `data_provider`/historical OHLCV source is actually available in
+  `main.py`'s `build_system()` scope; without one, `MLExtensionsAgent`
+  reports `status: not_ready` instead of erroring.
+- If any part of wiring fails (missing optional dependency, a
+  transient error, anything) it is caught and logged as a warning —
+  `ml_extensions_components` becomes `None`/`{"enabled": False}` and
+  the rest of the bot boots and trades exactly as before this phase.
 
 ## Rollback
 
-Set `HFT_FLOW_LIVE_ENABLED=false` (and/or `HFT_FLOW_CONTRADICTION_ENABLED=false`)
-and restart — reverts to byte-identical pre-patch decision behavior. No
-code rollback or database change needed either way; nothing in this
-patch touches the database.
+Set `ML_EXTENSIONS_ENABLED=false` and restart — reverts to
+byte-identical pre-patch behavior. No code rollback or database change
+needed either way; nothing in this patch touches the database.
+
+## Note on the optional dependency install
+
+Without `ml/extensions/requirements.txt` installed, `wire_all()` fails
+non-fatally the moment it tries to import `ml.extensions.orchestrator`
+(that import itself requires gymnasium — see `docs/architecture.md`
+§53's "Post-commit fix" addendum) — logged as a warning, never raised.
+`GET /api/ml_extensions/status` will show `enabled: false` in that case
+even with `ML_EXTENSIONS_ENABLED=true` set. This is expected, not a
+bug: install the optional requirements first if you want the feature
+to actually activate, not just be toggled on.

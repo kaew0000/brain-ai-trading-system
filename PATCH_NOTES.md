@@ -1,93 +1,134 @@
-# PATCH NOTES — V16 Phase 4C §51: HFT Flow Enabling-for-Live Switch (HFT-6b)
+# PATCH NOTES — V16 ML Extensions Integration Layer (observe-only)
 
-Branch: `feature/hft-6b-live-enable-switch`
-Base: `main` @ `884278d` (merge of PR #80, training-lane restore-on-restart)
+Branch: `feat/ml-extensions-integration-layer`
+Base: `main` @ `ac913b5` (merge of PR #82, RL/HPO/Online-Learning subpackage)
 
 ## Scope note
 
-Requested directly: "ต้องการให้ระบบตรวจจับสภาพคล่อง liquidity เพื่อช่วยตัดสินใจเทรด"
-(want the system to detect liquidity to help trade decisions), narrowed
-after inspection to: activate the real order-book depth signal that
-HFT-1 through HFT-6 (`docs/architecture.md` §45) already built and
-fully tested, but deliberately left inert. Confirmed via fresh clone +
-grep across `agents/`, `ranking/`, `decision/`, `execution/`, `risk/`
-that this repo already has three separate "liquidity" concepts (SMC
-liquidity pools for TP targeting, a volume+spread proxy in the scanner
-ranking factor, and this real depth-based HFT flow signal) plus one
-confirmed gap (no pre-trade slippage/depth guard in `execution/` or
-`risk/` — out of scope for this patch, `execution_orchestrator.py`'s
-`_compute_slippage()` remains post-fill measurement only, unchanged).
+Requested: "สร้างต่อจาก PR ในภาพ" (continue building from the PR shown in
+the screenshot — PR #82) — continuing from a supplied draft
+`brain_integration_bundle.zip` as a starting point. Before writing any
+code, fresh-cloned the real repo and inspected every real module the
+draft's four adapters needed to call.
 
-Two explicit choices confirmed before writing any code:
-- `HFT_FLOW_LIVE_WEIGHT = 5.0` (the conservative value HFT-6 already
-  named for live use, not HFT-5's own 20.0 paper-testing example)
-- `HFT_FLOW_CONTRADICTION_ENABLED = true` alongside it, not staged separately
+**Root cause: the draft bundle invented APIs that don't exist in this
+repo.** It assumed a fictional `decision.ensemble_decision_engine`
+(`.add_vote()`/`.resolve()`) — the real ensemble is
+`agents/ceo_agent.py`'s `CEOAgent`. It assumed a fictional
+`executor.submit_order()`/`.cancel_order()` — the real
+`ExecutionOrchestrator.execute()` takes a full `OrchestratedDecision` +
+`PortfolioState` + balance, and calling it directly from an ML signal
+would bypass Scanner→Ranking→Portfolio→Risk→Decision→Execution
+entirely. It assumed a generic `data_pipeline.get_ohlcv()`/`.portfolio`
+dict — `ml/extensions/rl/env.py`'s `BrainTradingEnv` actually requires a
+narrower, specific contract (`get_features(window)`/`reset()`/`step()`/
+`get_current_price()`/`is_done()`, confirmed against that file and its
+own `example.py::MockDataPipeline`). It also referenced a
+config-syncing "Auto-Config Engine" that a repo-wide grep confirms does
+not exist anywhere in this codebase, and assumed a `class BrainBot`
+that doesn't exist (`main.py`'s `main()` is procedural). None of this
+was malicious — it was written without inspecting the real repo. All
+four adapters were rewritten from scratch against the real APIs.
 
-Applied to the currently-running `EXECUTION_MODE=paper` deployment —
-this is exactly the safe lane HFT-6's own docstring says this evidence
-should be gathered in before any live-money config profile.
+**Key finding, confirmed by reading `CEOAgent.decide()`:** the
+weighted-vote loop only ever iterates `CEOAgent.WEIGHTS` (a fixed
+6-key dict). An agent registered under a 7th key still runs every
+cycle (telemetry, reasoning stream, dashboard) but can never enter the
+score or change the decided action — this repo already relies on
+exactly this pattern for `"trader"`. Verified with a worst-case test: a
+stub agent reporting `LONG` at 100% confidence, registered under
+`"ml_extensions"`, changes nothing about `CEOAgent.WEIGHTS` or the
+resulting action.
+
+**Scope decision, asked rather than assumed:** wiring RL/Online/HPO
+into a real trading vote or into execution means either rebalancing
+`CEOAgent.WEIGHTS` or bypassing the core execution pipeline — both
+carry real capital-safety weight. Presented as an explicit choice;
+confirmed answer: **observe-only this phase**. Live-vote wiring is
+deferred to a separate, future, human-approved phase.
 
 Track A only (Python backend). No `dashboard_src/`/frontend changes,
-no database schema changes.
-
-## Context
-
-`decision/confidence_engine.py`'s `DEFAULT_WEIGHTS["hft_flow"]` has been
-hardcoded to `0.0` since HFT-5, and `config/settings.py::HFT_FLOW_LIVE_WEIGHT`
-existed only as "a named, auditable config value... nothing in this
-codebase reads it automatically" — HFT-6's own scope was deliberately
-"config value + docs only, no other new logic." The documented
-"Enabling for live" procedure (`docs/architecture.md` §45) required a
-manual, untested, one-off edit at whichever `ConfidenceEngine()` call
-site an operator was using. Verified by inspection that
-`main.py:414`'s `confidence_engine = ConfidenceEngine()` is the single
-live construction site in the entire repo (injected into
-`PortfolioSignalProvider` via `build_strategy()`, covering both the
-legacy single-symbol loop and the multi-symbol `ExecutionScheduler`
-path) — `pipeline/brain_pipeline_v13.py`'s own `ConfidenceEngine(weights=weights)`
-is dead code, imported by nothing else. `.env.example` never listed
-`HFT_WS_ENABLED`, `HFT_FLOW_LIVE_WEIGHT`, or `HFT_FLOW_CONTRADICTION_ENABLED`
-at all, so none of this was discoverable from the VPS without reading
-source.
+no database schema changes, no changes to `ml/extensions/` itself
+(PR #82's files are untouched — this layer is purely additive).
 
 ## What changed
 
 | File | Change |
 |---|---|
-| `config/settings.py` | `+HFT_FLOW_LIVE_ENABLED: bool` (default `False`) — the actual opt-in switch, separate from `HFT_FLOW_LIVE_WEIGHT` so a candidate weight can sit in config without silently taking effect. Updated the now-stale "nothing reads it automatically" comment on `HFT_FLOW_LIVE_WEIGHT`. |
-| `decision/confidence_engine.py` | `+resolve_confidence_weights()` — returns `DEFAULT_WEIGHTS` untouched unless `HFT_FLOW_LIVE_ENABLED` is `True`, else a copy with `hft_flow` set to `HFT_FLOW_LIVE_WEIGHT`. Never mutates the shared `DEFAULT_WEIGHTS` constant. Module docstring's "HFT Flow integration" section updated to document it. |
-| `main.py` | `build_system()`'s Decision Layer: `ConfidenceEngine()` → `ConfidenceEngine(weights=resolve_confidence_weights())`, plus a startup log line (only when the live weight is active) echoing `HFT_FLOW_LIVE_WEIGHT`/`HFT_FLOW_CONTRADICTION_ENABLED`/`HFT_WS_ENABLED` together, so an operator can see at a glance whether the *whole* chain — not just this one flag — is actually live. |
-| `.env.example` | New "HFT Flow" section documenting all four previously-undiscoverable flags, each at its existing safe default. |
-| `tests/test_hft_flow_live_enable_switch.py` | New, 6 tests: switch off (returns `DEFAULT_WEIGHTS`), switch on (applies live weight), custom weight value, `DEFAULT_WEIGHTS` never mutated, `ConfidenceEngine` construction with resolved weights both ways, and the new setting's shipped default. |
+| `ml/extensions_integration/data_adapter.py` | New. `RLDataPipelineAdapter` — the real `BrainTradingEnv` data_pipeline contract over real OHLCV (`BinanceDataProvider.get_ohlcv()`, fetched once, walked in-memory — not called per-step). `compute_feature_frame()` — 20 deterministic pandas technical-indicator columns, matching `BrainTradingEnv`'s hardcoded `n_features=20`. |
+| `ml/extensions_integration/portfolio_adapter.py` | New. `PortfolioStateAdapter` — combines real `PortfolioState` + account balance into the dict `TradingPolicy.get_action()` expects. Never raises; degrades to zeroed defaults. Documented proxy limitation (see architecture.md §53). |
+| `ml/extensions_integration/ml_extensions_agent.py` | New. `MLExtensionsAgent(BaseAgent)` — observe-only, registered outside `CEOAgent.WEIGHTS`. `analyse()` never raises. |
+| `ml/extensions_integration/config_bridge.py` | New. `ConfigBridge` — reuses `settings.symbol_list`; builds `ExtensionsConfig` from real settings only. |
+| `ml/extensions_integration/system_integrator.py` | New. `SystemIntegrator.wire_all()` — single entry point, config-gated, non-fatal, defers all optional heavy imports so `import ml.extensions_integration` never requires gymnasium/stable-baselines3/torch/river/optuna to be installed. |
+| `api/ml_extensions_api.py` | New. 5 read-only `/api/ml_extensions/*` endpoints, mirrors `api/execution_api.py`'s conventions exactly. |
+| `api/app.py` | `+1` import, `+1` `include_router()` — covered by existing prefix-generic auth. |
+| `main.py` | `_start_api_server()`: `+ml_extensions_components` param + `set_state()` call. `build_system()`: new config-gated try/except block after `agent_layer = build_agent_layer(...)`; `+1` key in `components`; threaded into the `_start_api_server(...)` call. |
+| `config/settings.py` | New `ML_EXTENSIONS_ENABLED: bool` (default `False`). |
+| `.env.example` | New "ML Extensions Integration Layer" section. |
+| `docs/architecture.md` | `+2` sections: §52 backfills PR #82 (never documented by that PR itself), §53 documents this phase in full. |
+| `CLAUDE.md` | `+2` Completed entries (§52 backfill, §53). |
+| `tests/test_ml_extensions_data_adapter.py` | New, 14 tests. |
+| `tests/test_ml_extensions_agent.py` | New, 12 tests — includes the `CEOAgent.WEIGHTS` isolation proof. |
+| `tests/test_ml_extensions_integration.py` | New, 19 tests — `ConfigBridge`, `SystemIntegrator`, `PortfolioStateAdapter`, all 5 API endpoints. |
 
-No changes to `RiskEngine`, `ExecutionCoordinator`,
-`execution/ceo_gated_signal_provider.py`, `commander/control_state.py`,
-journal schema, or `database/db.py` — verified by direct inspection,
-matching HFT-1 through HFT-6's own scope boundary.
+No changes to `ml/extensions/`, `agents/ceo_agent.py`, `execution/`,
+`risk/`, journal schema, or `database/db.py` — verified by direct
+inspection.
+
+## Fix after first delivery, caught by CI
+
+The first delivery of this branch put the integration package at
+`ml/extensions/integration/` — nested *inside* `ml/extensions/`.
+Locally that passed every test, because this sandbox happened to have
+`ml/extensions/`'s optional dependencies (gymnasium, stable-baselines3,
+torch, river, optuna) installed globally already, from directly
+smoke-testing the real `ExtensionsOrchestrator`. That masked a real
+bug: `ml/extensions/__init__.py` (PR #82's own file, unmodified here)
+eagerly imports `.rl`/`.online`/`.hpo`/`.orchestrator` at its own
+module top level, contrary to that file's own docstring. CI — which
+correctly installs only the base `requirements.txt` — failed to even
+collect this layer's 3 test files as a result. Fixed by moving the
+package to `ml/extensions_integration/`, a sibling of `ml/extensions/`
+rather than a child of it (see `docs/architecture.md` §53's
+"Post-commit fix" addendum for the full write-up). This also surfaced
+a second, smaller bug in this layer's own test suite: 4 of the 45 tests
+genuinely need the optional stack to exercise `wire_all()`'s success
+path and weren't gated for its absence — fixed with
+`pytest.importorskip("gymnasium")`, plus one new regression test
+(`test_degrades_gracefully_when_gymnasium_not_installed`) that
+specifically proves graceful degradation without it. `ml/extensions/`
+itself remains completely untouched throughout both fixes.
 
 ## Testing
 
-- New: 6/6 passed (`tests/test_hft_flow_live_enable_switch.py`)
-- Regression, HFT-suite: 156/156 passed (`test_hft_flow_live_weight_config.py`,
-  `test_hft_shadow_mode.py`, `test_phase3.py`, `test_hft_flow_scorer.py`,
-  `test_hft_flow_confidence_integration.py`, plus the new file)
-- Full backend suite: 2922 passed, 45 deselected — same 3 pre-existing
-  `tests/test_dashboard_serving.py` failures (no frontend build present
-  in this environment; confirmed unrelated, present on unmodified `main`)
-- `ruff check`: clean on all 4 touched files
-- `vulture --min-confidence 80`: clean on all 4 touched files (the one
-  finding, `main.py:76` unused `frame` arg, is a pre-existing standard
-  signal-handler parameter, not part of this diff)
-- `python3 -c "import main"`: succeeds
+- New: 45 tests across 3 files — 41 always run, 4 skip cleanly (not
+  fail) in any environment without `ml/extensions/requirements.txt`
+  installed, since they specifically exercise the real
+  `ExtensionsConfig`/`ExtensionsOrchestrator` success path
+- Verified in BOTH environments, not just reasoned about: with
+  gymnasium/stable-baselines3/torch/river/optuna genuinely uninstalled
+  (matching CI) — 42 passed, 4 skipped, 0 errors across the 3 new
+  files; full backend suite 2958 passed, 4 skipped, 45 deselected. With
+  those optional packages installed — all 45 pass, 0 skipped; full
+  backend suite 2961 passed, 45 deselected. Both runs: same 3
+  pre-existing `tests/test_dashboard_serving.py` failures (no frontend
+  build present in this environment; confirmed unrelated, present on
+  unmodified `main`)
+- `ruff check`: clean on all touched/new files, in both environments
+- `vulture --min-confidence 80`: clean on all touched/new files
+- `python3 -c "import main"`: succeeds in both environments
+- The real `ExtensionsOrchestrator`/`RLAdapter`/`HPOManager`/
+  `OnlineLearner` were exercised directly in manual smoke tests (not
+  just mocked) to confirm the integration layer's assumptions against
+  actual runtime behavior, in addition to the automated tests above.
 
 ## Activation (operator action required — not automatic)
 
-Add to the live-running `.env` on the VPS, then restart:
+Add to `.env` and restart, **and** install
+`ml/extensions/requirements.txt`'s optional dependencies:
 ```
-HFT_WS_ENABLED=true
-HFT_FLOW_LIVE_ENABLED=true
-HFT_FLOW_CONTRADICTION_ENABLED=true
+ML_EXTENSIONS_ENABLED=true
 ```
-`HFT_FLOW_LIVE_WEIGHT` already defaults to `5.0` — no need to add it
-unless a different value is wanted. See `MIGRATION.md` for what to
-expect after restart.
+Without those optional dependencies installed, wiring fails non-fatally
+(caught and logged) and the bot behaves exactly as if the flag were
+`false`. See `MIGRATION.md` for what to expect after activation.
