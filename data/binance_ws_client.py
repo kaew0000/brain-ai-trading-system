@@ -90,6 +90,16 @@ class _SymbolState:
                                        # applied and the first straddling
                                        # diff is successfully applied
         self.stream_connected = False
+        self.pending_diffs: list[DepthDiff] = []   # depthUpdate events that
+                                                     # arrived while book.synced
+                                                     # was False (initial sync
+                                                     # or mid-resync), held so
+                                                     # _resync_symbol() can
+                                                     # replay them against the
+                                                     # fresh snapshot instead of
+                                                     # them being lost — see
+                                                     # HFT_WS_MAX_PENDING_DIFFS_
+                                                     # PER_SYMBOL's docstring
         self.lock = threading.Lock()   # protects reads from get_snapshot()
                                         # against the asyncio task's writes;
                                         # cheap since both sides hold it only
@@ -238,6 +248,7 @@ class BinanceWSClient:
         if symbol in self._resyncing:
             return
         self._resyncing.add(symbol)
+        still_gapped = False
         try:
             loop = asyncio.get_event_loop()
             raw = await loop.run_in_executor(None, self._rest_snapshot_fn, symbol)
@@ -247,9 +258,65 @@ class BinanceWSClient:
                 # sequence_valid stays False until the first diff that
                 # straddles this snapshot is successfully applied — see
                 # _handle_depth_diff below.
-            logger.debug(f"HFT-1 resync | {symbol} | lastUpdateId={snap.last_update_id}")
+                replayed = self._replay_pending_diffs(state)
+                still_gapped = not state.book.synced
+            logger.debug(
+                f"HFT-1 resync | {symbol} | lastUpdateId={snap.last_update_id} "
+                f"replayed={replayed}"
+                + (" (still gapped after replay, re-resyncing)" if still_gapped else "")
+            )
         finally:
             self._resyncing.discard(symbol)
+        if still_gapped:
+            # The buffered diffs collected during this resync couldn't
+            # bridge to the fresh snapshot's lastUpdateId (e.g. the
+            # HFT_WS_MAX_PENDING_DIFFS_PER_SYMBOL cap was hit during an
+            # unusually slow REST fetch, so the earliest buffered diff no
+            # longer straddles). Try again immediately with a brand-new
+            # snapshot rather than waiting for the next live diff, which
+            # would just get buffered against a book already known to be
+            # unsynced (see _handle_depth_diff's `if not state.book.synced`
+            # branch below).
+            asyncio.ensure_future(self._resync_symbol(symbol, state))
+
+    def _replay_pending_diffs(self, state: _SymbolState) -> int:
+        """Must be called with state.lock held, immediately after
+        state.book.apply_snapshot(). Replays depthUpdate events buffered
+        while this symbol's book was unsynced, per Binance's documented
+        handshake (data/local_order_book.py's module docstring, steps
+        1-4): buffer while the REST snapshot is in flight, drop anything
+        entirely behind the snapshot, use the straddle rule for the first
+        relevant one, then require exact chaining after that.
+
+        Returns the number of buffered diffs actually applied. If a real
+        gap remains even after replay (buffer overflow, or the feed
+        itself skipped a sequence), state.book.synced is left False by
+        LocalOrderBook.apply_diff() exactly as it would be for a live
+        diff — the caller (_resync_symbol) checks for that and re-resyncs
+        rather than this method special-casing it.
+        """
+        pending, state.pending_diffs = state.pending_diffs, []
+        applied_count = 0
+        for diff in pending:
+            if state.book.is_stale(diff):
+                continue   # covered by the new snapshot already
+            if not state.book.synced:
+                # A prior diff in this same batch already broke
+                # continuity — stop; the remaining buffered diffs are
+                # covered by whatever resync this triggers next.
+                break
+            if state.book.apply_diff(diff):
+                applied_count += 1
+                if not state.sequence_valid and state.book.synced:
+                    # Mirrors _handle_depth_diff's live-diff path: the
+                    # first replayed diff that successfully applies after
+                    # a (re)snapshot is what actually proves continuity,
+                    # not the snapshot alone.
+                    state.sequence_valid = True
+            else:
+                state.sequence_valid = False
+                break
+        return applied_count
 
     # ── Message handling (sync, pure parsing + dispatch — no I/O here) ──
 
@@ -298,7 +365,15 @@ class BinanceWSClient:
         diff = _parse_depth_diff(payload)
         with state.lock:
             if not state.book.synced:
-                return   # waiting on the initial REST snapshot; drop silently
+                # Waiting on the initial REST snapshot or a resync already
+                # in flight — buffer rather than drop, so _resync_symbol()
+                # can replay this once the fresh snapshot's lastUpdateId is
+                # known (dropping here was the original HFT-1 bug: it made
+                # the very next live diff responsible for straddling the
+                # new snapshot, which reliably failed under load or a
+                # rate-limit-slowed REST fetch and caused a resync loop).
+                self._buffer_diff(state, diff)
+                return
             if state.book.is_stale(diff):
                 return   # covered by current snapshot already — normal, not a gap
             applied = state.book.apply_diff(diff)
@@ -308,12 +383,31 @@ class BinanceWSClient:
                     f"resync required"
                 )
                 state.sequence_valid = False
+                # This diff itself wasn't applied — buffer it too, since it
+                # may still be relevant once a fresh snapshot lands.
+                self._buffer_diff(state, diff)
                 asyncio.ensure_future(self._resync_symbol(symbol, state))
             elif not state.sequence_valid and state.book.synced:
                 # First diff successfully applied after a (re)snapshot —
                 # per Binance's own handshake this confirms the book is now
                 # provably continuous, not just snapshot-fresh.
                 state.sequence_valid = True
+
+    def _buffer_diff(self, state: _SymbolState, diff: DepthDiff) -> None:
+        """Append a depthUpdate to this symbol's pending-replay buffer.
+        Caller must already hold state.lock (not re-acquired here —
+        threading.Lock is non-reentrant)."""
+        state.pending_diffs.append(diff)
+        cap = settings.HFT_WS_MAX_PENDING_DIFFS_PER_SYMBOL
+        if len(state.pending_diffs) > cap:
+            dropped = state.pending_diffs.pop(0)
+            logger.warning(
+                f"HFT-1 pending-diff buffer overflow for {state.symbol} "
+                f"(cap={cap}) — dropping oldest buffered diff "
+                f"(first_update_id={dropped.first_update_id}); the REST "
+                f"resync fetch may be abnormally slow (e.g. rate-limit "
+                f"backoff)."
+            )
 
     def _handle_agg_trade(self, state: _SymbolState, payload: dict) -> None:
         trade = TradeEvent(

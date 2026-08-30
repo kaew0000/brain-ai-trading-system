@@ -214,6 +214,60 @@ def test_handle_message_stale_diff_before_snapshot_is_dropped_silently():
     assert client.get_snapshot("BTCUSDT").book_valid is False
 
 
+def test_diffs_arriving_during_slow_resync_are_buffered_and_replayed():
+    """Regression test for the 2026-08-31 production incident: a slow REST
+    snapshot fetch (e.g. rate-limit backoff) used to mean every depthUpdate
+    that arrived while `book.synced` was False got dropped, so the first
+    live diff after the snapshot landed almost never straddled the new
+    lastUpdateId — triggering an immediate re-resync, over and over,
+    consuming REST weight each time and worsening the rate limit that
+    caused it. Diffs should now be buffered and replayed against the fresh
+    snapshot instead of lost, so a single resync (not an unbounded loop)
+    is enough to recover sequence_valid."""
+    import threading as _threading
+
+    snapshot_calls = []
+    release_fetch = _threading.Event()
+
+    def slow_fn(symbol):
+        snapshot_calls.append(symbol)
+        # Blocks until the test releases it, simulating a REST call slowed
+        # by rate-limit backoff. Safe to block here: run_in_executor runs
+        # this in a worker thread, not the event loop.
+        release_fetch.wait(timeout=5)
+        return _rest_snapshot(last_update_id=100 + (len(snapshot_calls) - 1) * 1000)
+
+    async def go():
+        client = BinanceWSClient(symbols=["BTCUSDT"], rest_snapshot_fn=slow_fn)
+        state = client._states["BTCUSDT"]
+
+        # Kick off the (slow) resync as a background task, then feed it
+        # several sequential diffs *while the fetch is still in flight* —
+        # these must be buffered, not dropped.
+        resync_task = asyncio.ensure_future(client._resync_symbol("BTCUSDT", state))
+        await asyncio.sleep(0.05)   # let the executor thread start the "slow" fetch
+
+        for u_start, u_end in [(90, 105), (106, 110), (111, 115)]:
+            client._handle_message(_combined_frame("BTCUSDT", "depth", {
+                "U": u_start, "u": u_end, "b": [], "a": [],
+                "E": int(time.time() * 1000),
+            }))
+
+        assert len(state.pending_diffs) == 3   # buffered, not dropped
+
+        release_fetch.set()
+        await resync_task
+        return client
+
+    client = asyncio.run(go())
+    snap = client.get_snapshot("BTCUSDT")
+    # lastUpdateId=100 from the snapshot; the buffered diffs (straddling,
+    # then chaining 106-110, 111-115) replay cleanly to sequence_valid=True
+    # in a single resync — no re-resync loop.
+    assert snap.sequence_valid is True
+    assert snapshot_calls == ["BTCUSDT"]
+
+
 # ── Message dispatch: malformed frames ───────────────────────────────────
 
 def test_handle_message_malformed_json_dropped_without_raising():
