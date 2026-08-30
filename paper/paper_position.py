@@ -74,7 +74,22 @@ class PaperPosition:
     """
 
     FEE_RATE = 0.0004      # 0.04% taker per side (Binance Futures default)
-    TIMEOUT_BARS = 96      # ~24 h at M15 — auto-close if no SL/TP hit
+    # Default/fallback ONLY, used when a caller does not pass
+    # `timeout_bars` explicitly — e.g. tests that construct PaperPosition
+    # directly, or execution/execution_factory.py's manual
+    # EXECUTION_MODE=paper wiring, both unchanged by this fix.
+    #
+    # NOTE (root-cause fix, see PATCH_NOTES.md): "96 bars ~= 24h" is only
+    # true if update_mark() is called once per real M15 candle close.
+    # PaperPosition has no notion of wall-clock time on its own — one
+    # "bar" is simply one update_mark() call — so a caller that ticks
+    # faster than M15 (e.g. training_lane/training_lane_runner.py,
+    # which ticks every settings.BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS,
+    # 20s by default) got positions force-closed after 96 x 20s = 32
+    # minutes, not 24h, well before most trades had time to reach TP.
+    # Callers with a non-M15 tick cadence MUST pass `timeout_bars`
+    # calibrated to their own cadence instead of relying on this default.
+    TIMEOUT_BARS = 96      # ~24 h ONLY if ticked once per M15 candle
 
     def __init__(
         self,
@@ -89,6 +104,7 @@ class PaperPosition:
         regime:       str   = "",
         oi_delta:     float = 0.0,
         funding_rate: float = 0.0,
+        timeout_bars: int | None = None,
     ) -> None:
         if direction not in ("LONG", "SHORT"):
             raise ValueError(f"direction must be LONG|SHORT, got {direction!r}")
@@ -107,6 +123,9 @@ class PaperPosition:
         self.regime       = regime
         self.oi_delta     = float(oi_delta)
         self.funding_rate = float(funding_rate)
+        self._timeout_bars = (
+            int(timeout_bars) if timeout_bars is not None else self.TIMEOUT_BARS
+        )
 
         self.opened_at   = datetime.now(timezone.utc)
         self.mark_price  = self.entry_price
@@ -144,7 +163,7 @@ class PaperPosition:
             return self._close(self.stop_loss,   "SL")
         if self._tp_hit():
             return self._close(self.take_profit, "TP")
-        if self._bars_open >= self.TIMEOUT_BARS:
+        if self._bars_open >= self._timeout_bars:
             return self._close(self.mark_price,  "TIMEOUT")
         return None
 
@@ -197,10 +216,11 @@ class PaperPosition:
     def to_state_dict(self) -> dict:
         """Full internal state for persistence/restore. Unlike to_dict()
         (a display snapshot), this includes opened_at as a raw
-        reconstructible value and bars_open — both needed so a restored
-        position keeps an accurate TIMEOUT_BARS countdown and an accurate
-        duration_s when it eventually closes, rather than silently
-        resetting either."""
+        reconstructible value, bars_open, and timeout_bars — all three
+        needed so a restored position keeps an accurate countdown to its
+        own calibrated timeout (see TIMEOUT_BARS's docstring) and an
+        accurate duration_s when it eventually closes, rather than
+        silently resetting any of them."""
         return {
             "symbol":       self.symbol,
             "direction":    self.direction,
@@ -215,11 +235,14 @@ class PaperPosition:
             "funding_rate": self.funding_rate,
             "opened_at":    self.opened_at.isoformat(),
             "bars_open":    self._bars_open,
+            "timeout_bars": self._timeout_bars,
             "mark_price":   self.mark_price,
         }
 
     @classmethod
-    def from_state_dict(cls, state: dict) -> "PaperPosition":
+    def from_state_dict(
+        cls, state: dict, default_timeout_bars: int | None = None,
+    ) -> "PaperPosition":
         """Reconstructs a position from to_state_dict()'s output. Raises
         (deliberately, unlike PaperAccount.from_state_dict()) if the
         required fields are missing or invalid — an open position
@@ -227,7 +250,13 @@ class PaperPosition:
         half-restored with fabricated entry/SL/TP; the caller
         (PaperExecutionEngine.from_state_dict()) is responsible for
         catching this per-position and skipping just that one rather
-        than failing the whole restore."""
+        than failing the whole restore.
+
+        `default_timeout_bars` covers state saved before this fix (no
+        "timeout_bars" key yet): falls back to the caller's current
+        calibrated value rather than the raw 96-bar default, since 96
+        under a fast poll cadence is exactly the bug this fix closes —
+        see TIMEOUT_BARS's docstring."""
         pos = cls(
             symbol=state["symbol"],
             direction=state["direction"],
@@ -240,6 +269,7 @@ class PaperPosition:
             regime=state.get("regime", ""),
             oi_delta=state.get("oi_delta", 0.0),
             funding_rate=state.get("funding_rate", 0.0),
+            timeout_bars=state.get("timeout_bars", default_timeout_bars),
         )
         try:
             pos.opened_at = datetime.fromisoformat(state["opened_at"])

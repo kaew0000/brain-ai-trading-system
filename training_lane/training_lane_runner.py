@@ -199,6 +199,24 @@ class TrainingLaneRunner:
             else settings.BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS
         )
 
+        # Root-cause fix (see PATCH_NOTES.md / paper/paper_position.py's
+        # TIMEOUT_BARS docstring): PaperPosition's 96-bar default assumes
+        # one tick == one M15 candle. This lane ticks once per
+        # self._poll_interval seconds instead (20s by default), so
+        # positions were being force-closed after ~32 minutes, not the
+        # intended settings.BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS.
+        # Derive the real bar count from actual cadence so the intended
+        # wall-clock timeout holds regardless of poll interval. Floored
+        # at 1 so a very long configured poll interval can never produce
+        # a zero/negative bar count.
+        self._timeout_bars = max(
+            1,
+            int(
+                (settings.BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS * 3600.0)
+                / self._poll_interval
+            ),
+        )
+
         # Person's explicit decision: same strategy/thresholds as live,
         # no exploratory bias — reuses settings.STRATEGY_NAME, the exact
         # same knob the primary/multi-symbol lane resolves through
@@ -268,7 +286,9 @@ class TrainingLaneRunner:
             engine_state = saved.get("engine")
             if not engine_state:
                 return
-            self._engine = PaperExecutionEngine.from_state_dict(engine_state)
+            self._engine = PaperExecutionEngine.from_state_dict(
+                engine_state, timeout_bars=self._timeout_bars,
+            )
             self.symbol = saved.get("symbol", self.symbol)
             self._bust_count = int(saved.get("bust_count", self._bust_count))
             self._rotation_index = int(saved.get("rotation_index", self._rotation_index))
@@ -335,7 +355,7 @@ class TrainingLaneRunner:
 
     def _new_engine(self) -> PaperExecutionEngine:
         account = PaperAccount(balance=self._starting_balance)
-        return PaperExecutionEngine(account=account)
+        return PaperExecutionEngine(account=account, timeout_bars=self._timeout_bars)
 
     def start(self) -> None:
         """Idempotent — calling twice is a no-op, matching the pattern

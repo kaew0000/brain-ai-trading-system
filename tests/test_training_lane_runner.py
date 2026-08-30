@@ -184,6 +184,75 @@ def _make_runner(
 
 
 # ══════════════════════════════════════════════════════════════════════
+# 0 — Regression: TIMEOUT_BARS calibrated to actual poll interval
+# ══════════════════════════════════════════════════════════════════════
+#
+# Root cause (see paper/paper_position.py's TIMEOUT_BARS docstring and
+# PATCH_NOTES.md): PaperPosition.TIMEOUT_BARS=96 is only really "~24h"
+# if update_mark() is called once per real M15 candle. This lane ticks
+# once per its own poll_interval_seconds instead (20s in production),
+# so positions were being force-closed after 96 x 20s = 32 minutes —
+# almost always before a legitimate trade had time to reach TP.
+
+class TestTimeoutBarsCalibratedToPollInterval:
+    def test_timeout_bars_derived_from_configured_hours_and_poll_interval(
+        self, monkeypatch,
+    ):
+        from config.settings import settings
+
+        monkeypatch.setattr(
+            settings, "BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS", 24.0,
+        )
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0])
+        # 24h / 0.01s poll interval (this file's standard test cadence)
+        assert runner._timeout_bars == int(24 * 3600 / 0.01)
+        assert runner._engine._timeout_bars == runner._timeout_bars
+
+    def test_opened_position_does_not_die_at_the_old_hardcoded_96_bars(
+        self, monkeypatch,
+    ):
+        """The bug, reproduced directly: with the raw PaperPosition
+        default (96) and a fast poll cadence, 97 ticks at a stable price
+        used to force-close every position via TIMEOUT. After
+        calibration, the same 97 ticks must NOT close it."""
+        signal = _FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)
+        runner = _make_runner(
+            monkeypatch, signals=[signal], prices=[100.0] * 200,
+        )
+        runner.symbol = runner._select_symbol()
+        decision = _to_paper_decision(runner._signal_provider(runner.symbol))
+        runner._engine.execute(decision, symbol=runner.symbol)
+        assert len(runner._engine.open_positions) == 1
+
+        for _ in range(PaperPosition.TIMEOUT_BARS + 1):  # the old bug's threshold
+            closed = runner._engine.tick(100.0)  # flat price: no SL, no TP
+            assert closed == [], "position must not TIMEOUT this early post-fix"
+
+    def test_calibrated_value_survives_a_restart(self, monkeypatch, db):
+        """A restored engine must use the *current* calibrated
+        timeout_bars, not silently fall back to the raw 96 default —
+        otherwise every restart would reintroduce the bug for whichever
+        positions happen to be open at restart time."""
+        store = TrainingLaneStateStore(db_path=db)
+        signal = _FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)
+        runner = _make_runner(
+            monkeypatch, signals=[signal], prices=[100.0] * 5, state_store=store,
+        )
+        runner.symbol = runner._select_symbol()
+        decision = _to_paper_decision(runner._signal_provider(runner.symbol))
+        runner._engine.execute(decision, symbol=runner.symbol)
+        runner._save_state()
+
+        restored = _make_runner(
+            monkeypatch, signals=[signal], prices=[100.0] * 5, state_store=store,
+        )
+        assert restored.restored_from_prior_run is True
+        pos = restored._engine.open_positions[0]
+        assert pos._timeout_bars == restored._timeout_bars
+        assert pos._timeout_bars != PaperPosition.TIMEOUT_BARS
+
+
+# ══════════════════════════════════════════════════════════════════════
 # 1 — Isolation from the primary lane
 # ══════════════════════════════════════════════════════════════════════
 
