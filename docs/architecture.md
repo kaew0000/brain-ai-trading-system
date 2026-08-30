@@ -5384,3 +5384,89 @@ deselected — same 3 pre-existing, unrelated `test_dashboard_serving.py`
 failures as before. ruff and vulture clean. `ml/extensions/` itself
 remains completely untouched throughout.
 
+## 54. Fix: Training Lane Position TIMEOUT Firing at ~32 Minutes Instead of ~24 Hours (2026-08-30)
+
+**Reported symptom:** operator observed the Background Training Lane
+(Track C, `localhost:8000/train`) losing paper balance every day for 3
+days straight ($100 → $90.98 over 19 closed trades in one session),
+despite the underlying model's own reported backtest stats (37.5% win
+rate, PF 3.32) not looking that bad. Live trading was separately
+unavailable (deposit/start-bot blocked), so this lane was the only
+signal the operator had into whether the system's decision logic
+actually works.
+
+**Root cause, confirmed by reading the code, not guessed:**
+`paper/paper_position.py::PaperPosition.TIMEOUT_BARS = 96` with the
+comment "~24 h at M15". That comment is only true if
+`update_mark()` — which increments `_bars_open` and is the sole thing
+that checks the timeout — is called once per real M15 candle close.
+It isn't. `training_lane/training_lane_runner.py::TrainingLaneRunner`
+calls `PaperExecutionEngine.tick()` (which calls `update_mark()` on
+every open position) once per `_cycle()`, and `_cycle()` runs once
+every `settings.BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS` — **20
+seconds by default**, not 15 minutes. So every position in this lane
+was being force-closed via `close_reason="TIMEOUT"` after
+`96 × 20s = 1,920s ≈ 32 minutes`, not 24 hours.
+
+**Why that alone plausibly explains a persistent, daily bleed:** SL/TP
+distances are computed by the same strategy/confidence pipeline the
+live lane uses, sized for realistic M15/H1 price movement — i.e.
+typically needing hours, not 32 minutes, to reach TP. Under the bug,
+almost every trade got cut off long before TP had a realistic chance
+to be hit, while SL could still be hit normally if price moved against
+the position quickly. Whatever didn't hit SL got force-closed near
+its entry price at whatever the mark happened to be — net negative
+after the 0.04%-per-side taker fee is applied twice per trade, with no
+time for the strategy's actual edge (if any) to play out. This matches
+the observed pattern exactly: the last closed trade in the operator's
+screenshot was `close_reason=TIMEOUT`, `result=LOSS`.
+
+**Fix — calibrate the timeout to the caller's real tick cadence instead
+of assuming M15:**
+- `PaperPosition.__init__` now accepts an optional `timeout_bars`
+  param; `TIMEOUT_BARS=96` remains the class-level *default*, used
+  only when a caller doesn't pass one explicitly — so
+  `execution/execution_factory.py`'s manual `EXECUTION_MODE=paper`
+  wiring and every existing direct-construction test are
+  byte-for-byte unaffected.
+- `PaperExecutionEngine.__init__`/`.execute()`/`.from_state_dict()`
+  thread an optional `timeout_bars` through to every `PaperPosition`
+  they create or restore.
+- New setting `config/settings.py::BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS`
+  (default `24.0`).
+- `TrainingLaneRunner.__init__` now computes
+  `self._timeout_bars = max(1, int(TIMEOUT_HOURS * 3600 / poll_interval_seconds))`
+  once, and passes it into every engine it constructs or restores
+  (`_new_engine()`, `_restore_state()`) — so the real-world timeout
+  holds regardless of poll cadence, and stays correct automatically if
+  `BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS` is ever changed.
+- `PaperPosition.to_state_dict()`/`.from_state_dict()` now persist
+  `timeout_bars` per-position too, with a `default_timeout_bars`
+  fallback for any position saved before this fix (predating the new
+  field) — so a restored position gets the caller's *current*
+  calibrated value rather than silently reverting to the raw 96-bar
+  default on restart.
+
+**Scope / blast radius:** `paper/paper_position.py`,
+`paper/paper_execution.py`, `training_lane/training_lane_runner.py`,
+`config/settings.py`. The primary live lane
+(`execution/execution_coordinator.py`) never touches `PaperPosition`
+at all — no real-money code path is affected. Manual
+`EXECUTION_MODE=paper` sessions (`execution_factory.py`) keep the
+original 96-bar/M15 assumption unchanged, since that path was out of
+scope for this report and not confirmed broken — only Track C's
+background lane, whose actual poll cadence is known and configurable,
+was recalibrated.
+
+**Tests:** 3 new regression tests in
+`tests/test_training_lane_runner.py::TestTimeoutBarsCalibratedToPollInterval`
+— (1) `_timeout_bars` is correctly derived from
+`BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS` and the runner's actual
+poll interval; (2) a position that would have died via `TIMEOUT` after
+the old hardcoded 96 ticks now survives them at a flat price; (3) the
+calibrated value (not the raw 96 default) survives a restart via
+`_restore_state()`. Full backend suite: 3006 passed, 4 skipped, 3
+pre-existing/unrelated `test_dashboard_serving.py` failures (missing
+`dashboard/dist/` build artifact in a fresh clone — audit finding
+predating this phase). World suite: 72 passed. ruff and vulture clean
+on all changed files.

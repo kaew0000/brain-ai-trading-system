@@ -1,134 +1,120 @@
-# PATCH NOTES — V16 ML Extensions Integration Layer (observe-only)
+# PATCH NOTES — Fix: Training Lane Position TIMEOUT Firing at ~32 Minutes Instead of ~24 Hours
 
-Branch: `feat/ml-extensions-integration-layer`
-Base: `main` @ `ac913b5` (merge of PR #82, RL/HPO/Online-Learning subpackage)
+Branch: `fix/training-lane-timeout-bars-poll-interval`
+Base: `main` @ `d247f80` (merge of PR #83, ML Extensions Integration Layer)
 
-## Scope note
+## Reported symptom
 
-Requested: "สร้างต่อจาก PR ในภาพ" (continue building from the PR shown in
-the screenshot — PR #82) — continuing from a supplied draft
-`brain_integration_bundle.zip` as a starting point. Before writing any
-code, fresh-cloned the real repo and inspected every real module the
-draft's four adapters needed to call.
+Operator observed the Background Training Lane (Track C,
+`localhost:8000/train`) bleeding paper balance every day for 3 days:
+$100 → $90.98 over 19 closed trades in the session shown, with the
+last closed trade `close_reason=TIMEOUT`, `result=LOSS`. Live trading
+was separately unavailable (deposit/start-bot blocked), so this lane
+was the operator's only real signal into whether the decision logic
+works at all — and it looked like it was losing on its own, not just
+idle.
 
-**Root cause: the draft bundle invented APIs that don't exist in this
-repo.** It assumed a fictional `decision.ensemble_decision_engine`
-(`.add_vote()`/`.resolve()`) — the real ensemble is
-`agents/ceo_agent.py`'s `CEOAgent`. It assumed a fictional
-`executor.submit_order()`/`.cancel_order()` — the real
-`ExecutionOrchestrator.execute()` takes a full `OrchestratedDecision` +
-`PortfolioState` + balance, and calling it directly from an ML signal
-would bypass Scanner→Ranking→Portfolio→Risk→Decision→Execution
-entirely. It assumed a generic `data_pipeline.get_ohlcv()`/`.portfolio`
-dict — `ml/extensions/rl/env.py`'s `BrainTradingEnv` actually requires a
-narrower, specific contract (`get_features(window)`/`reset()`/`step()`/
-`get_current_price()`/`is_done()`, confirmed against that file and its
-own `example.py::MockDataPipeline`). It also referenced a
-config-syncing "Auto-Config Engine" that a repo-wide grep confirms does
-not exist anywhere in this codebase, and assumed a `class BrainBot`
-that doesn't exist (`main.py`'s `main()` is procedural). None of this
-was malicious — it was written without inspecting the real repo. All
-four adapters were rewritten from scratch against the real APIs.
+## Root cause (confirmed by reading the code, not assumed)
 
-**Key finding, confirmed by reading `CEOAgent.decide()`:** the
-weighted-vote loop only ever iterates `CEOAgent.WEIGHTS` (a fixed
-6-key dict). An agent registered under a 7th key still runs every
-cycle (telemetry, reasoning stream, dashboard) but can never enter the
-score or change the decided action — this repo already relies on
-exactly this pattern for `"trader"`. Verified with a worst-case test: a
-stub agent reporting `LONG` at 100% confidence, registered under
-`"ml_extensions"`, changes nothing about `CEOAgent.WEIGHTS` or the
-resulting action.
-
-**Scope decision, asked rather than assumed:** wiring RL/Online/HPO
-into a real trading vote or into execution means either rebalancing
-`CEOAgent.WEIGHTS` or bypassing the core execution pipeline — both
-carry real capital-safety weight. Presented as an explicit choice;
-confirmed answer: **observe-only this phase**. Live-vote wiring is
-deferred to a separate, future, human-approved phase.
-
-Track A only (Python backend). No `dashboard_src/`/frontend changes,
-no database schema changes, no changes to `ml/extensions/` itself
-(PR #82's files are untouched — this layer is purely additive).
-
-## What changed
-
-| File | Change |
-|---|---|
-| `ml/extensions_integration/data_adapter.py` | New. `RLDataPipelineAdapter` — the real `BrainTradingEnv` data_pipeline contract over real OHLCV (`BinanceDataProvider.get_ohlcv()`, fetched once, walked in-memory — not called per-step). `compute_feature_frame()` — 20 deterministic pandas technical-indicator columns, matching `BrainTradingEnv`'s hardcoded `n_features=20`. |
-| `ml/extensions_integration/portfolio_adapter.py` | New. `PortfolioStateAdapter` — combines real `PortfolioState` + account balance into the dict `TradingPolicy.get_action()` expects. Never raises; degrades to zeroed defaults. Documented proxy limitation (see architecture.md §53). |
-| `ml/extensions_integration/ml_extensions_agent.py` | New. `MLExtensionsAgent(BaseAgent)` — observe-only, registered outside `CEOAgent.WEIGHTS`. `analyse()` never raises. |
-| `ml/extensions_integration/config_bridge.py` | New. `ConfigBridge` — reuses `settings.symbol_list`; builds `ExtensionsConfig` from real settings only. |
-| `ml/extensions_integration/system_integrator.py` | New. `SystemIntegrator.wire_all()` — single entry point, config-gated, non-fatal, defers all optional heavy imports so `import ml.extensions_integration` never requires gymnasium/stable-baselines3/torch/river/optuna to be installed. |
-| `api/ml_extensions_api.py` | New. 5 read-only `/api/ml_extensions/*` endpoints, mirrors `api/execution_api.py`'s conventions exactly. |
-| `api/app.py` | `+1` import, `+1` `include_router()` — covered by existing prefix-generic auth. |
-| `main.py` | `_start_api_server()`: `+ml_extensions_components` param + `set_state()` call. `build_system()`: new config-gated try/except block after `agent_layer = build_agent_layer(...)`; `+1` key in `components`; threaded into the `_start_api_server(...)` call. |
-| `config/settings.py` | New `ML_EXTENSIONS_ENABLED: bool` (default `False`). |
-| `.env.example` | New "ML Extensions Integration Layer" section. |
-| `docs/architecture.md` | `+2` sections: §52 backfills PR #82 (never documented by that PR itself), §53 documents this phase in full. |
-| `CLAUDE.md` | `+2` Completed entries (§52 backfill, §53). |
-| `tests/test_ml_extensions_data_adapter.py` | New, 14 tests. |
-| `tests/test_ml_extensions_agent.py` | New, 12 tests — includes the `CEOAgent.WEIGHTS` isolation proof. |
-| `tests/test_ml_extensions_integration.py` | New, 19 tests — `ConfigBridge`, `SystemIntegrator`, `PortfolioStateAdapter`, all 5 API endpoints. |
-
-No changes to `ml/extensions/`, `agents/ceo_agent.py`, `execution/`,
-`risk/`, journal schema, or `database/db.py` — verified by direct
-inspection.
-
-## Fix after first delivery, caught by CI
-
-The first delivery of this branch put the integration package at
-`ml/extensions/integration/` — nested *inside* `ml/extensions/`.
-Locally that passed every test, because this sandbox happened to have
-`ml/extensions/`'s optional dependencies (gymnasium, stable-baselines3,
-torch, river, optuna) installed globally already, from directly
-smoke-testing the real `ExtensionsOrchestrator`. That masked a real
-bug: `ml/extensions/__init__.py` (PR #82's own file, unmodified here)
-eagerly imports `.rl`/`.online`/`.hpo`/`.orchestrator` at its own
-module top level, contrary to that file's own docstring. CI — which
-correctly installs only the base `requirements.txt` — failed to even
-collect this layer's 3 test files as a result. Fixed by moving the
-package to `ml/extensions_integration/`, a sibling of `ml/extensions/`
-rather than a child of it (see `docs/architecture.md` §53's
-"Post-commit fix" addendum for the full write-up). This also surfaced
-a second, smaller bug in this layer's own test suite: 4 of the 45 tests
-genuinely need the optional stack to exercise `wire_all()`'s success
-path and weren't gated for its absence — fixed with
-`pytest.importorskip("gymnasium")`, plus one new regression test
-(`test_degrades_gracefully_when_gymnasium_not_installed`) that
-specifically proves graceful degradation without it. `ml/extensions/`
-itself remains completely untouched throughout both fixes.
-
-## Testing
-
-- New: 45 tests across 3 files — 41 always run, 4 skip cleanly (not
-  fail) in any environment without `ml/extensions/requirements.txt`
-  installed, since they specifically exercise the real
-  `ExtensionsConfig`/`ExtensionsOrchestrator` success path
-- Verified in BOTH environments, not just reasoned about: with
-  gymnasium/stable-baselines3/torch/river/optuna genuinely uninstalled
-  (matching CI) — 42 passed, 4 skipped, 0 errors across the 3 new
-  files; full backend suite 2958 passed, 4 skipped, 45 deselected. With
-  those optional packages installed — all 45 pass, 0 skipped; full
-  backend suite 2961 passed, 45 deselected. Both runs: same 3
-  pre-existing `tests/test_dashboard_serving.py` failures (no frontend
-  build present in this environment; confirmed unrelated, present on
-  unmodified `main`)
-- `ruff check`: clean on all touched/new files, in both environments
-- `vulture --min-confidence 80`: clean on all touched/new files
-- `python3 -c "import main"`: succeeds in both environments
-- The real `ExtensionsOrchestrator`/`RLAdapter`/`HPOManager`/
-  `OnlineLearner` were exercised directly in manual smoke tests (not
-  just mocked) to confirm the integration layer's assumptions against
-  actual runtime behavior, in addition to the automated tests above.
-
-## Activation (operator action required — not automatic)
-
-Add to `.env` and restart, **and** install
-`ml/extensions/requirements.txt`'s optional dependencies:
+`paper/paper_position.py`:
+```python
+TIMEOUT_BARS = 96      # ~24 h at M15 — auto-close if no SL/TP hit
+...
+self._bars_open += 1
+...
+if self._bars_open >= self.TIMEOUT_BARS:
+    return self._close(self.mark_price, "TIMEOUT")
 ```
-ML_EXTENSIONS_ENABLED=true
-```
-Without those optional dependencies installed, wiring fails non-fatally
-(caught and logged) and the bot behaves exactly as if the flag were
-`false`. See `MIGRATION.md` for what to expect after activation.
+
+`_bars_open` increments once per `update_mark()` call. The comment's
+"~24h at M15" is only true if `update_mark()` fires once per real M15
+candle close. It doesn't — `PaperExecutionEngine.tick()` calls
+`update_mark()` on every open position once per
+`TrainingLaneRunner._cycle()`, and `_cycle()` runs once every
+`settings.BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS` (**20 seconds by
+default**, confirmed in `config/settings.py`).
+
+`96 bars × 20s/bar = 1,920s ≈ 32 minutes` — not 24 hours.
+
+Every position opened by this lane was therefore force-closed at
+whatever the mark price happened to be after ~32 minutes, almost
+always well before the strategy's SL/TP levels (sized for realistic
+M15/H1 movement) had a real chance to resolve either way. TP rarely
+had time to be hit; SL could still be hit normally; everything else
+closed near-flat-to-negative once the 0.04%-per-side taker fee is
+applied twice per trade. That's a mechanical, structural drag on the
+account independent of whether the underlying signal has any edge —
+consistent with the model's own reported backtest stats (37.5% win
+rate, PF 3.32) not looking obviously broken while the live paper
+balance still bled down daily.
+
+## Fix
+
+Calibrate the timeout to each caller's *actual* tick cadence instead
+of hardcoding an assumption about M15 candles:
+
+- **`paper/paper_position.py`** — `PaperPosition.__init__` gains an
+  optional `timeout_bars: int | None = None` param. `TIMEOUT_BARS=96`
+  stays as the class-level *default*, used only when a caller omits
+  the param — so every existing caller that constructs `PaperPosition`
+  directly (`execution/execution_factory.py`'s manual
+  `EXECUTION_MODE=paper` wiring, and every pre-existing test) is
+  byte-for-byte unaffected. `to_state_dict()`/`from_state_dict()` now
+  carry `timeout_bars` too, with a `default_timeout_bars` fallback for
+  state saved before this fix.
+- **`paper/paper_execution.py`** — `PaperExecutionEngine.__init__`
+  gains an optional `timeout_bars` param, passed through on every
+  `execute()` call and on `from_state_dict()` restore.
+- **`config/settings.py`** — new
+  `BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS: float = 24.0`. Rule 16
+  (never hardcode values) — the intended real-world timeout is now a
+  config knob, not a magic number recomputed ad hoc.
+- **`training_lane/training_lane_runner.py`** — `TrainingLaneRunner.__init__`
+  computes
+  `self._timeout_bars = max(1, int(TIMEOUT_HOURS * 3600 / poll_interval_seconds))`
+  once, from its own actual `poll_interval_seconds`, and passes it to
+  every engine it builds (`_new_engine()`) or restores
+  (`_restore_state()`). If `BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS`
+  is ever changed later, the real-world timeout stays correct
+  automatically — no second place to remember to update.
+
+## Explicitly out of scope
+
+- Manual `EXECUTION_MODE=paper` sessions (`execution/execution_factory.py`)
+  — never reported as broken, left on the original 96-bar/M15 default.
+  Only Track C's always-on background lane (whose poll cadence is known
+  and configurable) was recalibrated.
+- Live trading (`execution/execution_coordinator.py`) — never imports
+  or touches `PaperPosition`; no real-money code path is affected.
+- The separate "can't deposit / can't start bot from live" issue the
+  operator also raised — different subsystem, not investigated in this
+  patch; flagged back to the operator as a follow-up.
+
+## Tests
+
+New: `tests/test_training_lane_runner.py::TestTimeoutBarsCalibratedToPollInterval`
+(3 tests):
+1. `_timeout_bars` is correctly derived from
+   `BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS` and the runner's actual
+   `poll_interval_seconds`.
+2. A position that would have died via `TIMEOUT` after the old
+   hardcoded 96 ticks now survives them at a flat price (direct
+   reproduction of the bug, proven fixed).
+3. The calibrated value — not the raw 96 default — survives a restart
+   via `TrainingLaneRunner._restore_state()`.
+
+Results:
+- `tests/test_phase4c.py`, `tests/test_audit_fixes.py`,
+  `tests/test_training_lane_runner.py`: baseline 227 passed before any
+  change; 227 passed + 3 new = 230 passed after (existing tests
+  required zero modification — confirms backward compatibility held).
+- Full backend suite: **3006 passed, 4 skipped**. 3 failures in
+  `tests/test_dashboard_serving.py` are pre-existing on unmodified
+  `main` (missing `dashboard/dist/` build artifact in a fresh clone —
+  audit finding predating this phase, reproduced independently on
+  `main` before branching) — unrelated to this fix.
+- World suite (`world/tests/`, `tests/test_world_*.py`,
+  `tests/test_main_world_runtime_wiring.py`): **72 passed**.
+- `ruff check` and `vulture --min-confidence 80`: clean on every
+  changed file.
+- `ast.parse()` + fresh import of every changed module: OK.

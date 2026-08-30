@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## [Unreleased] — Fix: Training Lane Position TIMEOUT Firing at ~32 Minutes Instead of ~24 Hours
+
+Root cause: `paper/paper_position.py::PaperPosition.TIMEOUT_BARS=96`
+assumed one `update_mark()` call per M15 candle (~24h). The Background
+Training Lane (Track C) actually ticks once per
+`BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS` (20s by default), so every
+position was force-closed via `TIMEOUT` after ~32 minutes — almost
+always before a real trade had time to reach TP. This matches the
+operator-reported symptom of the paper account bleeding down every day
+despite the underlying model's own backtest stats looking fine. See
+`docs/architecture.md` §54 for the full root-cause writeup and
+`PATCH_NOTES.md` for delivery detail.
+
+### Fixed
+- `paper/paper_position.py` — `PaperPosition` now accepts an optional
+  `timeout_bars` override (falls back to the original 96-bar/M15
+  default when omitted, so every other caller is unaffected); persists
+  `timeout_bars` in `to_state_dict()`/`from_state_dict()`.
+- `paper/paper_execution.py` — `PaperExecutionEngine` threads an
+  optional `timeout_bars` through `execute()` and `from_state_dict()`.
+- `training_lane/training_lane_runner.py` — `TrainingLaneRunner` now
+  derives the real bar count from
+  `settings.BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS` divided by its
+  own actual poll interval, and passes it into every engine it
+  constructs or restores.
+
+### Added
+- `config/settings.py::BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS`
+  (default `24.0`).
+- `tests/test_training_lane_runner.py::TestTimeoutBarsCalibratedToPollInterval`
+  — 3 new regression tests.
+
+### Unaffected (explicitly out of scope)
+- Manual `EXECUTION_MODE=paper` sessions
+  (`execution/execution_factory.py`) — unchanged, still use the raw
+  96-bar/M15 default, since that path wasn't reported as broken.
+- Live trading (`execution/execution_coordinator.py`) — never touches
+  `PaperPosition`, no real-money path affected.
+
 ## [Unreleased] — ML Extensions Integration Layer (observe-only)
 
 Request: continue building from PR #82 (RL/HPO/Online-Learning

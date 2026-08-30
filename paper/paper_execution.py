@@ -53,9 +53,11 @@ class PaperExecutionEngine:
         account:        PaperAccount | None = None,
         starting_usdt:  float = 1_000.0,
         max_open:       int   = 1,          # only 1 position at a time (same as live)
+        timeout_bars:   int | None = None,  # see PaperPosition.TIMEOUT_BARS docstring
     ) -> None:
         self.account   = account or PaperAccount(balance=starting_usdt)
         self.max_open  = max_open
+        self._timeout_bars = timeout_bars
         self._lock     = threading.Lock()
         self._open:    list[PaperPosition] = []
         self._closed:  list[ClosedTrade]   = []
@@ -94,19 +96,32 @@ class PaperExecutionEngine:
             }
 
     @classmethod
-    def from_state_dict(cls, state: dict, max_open: int = 1) -> "PaperExecutionEngine":
+    def from_state_dict(
+        cls, state: dict, max_open: int = 1, timeout_bars: int | None = None,
+    ) -> "PaperExecutionEngine":
         """Reconstructs an engine from to_state_dict()'s output. Never
         raises: an account that fails to restore falls back to
         PaperAccount's own from_state_dict() defensiveness; any single
         position that fails to restore is logged and skipped (not fatal
         to the rest of the restore) — matches this whole subsystem's
         established "a restore hiccup should degrade, never crash"
-        posture."""
+        posture.
+
+        `timeout_bars` is the caller's *current* calibrated value (e.g.
+        TrainingLaneRunner recomputes it from its own poll interval on
+        every boot) — used as the fallback for any restored position
+        whose own saved state predates this fix and has no
+        "timeout_bars" of its own. See PaperPosition.from_state_dict's
+        `default_timeout_bars`."""
         account = PaperAccount.from_state_dict(state.get("account") or {})
-        engine = cls(account=account, max_open=max_open)
+        engine = cls(account=account, max_open=max_open, timeout_bars=timeout_bars)
         for pos_state in state.get("positions") or []:
             try:
-                engine._open.append(PaperPosition.from_state_dict(pos_state))
+                engine._open.append(
+                    PaperPosition.from_state_dict(
+                        pos_state, default_timeout_bars=timeout_bars,
+                    )
+                )
             except Exception as exc:
                 logger.error(
                     f"PaperExecutionEngine.from_state_dict: skipping one "
@@ -175,6 +190,7 @@ class PaperExecutionEngine:
                 regime       = str(getattr(decision, "regime",       "")),
                 oi_delta     = float(getattr(decision, "oi_delta",     0.0)),
                 funding_rate = float(getattr(decision, "funding_rate", 0.0)),
+                timeout_bars = self._timeout_bars,
             )
             self._open.append(pos)
 

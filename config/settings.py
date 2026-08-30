@@ -545,6 +545,19 @@ class Settings(BaseSettings):
     BACKGROUND_TRAINING_SYMBOL_POOL_SIZE: int = Field(
         default=10, alias="BACKGROUND_TRAINING_SYMBOL_POOL_SIZE"
     )
+    # Root-cause fix (see PATCH_NOTES.md): PaperPosition.TIMEOUT_BARS
+    # (96) is only a real ~24h timeout if ticked once per M15 candle.
+    # This lane ticks every BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS
+    # (20s by default) — with the old hardcoded 96-bar count that forced
+    # every position closed after just 96 x 20s = 32 minutes, well
+    # before most trades had time to reach TP, well before "AND record
+    # why it busted" bust handling. TrainingLaneRunner now derives the
+    # actual bar count from this many real hours divided by its own
+    # poll interval, so the intended real-world timeout holds regardless
+    # of poll cadence.
+    BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS: float = Field(
+        default=24.0, alias="BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS"
+    )
 
     # Row-count cap for order_timeline_history (operational history
     # only — the journal, not this table, is the durable trade record).
