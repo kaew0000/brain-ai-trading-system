@@ -501,6 +501,12 @@ class TestStatus:
         assert result["open_position"] is None
         assert result["last_closed_trade"] is None
         assert result["poll_interval_seconds"] == 0.01
+        # V16 — Train Monitor cycle-ring fields: unset before any _cycle()
+        # call, same "honest empty state" posture as open_position/
+        # last_closed_trade above.
+        assert result["cycle_count"] == 0
+        assert result["last_cycle_at"] is None
+        assert result["last_cycle_summary"] == "Waiting for first cycle…"
 
     def test_status_reflects_open_position_and_closed_trade(self, monkeypatch):
         runner = _make_runner(
@@ -555,6 +561,112 @@ class TestStatus:
         runner._cycle()  # open
         result = runner.status()
         assert isinstance(result["open_position"], dict)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 6b — Cycle-heartbeat bookkeeping (Train Monitor real-time cycle ring)
+# ══════════════════════════════════════════════════════════════════════
+
+class TestCycleHeartbeat:
+    """status()'s cycle_count/last_cycle_at/last_cycle_summary fields —
+    added so the Train Monitor tab can render a real-time circular
+    progress indicator instead of only static account numbers. These
+    are pure observability bookkeeping: never read by _cycle()'s own
+    decision branches (see that method's own comment), so correctness
+    here is entirely about "does the reported cycle heartbeat match
+    what _cycle() actually did", not about trading behavior."""
+
+    def test_cycle_count_increments_once_per_cycle(self, monkeypatch):
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0, 100.0, 100.0])
+        assert runner.status()["cycle_count"] == 0
+        runner._cycle()
+        assert runner.status()["cycle_count"] == 1
+        runner._cycle()
+        assert runner.status()["cycle_count"] == 2
+
+    def test_last_cycle_at_is_a_parseable_utc_timestamp_that_advances(self, monkeypatch):
+        from datetime import datetime
+
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0, 100.0])
+        runner._cycle()
+        first = runner.status()["last_cycle_at"]
+        assert isinstance(first, str)
+        datetime.fromisoformat(first)  # must not raise
+
+        runner._cycle()
+        second = runner.status()["last_cycle_at"]
+        assert second >= first  # ISO-8601 UTC timestamps sort lexicographically
+
+    def test_heartbeat_still_advances_when_price_is_unavailable(self, monkeypatch):
+        """The early-return "no price yet" path must not leave the tab
+        looking frozen — cycle_count/last_cycle_at advance even though
+        no trading decision was possible this cycle."""
+        runner = _make_runner(monkeypatch, signals=[], prices=[None])
+        runner._cycle()
+        result = runner.status()
+        assert result["cycle_count"] == 1
+        assert result["last_cycle_at"] is not None
+        assert "price data" in result["last_cycle_summary"]
+
+    def test_summary_reports_managing_open_position(self, monkeypatch):
+        runner = _make_runner(
+            monkeypatch,
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)],
+            prices=[100.0, 100.0],
+        )
+        runner._cycle()  # opens
+        runner._cycle()  # still open, price unchanged -> just ticks
+        assert "Managing open" in runner.status()["last_cycle_summary"]
+        assert runner.symbol in runner.status()["last_cycle_summary"]
+
+    def test_summary_reports_opened_position(self, monkeypatch):
+        runner = _make_runner(
+            monkeypatch,
+            signals=[_FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0)],
+            prices=[100.0],
+        )
+        runner._cycle()
+        summary = runner.status()["last_cycle_summary"]
+        assert "Opened LONG" in summary
+        assert runner.symbol in summary
+
+    def test_summary_reports_no_entry_signal_when_flat_and_no_decision(self, monkeypatch):
+        runner = _make_runner(monkeypatch, signals=[None], prices=[100.0])
+        runner._cycle()
+        assert "no entry signal" in runner.status()["last_cycle_summary"]
+
+    def test_summary_reports_closed_trade_then_reopen_in_same_cycle(self, monkeypatch):
+        """Mirrors TestStatus's own close-then-reopen scenario, but
+        asserts on the summary string instead of the raw trade
+        fields."""
+        runner = _make_runner(
+            monkeypatch,
+            signals=[
+                _FakeSignal(direction=1, entry_price=100.0, stop_loss=95.0, take_profit=110.0),
+                _FakeSignal(direction=1, entry_price=90.0, stop_loss=85.0, take_profit=100.0),
+            ],
+            prices=[100.0, 90.0, 90.0],  # opens, then walks into SL -> closed LOSS -> reopens same cycle
+        )
+        runner._cycle()  # open
+        runner._cycle()  # SL hit -> close -> immediately reopens (signal available this time)
+        summary = runner.status()["last_cycle_summary"]
+        assert summary.startswith("Closed")
+        assert "LOSS" in summary
+        assert "opened LONG" in summary
+
+    def test_summary_reports_bust(self, monkeypatch, db):
+        from research.dataset_builder import reset_dataset_builder
+        from research.feature_store import FeatureStore
+
+        store = FeatureStore(db_path=db)
+        reset_dataset_builder(store=store)
+
+        runner = _make_runner(monkeypatch, signals=[], prices=[100.0], starting_balance=100.0)
+        runner._engine.account.realise_pnl(-100.0)
+        runner._cycle()
+        summary = runner.status()["last_cycle_summary"]
+        assert "busted" in summary
+        assert "$100" in summary
 
 
 # ══════════════════════════════════════════════════════════════════════
