@@ -629,6 +629,24 @@ class Settings(BaseSettings):
     # aggressive_buy_volume/CVD/trade_intensity FROM this buffer is HFT-2,
     # not implemented here.
     HFT_WS_TRADE_BUFFER_SECONDS: int = Field(default=60, alias="HFT_WS_TRADE_BUFFER_SECONDS")
+    # Per-symbol cap on depthUpdate events buffered while a snapshot
+    # fetch/resync is in flight (see data/local_order_book.py's Binance-
+    # sequencing docstring, step 1: "Buffer depthUpdate events while
+    # fetching a REST snapshot"). Bug-fix follow-up to the original HFT-1
+    # merge, which dropped these events instead of buffering them —
+    # dropping meant the first live diff after a resync almost never
+    # straddled the new snapshot's lastUpdateId under load or when the
+    # REST fetch was slowed by rate-limit backoff, causing a resync to
+    # immediately re-trigger another resync in a tight loop (each one
+    # consuming REST weight and worsening the rate-limit condition that
+    # caused it). Sized generously relative to HFT_WS_DEPTH_SPEED (a
+    # "100ms" stream produces ~10 diffs/sec/symbol, so 500 is ~50s of
+    # buffered updates) — if this cap is hit, the oldest buffered diff is
+    # dropped and a warning logged, which is a signal the REST fetch is
+    # abnormally slow, not a normal-operation limit.
+    HFT_WS_MAX_PENDING_DIFFS_PER_SYMBOL: int = Field(
+        default=500, alias="HFT_WS_MAX_PENDING_DIFFS_PER_SYMBOL"
+    )
 
     # ── V16 Phase 4C Track B: HFT Flow — HFT-2 Microstructure Features ────
     # Feature computation only (depth_imbalance, aggressive buy/sell,
