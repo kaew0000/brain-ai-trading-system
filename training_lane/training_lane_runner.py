@@ -102,6 +102,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from config.settings import settings
 from paper.paper_account import PaperAccount
@@ -233,6 +234,18 @@ class TrainingLaneRunner:
 
         self._engine = self._new_engine()
         self._bust_count = 0
+
+        # Train Monitor tab — real-time cycle visibility. Purely additive
+        # observability state: nothing here is read by _cycle()'s own
+        # decision logic, only written by it, so this can never change
+        # trading behavior. `_last_cycle_summary`'s initial value
+        # deliberately echoes the same "Waiting for first cycle…" copy
+        # Layout.tsx's global watchdog banner already uses, so a person
+        # sees consistent phrasing before this lane's first tick.
+        self._cycle_count = 0
+        self._last_cycle_at: str | None = None
+        self._last_cycle_summary = "Waiting for first cycle…"
+
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -414,6 +427,9 @@ class TrainingLaneRunner:
             "open_position": open_positions[0] if open_positions else None,
             "last_closed_trade": last_closed,
             "poll_interval_seconds": self._poll_interval,
+            "cycle_count": self._cycle_count,
+            "last_cycle_at": self._last_cycle_at,
+            "last_cycle_summary": self._last_cycle_summary,
             "restored_from_prior_run": self.restored_from_prior_run,
         }
 
@@ -431,15 +447,31 @@ class TrainingLaneRunner:
             self._stop_event.wait(self._poll_interval)
 
     def _cycle(self) -> None:
+        # Train Monitor tab — cycle-heartbeat bookkeeping. Set at the top,
+        # unconditionally, so `last_cycle_at`/`cycle_count` advance even
+        # on the early-return "no price yet" path below — a person
+        # watching the tab should see the ring keep ticking rather than
+        # appear frozen while price data is unavailable. Never read by
+        # any branch below, so this cannot change trading behavior.
+        self._cycle_count += 1
+        self._last_cycle_at = datetime.now(timezone.utc).isoformat()
+
         mark = self._data_provider.get_mark_price(self.symbol)
         if mark is None:
+            self._last_cycle_summary = f"Waiting for {self.symbol} price data"
             return
 
-        for closed_trade in self._engine.tick(float(mark)):
+        closed_this_cycle = list(self._engine.tick(float(mark)))
+        for closed_trade in closed_this_cycle:
             self._capture_closed_trade(closed_trade)
+        closed_note = (
+            f"Closed {closed_this_cycle[-1].symbol} {closed_this_cycle[-1].result}"
+            if closed_this_cycle else None
+        )
 
         if self._engine.account.balance <= 0:
             self._handle_bust()
+            self._last_cycle_summary = f"Account busted — reset to ${self._starting_balance:.0f}"
             self._save_state()
             return  # don't open a new position on the same cycle as a reset
 
@@ -456,6 +488,14 @@ class TrainingLaneRunner:
             decision = _to_paper_decision(self._signal_provider(self.symbol))
             if decision is not None:
                 self._engine.execute(decision, symbol=self.symbol)
+                self._last_cycle_summary = (
+                    f"{closed_note} → opened {decision.action} {self.symbol}"
+                    if closed_note else f"Opened {decision.action} {self.symbol}"
+                )
+            else:
+                self._last_cycle_summary = closed_note or f"Scanning {self.symbol} — no entry signal"
+        else:
+            self._last_cycle_summary = closed_note or f"Managing open {self.symbol} position"
 
         # V16 Phase 4C §49: save every cycle, unconditionally — not just
         # on a graceful stop() — so a hard kill/crash (this project's own

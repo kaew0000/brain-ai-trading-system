@@ -99,6 +99,13 @@ export interface TrainingLaneStatus {
   open_position?: TrainingLanePosition | null
   last_closed_trade?: TrainingLaneClosedTrade | null
   poll_interval_seconds?: number
+  // V16 — Train Monitor real-time cycle ring. cycle_count/last_cycle_at
+  // advance every _cycle() call, including the "no price yet" path, so
+  // they're a true heartbeat, not just an activity indicator; see
+  // training_lane_runner.py::_cycle()'s own comment.
+  cycle_count?: number
+  last_cycle_at?: string | null
+  last_cycle_summary?: string
 }
 
 export interface PortfolioHistoryEntry {

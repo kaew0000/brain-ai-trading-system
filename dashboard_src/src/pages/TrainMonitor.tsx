@@ -42,6 +42,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useML } from '@/stores'
 import { Panel, StatCard, DataTable, Empty, Loading, ConfBar, fmtPct, timeAgo } from '@/components/common'
 import { MiniChart } from '@/components/common/MiniChart'
+import { CycleRing } from '@/components/common/CycleRing'
 import { api } from '@/lib/api'
 import { computeRowsGrowth } from '@/lib/trainMonitor'
 import type { MLModelsData, ModelInfo, MLStatus, PortfolioHistoryEntry, TrainingLaneStatus } from '@/types/api'
@@ -179,6 +180,15 @@ export default function TrainMonitor() {
                   บัญชีนี้แยกจากบัญชีจริงโดยสมบูรณ์ (${trainingLane.starting_balance ?? 100} เริ่มต้น) เทรนอยู่เบื้องหลังตลอดเวลา
                   ไม่ขึ้นกับ circuit breaker ของบัญชีจริง แม้บัญชีจริงจะถูกบล็อกอยู่ก็ยังเทรนต่อ —
                   ดูสถานะบัญชีจริงที่หน้า Commander
+                </div>
+                <div className="rounded border border-border p-2.5">
+                  <CycleRing
+                    isRunning={trainingLane.is_running}
+                    pollIntervalSeconds={trainingLane.poll_interval_seconds}
+                    lastCycleAt={trainingLane.last_cycle_at}
+                    cycleCount={trainingLane.cycle_count}
+                    summary={trainingLane.last_cycle_summary}
+                  />
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <StatCard
