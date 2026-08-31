@@ -100,7 +100,11 @@ class RiskEngine:
     # ── Individual checks ─────────────────────────────────────────────────
 
     def check_daily_loss(self, balance: float) -> tuple[bool, str]:
-        pnl     = self.journal.get_today_pnl()
+        # execution_lane="LIVE": same rationale as check_consecutive_losses
+        # below -- background TRAINING/PAPER-lane PnL swings (that lane's
+        # $100 auto-training balance busting/resetting) must never gate
+        # real capital's daily-loss limit.
+        pnl     = self.journal.get_today_pnl(execution_lane="LIVE")
         max_loss = balance * settings.MAX_DAILY_LOSS
         if pnl < -max_loss:
             reason = (
@@ -147,7 +151,7 @@ class RiskEngine:
           normal                → MAX risk × volatility factor, never below MIN
         """
         streak  = self.journal.get_consecutive_losses(execution_lane="LIVE")
-        pnl     = self.journal.get_today_pnl()
+        pnl     = self.journal.get_today_pnl(execution_lane="LIVE")
         max_loss = balance * settings.MAX_DAILY_LOSS
 
         if streak >= 2:
@@ -200,7 +204,16 @@ class RiskEngine:
 
     def report(self, balance: float, atr_pct: float | None = None) -> dict:
         self._reset_if_new_day()
-        today      = self.journal.get_daily_stats()
+        # execution_lane="LIVE": this dict's own can_trade/dynamic_risk_pct
+        # fields are already computed from LIVE-only figures (see
+        # check_daily_loss/check_consecutive_losses/get_risk_pct above) --
+        # today_pnl/today_trades/today_win_rate must match the same scope,
+        # or this report would show e.g. "today_pnl: -500" (all lanes)
+        # right next to "can_trade: True" with no visible reason why the
+        # daily-loss gate didn't trip. For an all-lanes activity view, see
+        # api/app.py's or main.py's own direct journal.get_daily_stats()
+        # calls, which are unrelated to this risk report.
+        today      = self.journal.get_daily_stats(execution_lane="LIVE")
         streak     = self.journal.get_consecutive_losses(execution_lane="LIVE")
         ok, reason = self.can_trade(balance)
         return {

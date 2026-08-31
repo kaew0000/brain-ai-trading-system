@@ -442,6 +442,25 @@ class TestRiskEngine:
                     "today_pnl", "dynamic_risk_pct"):
             assert key in rep, f"Missing key: {key}"
 
+    def test_check_daily_loss_scopes_journal_call_to_live_lane(self):
+        """Regression test (2026-08-31): the background training lane's
+        PnL swings must never feed the real-money daily-loss gate --
+        locked in at the call-site level, not just inside journal_v2."""
+        eng = self._engine_with_journal()
+        eng.check_daily_loss(10_000.0)
+        eng.journal.get_today_pnl.assert_called_with(execution_lane="LIVE")
+
+    def test_check_consecutive_losses_scopes_journal_call_to_live_lane(self):
+        eng = self._engine_with_journal()
+        eng.check_consecutive_losses()
+        eng.journal.get_consecutive_losses.assert_called_with(execution_lane="LIVE")
+
+    def test_report_scopes_daily_stats_to_live_lane(self):
+        eng = self._engine_with_journal()
+        eng.report(10_000.0)
+        eng.journal.get_daily_stats.assert_called_with(execution_lane="LIVE")
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Confidence Engine — quant correctness

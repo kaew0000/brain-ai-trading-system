@@ -1,12 +1,14 @@
-"""tests/test_journal_v2_consecutive_losses.py
+"""tests/test_journal_v2_risk_gate_lane_scoping.py
 
-Regression coverage for the 2026-08-31 cross-lane consecutive-loss bug:
-journal.journal_v2.TradeJournalV2.get_consecutive_losses() used to query
-across every execution_lane combined, so the always-on background
-training lane's frequent, expected losses (see training_lane/
+Regression coverage for the 2026-08-31 cross-lane risk-gate bugs:
+journal.journal_v2.TradeJournalV2's get_consecutive_losses() and
+get_daily_stats()/get_today_pnl() used to query across every
+execution_lane combined, so the always-on background training lane's
+frequent, expected wins/losses/PnL swings (see training_lane/
 training_lane_runner.py -- that lane exists specifically to bust and
 reset a small auto-training balance) could trip RiskEngine's LIVE-trading
-gate even with zero live trades having happened.
+gates (both the consecutive-loss streak and the daily-loss limit) even
+with zero live trades having happened.
 
 No dedicated test file previously existed for journal/journal_v2.py
 directly (tests/test_execution.py's TestRiskEngine-adjacent fixtures use
@@ -123,3 +125,42 @@ def test_live_filter_with_no_live_trades_at_all_is_zero_not_blocking(journal):
 def test_invalid_execution_lane_raises(journal):
     with pytest.raises(ValueError):
         journal.get_consecutive_losses(execution_lane="NOT_A_REAL_LANE")
+
+
+# ── get_daily_stats / get_today_pnl (companion fix, same pattern) ───────
+# check_daily_loss() had the identical cross-lane gap as
+# check_consecutive_losses(): MAX_DAILY_LOSS was being evaluated against
+# combined LIVE+TRAINING+PAPER PnL, so training-lane swings could trip
+# (or mask) the real-money daily-loss gate.
+
+def test_daily_stats_no_filter_combines_every_lane(journal):
+    today = datetime.now(timezone.utc).date().isoformat()
+    _save_closed_trade(journal, "LIVE", "LOSS", pnl=-100.0)
+    _save_closed_trade(journal, "TRAINING", "LOSS", pnl=-40.0)
+    stats = journal.get_daily_stats(day=today)
+    assert stats["total_trades"] == 2
+    assert stats["total_pnl"] == pytest.approx(-140.0)
+
+
+def test_daily_stats_live_filter_excludes_training_and_paper(journal):
+    today = datetime.now(timezone.utc).date().isoformat()
+    _save_closed_trade(journal, "LIVE", "LOSS", pnl=-100.0)
+    _save_closed_trade(journal, "TRAINING", "LOSS", pnl=-9999.0)
+    _save_closed_trade(journal, "PAPER", "WIN", pnl=9999.0)
+    stats = journal.get_daily_stats(day=today, execution_lane="LIVE")
+    assert stats["total_trades"] == 1
+    assert stats["total_pnl"] == pytest.approx(-100.0)
+
+
+def test_today_pnl_live_filter_ignores_training_lane_swings(journal):
+    """The exact scenario this fix targets: a training-lane bust deep
+    enough to look like it breached MAX_DAILY_LOSS must not affect the
+    LIVE-scoped figure RiskEngine.check_daily_loss() uses."""
+    _save_closed_trade(journal, "TRAINING", "LOSS", pnl=-500.0)
+    assert journal.get_today_pnl(execution_lane="LIVE") == 0.0
+    assert journal.get_today_pnl() == pytest.approx(-500.0)   # unfiltered still sees it
+
+
+def test_daily_stats_invalid_execution_lane_raises(journal):
+    with pytest.raises(ValueError):
+        journal.get_daily_stats(execution_lane="NOT_A_REAL_LANE")

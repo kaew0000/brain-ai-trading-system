@@ -222,16 +222,29 @@ class TradeJournalV2:
             ).fetchall()
         return [_row_to_dict(r, json_cols=("confidence_breakdown", "block_reasons")) for r in rows]
 
-    def get_daily_stats(self, day: str | None = None) -> dict:
+    def get_daily_stats(self, day: str | None = None, execution_lane: str | None = None) -> dict:
+        """Same execution_lane pattern as get_consecutive_losses() above.
+
+        Defaults to None (unfiltered, every lane combined) -- this is
+        used directly by several dashboard/reporting call sites (main.py's
+        printed daily report, api/app.py, telemetry/world_export.py,
+        api/account_api.py) that legitimately want an overall "today's
+        activity across every lane" view, and none of those should change
+        behavior here. RiskEngine.check_daily_loss() (the one caller that
+        gates real trading) passes execution_lane="LIVE" explicitly --
+        see that method's comment for why.
+        """
         if day is None:
             day = date.today().isoformat()
+        sql = """SELECT result, pnl, rr FROM trades
+                 WHERE date(timestamp)=? AND result NOT IN ('OPEN','CANCELLED')"""
+        params: tuple = (day,)
+        if execution_lane is not None:
+            sql += " AND execution_lane=?"
+            params = (day, _validate_lane(execution_lane))
+        sql += " ORDER BY timestamp"
         with self._conn() as c:
-            rows = c.execute(
-                """SELECT result, pnl, rr FROM trades
-                   WHERE date(timestamp)=? AND result NOT IN ('OPEN','CANCELLED')
-                   ORDER BY timestamp""",
-                (day,),
-            ).fetchall()
+            rows = c.execute(sql, params).fetchall()
         if not rows:
             return {"date": day, "total_trades": 0, "wins": 0, "losses": 0,
                     "win_rate": 0.0, "total_pnl": 0.0, "avg_rr": 0.0}
@@ -287,8 +300,8 @@ class TradeJournalV2:
                 break
         return count
 
-    def get_today_pnl(self) -> float:
-        return self.get_daily_stats().get("total_pnl", 0.0)
+    def get_today_pnl(self, execution_lane: str | None = None) -> float:
+        return self.get_daily_stats(execution_lane=execution_lane).get("total_pnl", 0.0)
 
     def get_performance_summary(self, limit: int = 200) -> dict:
         with self._conn() as c:
