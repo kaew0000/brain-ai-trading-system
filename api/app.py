@@ -539,6 +539,11 @@ _AUTH_OPERATOR_ROUTES = {
     # trading-safety decision (see system_health/recovery_engine.py),
     # same trust level as pause/resume.
     ("POST", "/api/system/reconciliation/acknowledge"),
+    # V16 BUG-LIVE-RISK-03: arming/clearing a consecutive-loss override
+    # is the same trust level -- it's a human explicitly overriding a
+    # real-money safety gate (risk/risk_engine.py).
+    ("POST", "/api/system/risk/override-next-trade"),
+    ("POST", "/api/system/risk/clear-override"),
 }
 
 
@@ -1869,6 +1874,72 @@ async def system_reconciliation_acknowledge(request: Request):
                     "timestamp": datetime.now(timezone.utc).isoformat()})
     except Exception as exc:
         logger.error(f"/api/system/reconciliation/acknowledge error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/system/risk/override-next-trade")
+async def system_risk_override_next_trade(request: Request, body: dict):
+    """
+    V16 BUG-LIVE-RISK-03: arm a one-shot bypass of RiskEngine's
+    consecutive-loss gate (risk/risk_engine.py) for exactly the next
+    can_trade() check. Exists for a genuinely stale block -- e.g. the
+    last LIVE trade was days ago and happened to be the 3rd loss in a
+    row, with no new LIVE trade since to ever naturally clear the streak
+    (disable_trading_today()'s UTC-midnight reset doesn't help this case:
+    the very next can_trade() call just recomputes the same streak from
+    journal history and re-blocks immediately). Does NOT touch
+    check_daily_loss() or an active manual_hold (see
+    RiskEngine.override_next_trade_despite_streak()'s docstring).
+
+    Body: { "reason": "..." } -- reason is required and logged at
+    CRITICAL alongside the operator identity, for audit purposes; this
+    bypasses a real-money safety gate and must leave a trail.
+
+    OPERATOR role required (see _AUTH_OPERATOR_ROUTES), same trust level
+    as /api/system/reconciliation/acknowledge.
+    """
+    reason = (body or {}).get("reason", "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="reason is required")
+    try:
+        risk_engine = _state.get("risk_engine")
+        if risk_engine is None:
+            raise HTTPException(status_code=503, detail="risk_engine not initialized")
+        auth_ctx = getattr(request.state, "auth", None)
+        operator = auth_ctx.principal if auth_ctx is not None else "unauthenticated"
+        full_reason = f"{reason} (operator={operator})"
+        risk_engine.override_next_trade_despite_streak(full_reason)
+        return _ok({
+            "armed": True,
+            "reason": full_reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"/api/system/risk/override-next-trade error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/system/risk/clear-override")
+async def system_risk_clear_override():
+    """Disarm a consecutive-loss override before it's consumed by a
+    can_trade() check, if the operator changes their mind. Safe to call
+    even when no override is armed (no-op)."""
+    try:
+        risk_engine = _state.get("risk_engine")
+        if risk_engine is None:
+            raise HTTPException(status_code=503, detail="risk_engine not initialized")
+        was_armed = risk_engine.has_consecutive_loss_override()
+        risk_engine.clear_consecutive_loss_override()
+        return _ok({
+            "cleared": was_armed,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"/api/system/risk/clear-override error: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
