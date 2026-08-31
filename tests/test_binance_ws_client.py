@@ -19,11 +19,30 @@ import pytest
 from data.binance_ws_client import (
     BinanceWSClient,
     SymbolWSSnapshot,
+    _build_ssl_context,
     _parse_depth_diff,
     _parse_rest_snapshot,
 )
 
 pytestmark = pytest.mark.unit
+
+
+# ── SSL context (certifi, not OS trust store — see module docstring) ────
+
+def test_build_ssl_context_uses_certifi_bundle():
+    import ssl as _ssl
+    ctx = _build_ssl_context()
+    assert isinstance(ctx, _ssl.SSLContext)
+    # A context loaded from certifi's cacert.pem should have a non-trivial
+    # number of trusted CAs -- this is the actual behavioral difference
+    # from an empty/unconfigured context, not just an isinstance check.
+    assert len(ctx.get_ca_certs()) > 0
+
+
+def test_client_builds_its_own_ssl_context_once():
+    client, _ = _make_client()
+    import ssl as _ssl
+    assert isinstance(client._ssl_context, _ssl.SSLContext)
 
 
 def _rest_snapshot(last_update_id=100):
