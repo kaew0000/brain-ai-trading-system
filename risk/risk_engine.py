@@ -51,6 +51,12 @@ class RiskEngine:
         self.journal               = journal
         self._disabled_today: bool = False
         self._disable_date: date | None = None
+        # V16 BUG-LIVE-RISK-03: which check set _disabled_today, so an
+        # override can punch through the sticky latch specifically for
+        # "consecutive_losses" without also bypassing "daily_loss" (a
+        # separate, more urgent protection). None when _disabled_today is
+        # False. See override_next_trade_despite_streak() below.
+        self._disabled_by: str | None = None
         # V16 BUG-LIVE-RISK-02: manual hold, distinct from _disabled_today.
         # _disabled_today auto-clears at the next UTC day boundary (see
         # _reset_if_new_day) — appropriate for daily-loss/consecutive-loss
@@ -60,6 +66,12 @@ class RiskEngine:
         # blocking new entries across day boundaries until a human
         # explicitly acknowledges it, not just until midnight UTC.
         self._manual_hold_reason: str | None = None
+        # V16 BUG-LIVE-RISK-03: one-shot operator override for a stale/
+        # confirmed-legitimate consecutive-loss block. See
+        # override_next_trade_despite_streak()'s docstring for why this
+        # exists and why it's deliberately one-shot rather than a
+        # persistent disable.
+        self._consecutive_loss_override_reason: str | None = None
         logger.info("RiskEngine ready")
 
     # ── Manual hold (V16 BUG-LIVE-RISK-02) ──────────────────────────────────
@@ -83,6 +95,56 @@ class RiskEngine:
     def manual_hold_reason(self) -> str | None:
         return self._manual_hold_reason
 
+    # ── Consecutive-loss override (V16 BUG-LIVE-RISK-03) ────────────────────
+    # Bug context (2026-08-31): check_consecutive_losses() reads the LIVE
+    # lane's last-20-trades streak straight from the journal every call --
+    # it isn't a resettable in-memory counter. A genuinely stale block
+    # (e.g. the last LIVE trade was 8 days ago and happened to be the 3rd
+    # loss in a row, with nothing since to ever produce a new LIVE win and
+    # naturally clear it) has no way to resolve on its own: disable_trading_
+    # today()'s UTC-midnight reset doesn't help, because the very next
+    # can_trade() call just recomputes the same streak from history and
+    # re-blocks immediately. This is a deliberately narrow, one-shot escape
+    # hatch for exactly that situation -- not a way to disable the gate.
+
+    def override_next_trade_despite_streak(self, reason: str) -> None:
+        """Bypasses check_consecutive_losses() for exactly the next
+        can_trade() call, then disarms itself automatically -- it does
+        NOT silently disable the gate indefinitely, and does NOT touch
+        check_daily_loss() (a real-money percentage-of-balance limit,
+        a separate and more urgent protection) or _manual_hold_reason
+        (an operator-imposed hold for a *different* reason, e.g.
+        RecoveryEngine's orphaned-position hold -- this must never
+        accidentally clear that too).
+
+        Call this only after reviewing why the streak tripped (e.g. via
+        this class's own report()) and confirming the block no longer
+        reflects current conditions. If the resulting trade also loses,
+        the very next can_trade() call re-blocks normally -- this is a
+        single "let one probe trade through" lever, not a reset.
+        """
+        self._consecutive_loss_override_reason = reason
+        logger.critical(
+            "RISK OVERRIDE ARMED: consecutive-loss gate will be bypassed "
+            f"for exactly the next can_trade() check | reason={reason}"
+        )
+
+    def clear_consecutive_loss_override(self) -> None:
+        """Disarm an override before it's consumed, if the operator
+        changes their mind."""
+        if self._consecutive_loss_override_reason is not None:
+            logger.warning(
+                "Consecutive-loss override cleared before use (was: "
+                f"{self._consecutive_loss_override_reason})"
+            )
+        self._consecutive_loss_override_reason = None
+
+    def has_consecutive_loss_override(self) -> bool:
+        return self._consecutive_loss_override_reason is not None
+
+    def consecutive_loss_override_reason(self) -> str | None:
+        return self._consecutive_loss_override_reason
+
     # ── Day boundary ──────────────────────────────────────────────────────
 
     def _reset_if_new_day(self) -> None:
@@ -90,11 +152,19 @@ class RiskEngine:
         if self._disable_date is not None and self._disable_date != today:
             self._disabled_today = False
             self._disable_date   = None
+            self._disabled_by    = None
             logger.info("Risk state reset for new UTC day")
 
-    def disable_trading_today(self, reason: str) -> None:
+    def disable_trading_today(self, reason: str, cause: str | None = None) -> None:
+        """cause: optional short tag ("daily_loss" / "consecutive_losses")
+        recorded alongside the block so a later override can target the
+        specific check that tripped -- see can_trade()'s _disabled_today
+        branch and override_next_trade_despite_streak() above. Existing
+        callers that don't pass it (external callers outside this class,
+        if any) keep working identically; cause just stays None."""
         self._disabled_today = True
         self._disable_date   = datetime.now(timezone.utc).date()
+        self._disabled_by    = cause
         logger.warning(f"TRADING DISABLED TODAY | {reason}")
 
     # ── Individual checks ─────────────────────────────────────────────────
@@ -186,16 +256,45 @@ class RiskEngine:
             return False, self._manual_hold_reason
 
         if self._disabled_today:
+            # V16 BUG-LIVE-RISK-03: an armed override must be able to punch
+            # through this sticky same-session latch, not just a *fresh*
+            # check_consecutive_losses() call below -- otherwise the
+            # override would only ever work on the very first can_trade()
+            # call after a process restart (before _disabled_today gets
+            # set again), which defeats the point of it being callable at
+            # any time via the dashboard/API. Only bypasses when the latch
+            # was specifically set *by* the consecutive-loss check -- a
+            # daily_loss-caused latch is untouched by this override.
+            if (self._disabled_by == "consecutive_losses"
+                    and self._consecutive_loss_override_reason is not None):
+                override_reason = self._consecutive_loss_override_reason
+                self._consecutive_loss_override_reason = None   # one-shot: consume now
+                self._disabled_today = False
+                self._disable_date   = None
+                self._disabled_by    = None
+                logger.critical(
+                    "RISK OVERRIDE CONSUMED: bypassing latched consecutive-"
+                    f"loss block | override_reason={override_reason}"
+                )
+                return True, ""
             return False, "Trading disabled for today"
 
         ok, reason = self.check_daily_loss(balance)
         if not ok:
-            self.disable_trading_today(reason)
+            self.disable_trading_today(reason, cause="daily_loss")
             return False, reason
 
         ok, reason = self.check_consecutive_losses()
         if not ok:
-            self.disable_trading_today(reason)
+            if self._consecutive_loss_override_reason is not None:
+                override_reason = self._consecutive_loss_override_reason
+                self._consecutive_loss_override_reason = None   # one-shot: consume now
+                logger.critical(
+                    f"RISK OVERRIDE CONSUMED: bypassing consecutive-loss "
+                    f"block ({reason}) | override_reason={override_reason}"
+                )
+                return True, ""
+            self.disable_trading_today(reason, cause="consecutive_losses")
             return False, reason
 
         return True, ""
@@ -215,6 +314,12 @@ class RiskEngine:
         # calls, which are unrelated to this risk report.
         today      = self.journal.get_daily_stats(execution_lane="LIVE")
         streak     = self.journal.get_consecutive_losses(execution_lane="LIVE")
+        # Captured before can_trade() below, since can_trade() consumes a
+        # one-shot override as a side effect -- this reflects "was an
+        # override present going into this check" rather than "is one
+        # still armed after" (which would always show False the instant
+        # it's used).
+        override_armed_before = self._consecutive_loss_override_reason
         ok, reason = self.can_trade(balance)
         return {
             "can_trade":          ok,
@@ -236,4 +341,7 @@ class RiskEngine:
             # above is unchanged, so existing readers keep working.
             "manual_hold":        self._manual_hold_reason is not None,
             "manual_hold_reason": self._manual_hold_reason,
+            # V16 BUG-LIVE-RISK-03 additions. New keys only.
+            "consecutive_loss_override_armed":  override_armed_before is not None,
+            "consecutive_loss_override_reason": override_armed_before,
         }

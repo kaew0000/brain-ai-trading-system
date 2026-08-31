@@ -460,6 +460,120 @@ class TestRiskEngine:
         eng.report(10_000.0)
         eng.journal.get_daily_stats.assert_called_with(execution_lane="LIVE")
 
+    # ── V16 BUG-LIVE-RISK-03: one-shot consecutive-loss override ────────
+
+    def test_override_not_armed_by_default(self):
+        eng = self._engine_with_journal()
+        assert eng.has_consecutive_loss_override() is False
+        assert eng.consecutive_loss_override_reason() is None
+
+    def test_override_bypasses_a_fresh_consecutive_loss_block(self):
+        """The 'first can_trade() call this session' path: _disabled_today
+        is still False, so check_consecutive_losses() runs fresh."""
+        # Separate instance for the sanity check, since calling can_trade()
+        # even once latches _disabled_today=True -- this test needs the
+        # override to be exercised against a genuinely never-latched
+        # engine to isolate the fresh-check code path from the
+        # already-latched path (covered separately below).
+        sanity_eng = self._engine_with_journal(consec=3)
+        ok, _ = sanity_eng.can_trade(10_000.0)
+        assert ok is False   # sanity: really was blocked beforehand
+
+        eng = self._engine_with_journal(consec=3)
+        eng.override_next_trade_despite_streak("stale streak from 8 days ago")
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is True
+        assert reason == ""
+        # One-shot: consumed, must not still be armed.
+        assert eng.has_consecutive_loss_override() is False
+
+    def test_override_bypasses_the_sticky_latched_block(self):
+        """The 'already blocked earlier this session' path: _disabled_today
+        is already True (set by a prior can_trade() call), so can_trade()
+        short-circuits before ever reaching check_consecutive_losses()
+        again -- the override must still work here, not just on a fresh
+        check. This is the actual production scenario: the bot has been
+        running for a while, already latched the block, and the operator
+        arms an override afterward via the dashboard."""
+        eng = self._engine_with_journal(consec=3)
+        eng.can_trade(10_000.0)          # latches _disabled_today=True
+        assert eng._disabled_today is True
+
+        eng.override_next_trade_despite_streak("reviewed, confirmed stale")
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is True
+        assert reason == ""
+        assert eng._disabled_today is False   # latch cleared, not just bypassed once
+
+    def test_override_does_not_bypass_daily_loss_block(self):
+        """An override must be scoped to the consecutive-loss check only
+        -- a daily-loss-caused latch is a separate, more urgent
+        real-money protection and must never be silently bypassed by a
+        streak-specific override."""
+        eng = self._engine_with_journal(today_pnl=-10_000.0, consec=0)
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is False
+        assert "Daily loss" in reason   # first call: specific check message
+
+        eng.override_next_trade_despite_streak("trying to bypass daily loss")
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is False   # still blocked -- override didn't apply
+        # Second call: already latched by daily_loss, so it's the generic
+        # sticky-latch message (see can_trade()'s _disabled_today branch)
+        # -- the point being tested is ok=False, not the exact wording.
+        assert reason == "Trading disabled for today"
+        # Override should still be armed/unconsumed, since it was never
+        # the relevant check for this particular block.
+        assert eng.has_consecutive_loss_override() is True
+
+    def test_override_does_not_bypass_manual_hold(self):
+        eng = self._engine_with_journal(consec=3)
+        eng.set_manual_hold("orphaned position found")
+        eng.override_next_trade_despite_streak("try to bypass manual hold")
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is False
+        assert reason == "orphaned position found"
+
+    def test_override_second_losing_trade_reblocks_immediately(self):
+        """If the probe trade the override let through also loses, the
+        streak (now 4-in-a-row, or still >=3) must re-block on the very
+        next call -- the override is genuinely one-shot, not a standing
+        disable."""
+        eng = self._engine_with_journal(consec=3)
+        eng.override_next_trade_despite_streak("probe")
+        ok, _ = eng.can_trade(10_000.0)
+        assert ok is True
+
+        # Simulate the probe trade also losing: streak stays >= 3.
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is False
+        assert "Consecutive losses" in reason
+
+    def test_clear_override_before_use(self):
+        eng = self._engine_with_journal(consec=3)
+        eng.override_next_trade_despite_streak("changed my mind")
+        eng.clear_consecutive_loss_override()
+        assert eng.has_consecutive_loss_override() is False
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is False   # nothing to consume anymore, block stands
+
+    def test_clear_override_when_none_armed_is_a_safe_noop(self):
+        eng = self._engine_with_journal()
+        eng.clear_consecutive_loss_override()   # must not raise
+        assert eng.has_consecutive_loss_override() is False
+
+    def test_report_shows_override_armed_before_consumption(self):
+        eng = self._engine_with_journal(consec=3)
+        eng.override_next_trade_despite_streak("visible in report")
+        rep = eng.report(10_000.0)
+        assert rep["consecutive_loss_override_armed"] is True
+        assert rep["consecutive_loss_override_reason"] == "visible in report"
+        assert rep["can_trade"] is True   # report()'s own can_trade() consumed it
+
+        # Next report call: already consumed, should show cleared.
+        rep2 = eng.report(10_000.0)
+        assert rep2["consecutive_loss_override_armed"] is False
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -721,6 +835,88 @@ class TestReconciliationOrphanHoldAPI:
         assert body["result"] == "cleared"
         assert body["orphan_hold"] is None
         risk.clear_manual_hold.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# V16 BUG-LIVE-RISK-03: /api/system/risk/override-next-trade,
+# /api/system/risk/clear-override
+# ─────────────────────────────────────────────────────────────────────────────
+class TestRiskOverrideAPI:
+
+    @pytest.fixture(autouse=True)
+    def _reset_singletons(self):
+        # Same test-hygiene rationale as TestReconciliationOrphanHoldAPI's
+        # fixture above -- api.app._state is a module-level global that
+        # persists for the whole pytest session.
+        import api.app as app_module
+        orig_risk_engine = app_module._state.get("risk_engine")
+        yield
+        app_module.set_state("risk_engine", orig_risk_engine)
+
+    def _client(self):
+        from api.app import app
+        from fastapi.testclient import TestClient
+        return TestClient(app, raise_server_exceptions=False)
+
+    def _set_mock_risk_engine(self):
+        from unittest.mock import MagicMock
+        import api.app as app_module
+        risk = MagicMock()
+        app_module.set_state("risk_engine", risk)
+        return risk
+
+    def test_override_requires_reason(self):
+        self._set_mock_risk_engine()
+        with self._client() as c:
+            r = c.post("/api/system/risk/override-next-trade", json={"reason": ""})
+        assert r.status_code == 400
+
+    def test_override_requires_risk_engine_initialized(self):
+        import api.app as app_module
+        app_module.set_state("risk_engine", None)
+        with self._client() as c:
+            r = c.post("/api/system/risk/override-next-trade", json={"reason": "test"})
+        assert r.status_code == 503
+
+    def test_override_arms_the_risk_engine(self):
+        risk = self._set_mock_risk_engine()
+        with self._client() as c:
+            r = c.post("/api/system/risk/override-next-trade",
+                       json={"reason": "stale streak from 8 days ago"})
+        assert r.status_code == 200
+        body = r.json()["data"]
+        assert body["armed"] is True
+        assert "stale streak from 8 days ago" in body["reason"]
+        risk.override_next_trade_despite_streak.assert_called_once()
+        call_arg = risk.override_next_trade_despite_streak.call_args[0][0]
+        assert "stale streak from 8 days ago" in call_arg
+        # Operator identity gets folded into the recorded reason for
+        # audit purposes, even when auth is disabled in this test client.
+        assert "operator=" in call_arg
+
+    def test_clear_override_with_none_armed(self):
+        risk = self._set_mock_risk_engine()
+        risk.has_consecutive_loss_override.return_value = False
+        with self._client() as c:
+            r = c.post("/api/system/risk/clear-override")
+        assert r.status_code == 200
+        assert r.json()["data"]["cleared"] is False
+        risk.clear_consecutive_loss_override.assert_called_once()
+
+    def test_clear_override_when_armed(self):
+        risk = self._set_mock_risk_engine()
+        risk.has_consecutive_loss_override.return_value = True
+        with self._client() as c:
+            r = c.post("/api/system/risk/clear-override")
+        assert r.status_code == 200
+        assert r.json()["data"]["cleared"] is True
+
+    def test_clear_override_requires_risk_engine_initialized(self):
+        import api.app as app_module
+        app_module.set_state("risk_engine", None)
+        with self._client() as c:
+            r = c.post("/api/system/risk/clear-override")
+        assert r.status_code == 503
 
 
 # ─────────────────────────────────────────────────────────────────────────────
