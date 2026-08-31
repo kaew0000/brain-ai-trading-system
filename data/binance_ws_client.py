@@ -31,10 +31,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 import threading
 import time
 from dataclasses import dataclass, field
 
+import certifi
 import websockets
 
 from config.settings import settings
@@ -42,6 +44,29 @@ from data.local_order_book import DepthDiff, DepthSnapshot, LocalOrderBook, Orde
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    """Explicit certifi-backed TLS context for the WS connection.
+
+    Bug-fix follow-up (2026-08-31 VPS incident): without an explicit
+    `ssl=` argument, `websockets.connect()` falls back to
+    `ssl.create_default_context()`, which on Windows validates against
+    the OS's local Root CA store. Every REST call in this codebase goes
+    through `binance-futures-connector` -> `requests`, which validates
+    against the `certifi` package's bundled CA file instead -- a
+    completely different, independently-updated trust chain. On a VPS
+    where Windows' Automatic Root Certificate Update is disabled or
+    can't reach the network, the OS store can be missing an intermediate
+    CA that `certifi`'s bundle already has, so REST calls succeed while
+    this WS connection fails with CERTIFICATE_VERIFY_FAILED on the exact
+    same machine, in the exact same process, at the exact same time.
+    Building the context from `certifi.where()` here makes both network
+    paths use the same trust source, removing the OS-store dependency
+    entirely rather than requiring a Windows-side fix on every VPS this
+    project is deployed to.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 @dataclass
@@ -157,6 +182,12 @@ class BinanceWSClient:
         self._resyncing: set[str] = set()   # in-flight guard so repeated
                                              # gaps on the same symbol don't
                                              # fire concurrent REST resyncs
+        self._ssl_context = _build_ssl_context()   # built once, not per
+                                                     # reconnect -- reading
+                                                     # certifi's cacert.pem
+                                                     # is disk I/O, no need
+                                                     # to repeat it on every
+                                                     # reconnect attempt
 
     # ── Public read API ─────────────────────────────────────────────────
 
@@ -233,7 +264,9 @@ class BinanceWSClient:
                 state.sequence_valid = False
         await self._resync_all()
 
-        async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
+        async with websockets.connect(
+            url, ssl=self._ssl_context, ping_interval=20, ping_timeout=20
+        ) as ws:
             for state in self._states.values():
                 state.stream_connected = True
             logger.info(f"BinanceWSClient connected — symbols={self._symbols}")
