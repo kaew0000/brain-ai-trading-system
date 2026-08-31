@@ -250,13 +250,35 @@ class TradeJournalV2:
             "avg_rr": round(arr, 3),
         }
 
-    def get_consecutive_losses(self) -> int:
+    def get_consecutive_losses(self, execution_lane: str | None = None) -> int:
+        """Counts trailing losses in the most recent 20 closed trades.
+
+        Bug-fix follow-up (2026-08-31): this used to query across every
+        execution_lane combined. RiskEngine's LIVE-trading gate calls this
+        to decide whether real capital can trade, but the always-on
+        background training_lane_runner (see training_lane/
+        training_lane_runner.py) writes its own PAPER/TRAINING-lane wins
+        and losses into this same `trades` table -- and that lane is
+        *designed* to bust and reset its small auto-training balance
+        frequently. Without a lane filter, a run of ordinary training-lane
+        losses could (and in production did) trip the live risk gate and
+        block real trading, even with zero live trades having happened.
+
+        execution_lane: if given, scopes the streak to just that lane
+        (see VALID_EXECUTION_LANES). Defaults to None (no filter, every
+        lane combined) to keep this method's existing behavior for any
+        other/future caller that legitimately wants a cross-lane view --
+        callers that gate real trading decisions (RiskEngine) must pass
+        execution_lane="LIVE" explicitly.
+        """
+        sql = "SELECT result FROM trades WHERE result IN ('WIN','LOSS')"
+        params: tuple = ()
+        if execution_lane is not None:
+            sql += " AND execution_lane=?"
+            params = (_validate_lane(execution_lane),)
+        sql += " ORDER BY timestamp DESC LIMIT 20"
         with self._conn() as c:
-            rows = c.execute(
-                """SELECT result FROM trades
-                   WHERE result IN ('WIN','LOSS')
-                   ORDER BY timestamp DESC LIMIT 20"""
-            ).fetchall()
+            rows = c.execute(sql, params).fetchall()
         count = 0
         for r in rows:
             if r["result"] == "LOSS":

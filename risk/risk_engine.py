@@ -111,7 +111,10 @@ class RiskEngine:
         return True, ""
 
     def check_consecutive_losses(self) -> tuple[bool, str]:
-        streak = self.journal.get_consecutive_losses()
+        # execution_lane="LIVE": see journal_v2.get_consecutive_losses()'s
+        # docstring -- the always-on background training lane's frequent,
+        # expected losses must never gate real capital.
+        streak = self.journal.get_consecutive_losses(execution_lane="LIVE")
         if streak >= settings.MAX_CONSECUTIVE_LOSSES:
             return False, f"Consecutive losses: {streak}/{settings.MAX_CONSECUTIVE_LOSSES}"
         return True, ""
@@ -143,7 +146,7 @@ class RiskEngine:
           daily loss > 50 % cap → MIN risk (same as above)
           normal                → MAX risk × volatility factor, never below MIN
         """
-        streak  = self.journal.get_consecutive_losses()
+        streak  = self.journal.get_consecutive_losses(execution_lane="LIVE")
         pnl     = self.journal.get_today_pnl()
         max_loss = balance * settings.MAX_DAILY_LOSS
 
@@ -198,7 +201,7 @@ class RiskEngine:
     def report(self, balance: float, atr_pct: float | None = None) -> dict:
         self._reset_if_new_day()
         today      = self.journal.get_daily_stats()
-        streak     = self.journal.get_consecutive_losses()
+        streak     = self.journal.get_consecutive_losses(execution_lane="LIVE")
         ok, reason = self.can_trade(balance)
         return {
             "can_trade":          ok,
