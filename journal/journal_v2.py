@@ -303,6 +303,60 @@ class TradeJournalV2:
     def get_today_pnl(self, execution_lane: str | None = None) -> float:
         return self.get_daily_stats(execution_lane=execution_lane).get("total_pnl", 0.0)
 
+    # ════════════════════════════════════════════════════════════════════
+    # RISK ENGINE STATE (V16 BUG-LIVE-RISK-04)
+    # ════════════════════════════════════════════════════════════════════
+    # A tiny dedicated table for RiskEngine's one-shot consecutive-loss
+    # override (risk/risk_engine.py::override_next_trade_despite_streak).
+    # Not part of schema_v13.sql -- created lazily here on first use,
+    # same "CREATE TABLE IF NOT EXISTS" pattern SQLite migrations in this
+    # project already rely on being idempotent. Lives in this class (not
+    # a new module) because RiskEngine already depends on a
+    # TradeJournalV2 instance for every other piece of persisted state it
+    # reads, and this project's own conventions call for reusing an
+    # existing implementation over creating a parallel one.
+    #
+    # Why this needs to exist at all: RiskEngine previously held the
+    # override only in memory, so restarting the bot (which happens
+    # constantly during normal dev/test iteration) silently discarded an
+    # operator's already-confirmed override, forcing them to re-run the
+    # same curl command after every restart with no indication anything
+    # had been lost.
+
+    def _ensure_risk_state_table(self, c: sqlite3.Connection) -> None:
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS risk_engine_state (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL,
+                   set_at TEXT NOT NULL
+               )"""
+        )
+
+    def save_risk_override(self, reason: str) -> None:
+        with self._conn() as c:
+            self._ensure_risk_state_table(c)
+            c.execute(
+                """INSERT INTO risk_engine_state (key, value, set_at)
+                   VALUES ('consecutive_loss_override', ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value, set_at=excluded.set_at""",
+                (reason, datetime.now(timezone.utc).isoformat()),
+            )
+            c.commit()
+
+    def get_risk_override(self) -> str | None:
+        with self._conn() as c:
+            self._ensure_risk_state_table(c)
+            row = c.execute(
+                "SELECT value FROM risk_engine_state WHERE key='consecutive_loss_override'"
+            ).fetchone()
+        return row["value"] if row is not None else None
+
+    def clear_risk_override(self) -> None:
+        with self._conn() as c:
+            self._ensure_risk_state_table(c)
+            c.execute("DELETE FROM risk_engine_state WHERE key='consecutive_loss_override'")
+            c.commit()
+
     def get_performance_summary(self, limit: int = 200) -> dict:
         with self._conn() as c:
             rows = c.execute(

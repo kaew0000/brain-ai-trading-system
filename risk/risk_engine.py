@@ -66,12 +66,36 @@ class RiskEngine:
         # blocking new entries across day boundaries until a human
         # explicitly acknowledges it, not just until midnight UTC.
         self._manual_hold_reason: str | None = None
-        # V16 BUG-LIVE-RISK-03: one-shot operator override for a stale/
+        # V16 BUG-LIVE-RISK-03/04: one-shot operator override for a stale/
         # confirmed-legitimate consecutive-loss block. See
         # override_next_trade_despite_streak()'s docstring for why this
         # exists and why it's deliberately one-shot rather than a
-        # persistent disable.
-        self._consecutive_loss_override_reason: str | None = None
+        # persistent disable. Restored from the journal's persisted state
+        # (if any) rather than starting unarmed every time -- otherwise a
+        # bot restart (routine during normal dev/test iteration) would
+        # silently discard an operator's already-confirmed override with
+        # no indication anything was lost, forcing a re-run of the same
+        # override call after every restart.
+        #
+        # The isinstance(..., str) check (not just "is journal missing the
+        # method") matters: most of this project's own RiskEngine tests
+        # construct it with a bare, unconfigured MagicMock() as the
+        # journal, and MagicMock auto-creates any attribute accessed on
+        # it -- getattr(mock, "get_risk_override", None) would return a
+        # MagicMock (truthy), and calling it returns another MagicMock
+        # (also truthy, not None), which would silently arm a fake
+        # override on construction for every single one of those tests.
+        # Requiring the restored value to actually be a str is what makes
+        # this safe against that without requiring every existing test
+        # fixture across the suite to be updated.
+        get_persisted = getattr(journal, "get_risk_override", None)
+        restored = get_persisted() if get_persisted else None
+        self._consecutive_loss_override_reason = restored if isinstance(restored, str) else None
+        if self._consecutive_loss_override_reason is not None:
+            logger.critical(
+                "RISK OVERRIDE RESTORED from previous session: "
+                f"{self._consecutive_loss_override_reason}"
+            )
         logger.info("RiskEngine ready")
 
     # ── Manual hold (V16 BUG-LIVE-RISK-02) ──────────────────────────────────
@@ -107,6 +131,20 @@ class RiskEngine:
     # re-blocks immediately. This is a deliberately narrow, one-shot escape
     # hatch for exactly that situation -- not a way to disable the gate.
 
+    def _persist_override(self, reason: str) -> None:
+        """Best-effort: write-through to the journal so the override
+        survives a restart. Guarded the same way as the __init__ restore
+        above, for the same reason (tests constructing RiskEngine with a
+        minimal stub journal that doesn't implement this)."""
+        save = getattr(self.journal, "save_risk_override", None)
+        if save:
+            save(reason)
+
+    def _clear_persisted_override(self) -> None:
+        clear = getattr(self.journal, "clear_risk_override", None)
+        if clear:
+            clear()
+
     def override_next_trade_despite_streak(self, reason: str) -> None:
         """Bypasses check_consecutive_losses() for exactly the next
         can_trade() call, then disarms itself automatically -- it does
@@ -117,6 +155,11 @@ class RiskEngine:
         RecoveryEngine's orphaned-position hold -- this must never
         accidentally clear that too).
 
+        Persisted via the journal (V16 BUG-LIVE-RISK-04) so it survives
+        a bot restart between arming it and the next actual can_trade()
+        opportunity -- still genuinely one-shot, just no longer scoped
+        to "one process lifetime".
+
         Call this only after reviewing why the streak tripped (e.g. via
         this class's own report()) and confirming the block no longer
         reflects current conditions. If the resulting trade also loses,
@@ -124,6 +167,7 @@ class RiskEngine:
         single "let one probe trade through" lever, not a reset.
         """
         self._consecutive_loss_override_reason = reason
+        self._persist_override(reason)
         logger.critical(
             "RISK OVERRIDE ARMED: consecutive-loss gate will be bypassed "
             f"for exactly the next can_trade() check | reason={reason}"
@@ -138,6 +182,7 @@ class RiskEngine:
                 f"{self._consecutive_loss_override_reason})"
             )
         self._consecutive_loss_override_reason = None
+        self._clear_persisted_override()
 
     def has_consecutive_loss_override(self) -> bool:
         return self._consecutive_loss_override_reason is not None
@@ -269,6 +314,7 @@ class RiskEngine:
                     and self._consecutive_loss_override_reason is not None):
                 override_reason = self._consecutive_loss_override_reason
                 self._consecutive_loss_override_reason = None   # one-shot: consume now
+                self._clear_persisted_override()
                 self._disabled_today = False
                 self._disable_date   = None
                 self._disabled_by    = None
@@ -289,6 +335,7 @@ class RiskEngine:
             if self._consecutive_loss_override_reason is not None:
                 override_reason = self._consecutive_loss_override_reason
                 self._consecutive_loss_override_reason = None   # one-shot: consume now
+                self._clear_persisted_override()
                 logger.critical(
                     f"RISK OVERRIDE CONSUMED: bypassing consecutive-loss "
                     f"block ({reason}) | override_reason={override_reason}"
