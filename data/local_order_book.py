@@ -25,10 +25,21 @@ Binance diff-depth sequencing (per Binance USDT-M Futures docs):
   2. Drop any buffered event where `u` (final update ID) <= L.
   3. The first event applied must satisfy `U <= L+1 <= u` (U = first update ID
      in event, u = final update ID in event).
-  4. Every subsequent event's `U` must equal the previous event's `u + 1`.
-     A gap here means an update was missed — the local book is no longer
-     provably correct and must be treated as invalid until a fresh REST
-     snapshot resynchronizes it (BOOK_INVALID_UNTIL_RESYNC below).
+  4. Every subsequent event's `pu` (previous event's final update ID) must
+     equal the last-applied event's `u`. This is the Futures-specific
+     continuity check, and it is authoritative when `pu` is present in the
+     payload. Unlike the SPOT stream (where `U` must equal the previous
+     event's `u + 1` exactly), Futures diff events legitimately have `U`
+     jump ahead of `prev_u + 1` with no update actually missed — Binance
+     documents this explicitly and it is routine on real traffic. Checking
+     `U == prev_u + 1` as the primary/only rule (this module's original
+     design) misreads normal Futures behavior as a gap on nearly every
+     diff, triggering constant false-positive resyncs. `U`-continuity is
+     used only as a fallback for payloads that omit `pu` entirely. A real
+     mismatch (via either check) means an update was actually missed — the
+     local book is no longer provably correct and must be treated as
+     invalid until a fresh REST snapshot resynchronizes it
+     (BOOK_INVALID_UNTIL_RESYNC below).
 """
 from __future__ import annotations
 
@@ -126,10 +137,19 @@ class LocalOrderBook:
           gap unless its U happened to land exactly on last_update_id+1,
           which is not what Binance's own spec requires or what real
           traffic reliably does.
-        - Every subsequent diff: `U` must equal the previous diff's `u+1`
-          exactly (this module deliberately checks against `U`, not `pu`,
-          so it works whether or not the exchange payload includes `pu`;
-          `pu`, when present, is used as a secondary corroborating check).
+        - Every subsequent diff: when `pu` is present, it is the
+          AUTHORITATIVE continuity check — `pu` must equal the last
+          applied diff's `u`. `U` is not required to equal `prev_u + 1` on
+          Futures (it legitimately jumps ahead with no update missed; see
+          module docstring), so `U`-continuity is used only as a fallback
+          when a payload omits `pu`. This was this module's second bug:
+          checking `U == prev_u + 1` as the primary rule (with `pu` only
+          as a secondary corroborating check reached after the U-check
+          already passed) meant real Futures traffic — where `U` jumps
+          are normal — was misread as a gap on nearly every diff, forcing
+          a REST resync that itself could never catch up before the next
+          false gap. `pu`, when present, now fully replaces the `U`-based
+          check rather than supplementing it.
         """
         if self._last_update_id is None or not self._synced:
             raise OrderBookError(
@@ -146,20 +166,23 @@ class LocalOrderBook:
                 # snapshot forward can't be established from this event.
                 self._synced = False
                 return False
+        elif diff.prev_final_update_id is not None:
+            # `pu` present -> authoritative Futures continuity check.
+            # `U` is deliberately NOT also checked here: a legitimate
+            # Futures event can have `U` far ahead of `prev_u + 1` with
+            # zero updates missed, so requiring both would reintroduce
+            # the same false-positive gap this fix removes.
+            if diff.prev_final_update_id != self._last_update_id:
+                self._synced = False
+                return False
         else:
+            # `pu` absent -> fall back to the stricter exact-U-continuity
+            # rule, since it's the only sequencing signal this payload has.
             expected_first = self._last_update_id + 1
             if diff.first_update_id != expected_first:
                 # Gap detected: we're missing update(s) between what we have
                 # and what this diff starts from. The book can no longer be
                 # trusted.
-                self._synced = False
-                return False
-
-            if diff.prev_final_update_id is not None and diff.prev_final_update_id != self._last_update_id:
-                # Secondary corroborating check using `pu`, when the
-                # exchange supplies it. Disagreement here alongside a
-                # passing `U` check would be unexpected — treat
-                # conservatively as a gap too.
                 self._synced = False
                 return False
 

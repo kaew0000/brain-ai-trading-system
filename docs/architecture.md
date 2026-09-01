@@ -5470,3 +5470,76 @@ pre-existing/unrelated `test_dashboard_serving.py` failures (missing
 `dashboard/dist/` build artifact in a fresh clone — audit finding
 predating this phase). World suite: 72 passed. ruff and vulture clean
 on all changed files.
+
+## 55. Fix: HFT-1 Local Order-Book False-Positive Resync on Futures `U` Discontinuity (2026-09-02)
+
+**Audit finding, not an operator-reported symptom:** a code-level audit
+of `data/local_order_book.py` ahead of wiring HFT-1 into HFT-3/4
+(microstructure features feeding a live decision) found the diff
+sequence-validation rule was checking Binance **SPOT** semantics
+(`U == prev_u + 1`, exact match required) rather than **USDT-M
+Futures** semantics. Binance's own Futures docs state the correct
+continuity check is `pu == prev_u` — on Futures, a diff's `U` is
+explicitly *not* guaranteed to equal `prev_u + 1` even when zero
+updates were missed, because Binance batches internal updates
+differently than on SPOT.
+
+**Root cause, confirmed by reading the code, not guessed:**
+`LocalOrderBook.apply_diff()`'s non-first-diff branch checked
+`diff.first_update_id == self._last_update_id + 1` as the *primary*
+and only gap-detecting rule, with `diff.prev_final_update_id` (`pu`)
+checked only as a *secondary* corroborating condition reached after
+the U-check had already passed. On real Futures traffic, where `U`
+jumps ahead of `prev_u + 1` routinely and validly, this primary rule
+alone would misread nearly every diff as a gap, forcing
+`self._synced = False` and a REST resync — which itself would only
+buy a few diffs before the next false gap, so the local book would
+rarely if ever stay synced.
+
+**Current live-money impact: zero.** `data/local_order_book.py` and
+its async wrapper `data/binance_ws_client.py` are HFT-1 only — neither
+is imported by `ConfidenceEngine`, `RiskEngine`, or any `execution/*`
+module (confirmed by module docstrings and an independent
+repo-wide `grep` for both modules' consumers during this audit).
+`BinanceWSClient` is only ever constructed behind
+`settings.HFT_WS_ENABLED`, which defaults to `False`. So this bug, as
+it stands on `main` today, does not affect any currently-running live
+or paper trade — it would only start mattering once a future HFT-3/4
+phase wires this module's output into a decision path.
+
+**Fix — make `pu` authoritative when present, `U`-continuity a
+fallback only when it's absent:**
+- `LocalOrderBook.apply_diff()`: for every diff after the first
+  post-snapshot one, if `diff.prev_final_update_id` (`pu`) is present,
+  it alone determines continuity (`pu == last_update_id`) — `U` is no
+  longer also required to match `prev_u + 1`. If `pu` is absent from
+  the payload, the original strict `U == prev_u + 1` check is used as
+  a fallback, since it's the only signal available in that case.
+- Module and method docstrings updated to describe the corrected,
+  Futures-specific sequencing rule and explain why the old rule was
+  wrong.
+- No change to the first-diff-after-snapshot straddle check
+  (`U <= last_update_id+1 <= u`), which was already correct.
+
+**Scope / blast radius:** `data/local_order_book.py` only (one
+method). Not consumed anywhere yet (see impact above), so this change
+has no observable effect outside its own module and tests until a
+future phase wires HFT-1 into a consumer.
+
+**Tests:** 2 new regression tests in `tests/test_local_order_book.py`
+— (1) a diff whose `U` jumps far past `prev_u + 1` but whose `pu`
+correctly matches the last applied `u` is now accepted, not flagged as
+a gap; (2) the same diff's bid/ask payload is confirmed actually
+applied to book state, not just that the sequence check passed. Both
+new tests were confirmed to fail against the pre-fix logic and pass
+against the fix, before being kept as permanent regression coverage.
+All 8 pre-existing `pu`/gap/sequencing tests in the same file continue
+to pass unchanged (none of them set `pu`, so the fallback path is
+exercised for all of them — zero behavior change on any existing
+scenario). Full backend suite: 3003 passed, 4 skipped, 3
+pre-existing/unrelated `test_dashboard_serving.py` failures (same
+missing-build-artifact cause as §54, confirmed identical on baseline
+`main` before this change). ruff clean on all changed files and
+repo-wide (`ruff check . --exclude dashboard_src --exclude dashboard`,
+the exact CI command).
+
