@@ -85,6 +85,18 @@ export default function TrainMonitor() {
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioHistoryEntry[]>([])
   const [portfolioHistoryLoading, setPortfolioHistoryLoading] = useState(true)
 
+  // Collapsed by default: this log is LIVE-lane only (the real circuit
+  // breaker) and has no relationship to the training lane this whole
+  // page exists to monitor -- see the panel's own toggle button below
+  // and the file header's rationale for why the two are shown
+  // separately rather than merged. Defaulting to collapsed means
+  // opening this tab leads with "is training running" (it always is,
+  // per the Background Training Lane panel above), not with a
+  // page-wide wall of BLOCKED rows from an unrelated, already-isolated
+  // system. Still one click away for anyone actually debugging LIVE
+  // trading, which is a real and separate use of this exact data.
+  const [showLiveScannerLog, setShowLiveScannerLog] = useState(false)
+
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -325,26 +337,54 @@ export default function TrainMonitor() {
             className="h-full"
             noPad
           >
-            <div className="px-3 pt-2 pb-1 text-[10px] text-accent-gold/90 border-b border-border bg-accent-gold/5">
-              แสดง decision cycle ของ scanner/CEO (เหรียญที่ประเมิน/เลือกต่อรอบ)
-              ไม่ใช่พอร์ตเงินจริงที่กำลังถือ — ดูสถานะบัญชีจริงที่หน้า Commander
+            <div className="px-3 pt-2 pb-1 text-[10px] text-accent-gold/90 border-b border-border bg-accent-gold/5 flex items-center justify-between gap-2">
+              <span>
+                แสดง decision cycle ของ scanner/CEO (เหรียญที่ประเมิน/เลือกต่อรอบ)
+                ไม่ใช่พอร์ตเงินจริงที่กำลังถือ — ดูสถานะบัญชีจริงที่หน้า Commander
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowLiveScannerLog(v => !v)}
+                className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium border border-accent-gold/40 text-accent-gold hover:bg-accent-gold/10 transition-colors"
+              >
+                {showLiveScannerLog ? 'ซ่อน ▲' : 'แสดง Live Circuit Breaker Log ▼'}
+              </button>
             </div>
-            <div className="p-3 overflow-auto h-full">
-              {portfolioHistoryLoading ? <Loading /> : portfolioHistory.length === 0
-                ? <Empty text="No decision cycles persisted yet" />
-                : <DataTable
-                    cols={[
-                      { key: 'timestamp', label: 'Cycle', render: (r: PortfolioHistoryEntry) => <span className="text-text-muted">{timeAgo(r.timestamp)}</span> },
-                      { key: 'symbols', label: 'Symbols', render: (r: PortfolioHistoryEntry) => <span className="text-text-secondary">{r.symbols.length ? r.symbols.join(', ') : '—'}</span> },
-                      { key: 'selected_count', label: 'Selected', right: true },
-                      { key: 'rejected_count', label: 'Rejected', right: true },
-                      { key: 'blocked', label: 'Blocked', render: (r: PortfolioHistoryEntry) => r.blocked ? <span className="badge-red" title={r.block_reason ?? undefined}>BLOCKED</span> : <span className="text-text-muted text-[10px]">—</span> },
-                      { key: 'portfolio_score', label: 'Score', right: true, render: (r: PortfolioHistoryEntry) => <span className="font-mono">{r.portfolio_score.toFixed(1)}</span> },
-                    ]}
-                    rows={portfolioHistory}
-                    rowKey={(r: PortfolioHistoryEntry, i) => r.decided_at ?? String(i)}
-                  />}
-            </div>
+
+            {!showLiveScannerLog ? (
+              <div className="p-3 h-full flex flex-col items-center justify-center text-center gap-2">
+                <div className="text-xs text-text-secondary max-w-sm">
+                  รายการนี้เป็นของ <span className="text-accent-gold">LIVE circuit breaker</span> เท่านั้น
+                  ไม่เกี่ยวข้องกับ Background Training Lane ด้านบน — เทรนนิ่งไม่เคยถูกบล็อกโดยรายการนี้
+                </div>
+                <div className="text-[10px] text-text-muted max-w-sm">
+                  {trainingLaneLoading
+                    ? 'กำลังโหลดสถานะ training lane…'
+                    : trainingLane?.is_running
+                      ? (trainingLane.open_position
+                          ? `Training lane กำลังถือ position ${trainingLane.open_position.direction} อยู่ (ดูรายละเอียดในแผง Background Training Lane ด้านบน)`
+                          : 'Training lane กำลังทำงานปกติ ยังไม่มี position เปิดอยู่ตอนนี้')
+                      : 'Training lane ไม่ได้เปิดใช้งานอยู่ในขณะนี้'}
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 overflow-auto h-full">
+                {portfolioHistoryLoading ? <Loading /> : portfolioHistory.length === 0
+                  ? <Empty text="No decision cycles persisted yet" />
+                  : <DataTable
+                      cols={[
+                        { key: 'timestamp', label: 'Cycle', render: (r: PortfolioHistoryEntry) => <span className="text-text-muted">{timeAgo(r.timestamp)}</span> },
+                        { key: 'symbols', label: 'Symbols', render: (r: PortfolioHistoryEntry) => <span className="text-text-secondary">{r.symbols.length ? r.symbols.join(', ') : '—'}</span> },
+                        { key: 'selected_count', label: 'Selected', right: true },
+                        { key: 'rejected_count', label: 'Rejected', right: true },
+                        { key: 'blocked', label: 'Blocked', render: (r: PortfolioHistoryEntry) => r.blocked ? <span className="badge-red" title={r.block_reason ?? undefined}>BLOCKED</span> : <span className="text-text-muted text-[10px]">—</span> },
+                        { key: 'portfolio_score', label: 'Score', right: true, render: (r: PortfolioHistoryEntry) => <span className="font-mono">{r.portfolio_score.toFixed(1)}</span> },
+                      ]}
+                      rows={portfolioHistory}
+                      rowKey={(r: PortfolioHistoryEntry, i) => r.decided_at ?? String(i)}
+                    />}
+              </div>
+            )}
           </Panel>
         </div>
 
