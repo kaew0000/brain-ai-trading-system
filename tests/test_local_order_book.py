@@ -157,6 +157,42 @@ def test_apply_diff_pu_mismatch_invalidates_sync_even_if_u_matches():
     assert book.synced is False
 
 
+def test_apply_diff_futures_u_jump_with_matching_pu_is_accepted():
+    """The core bug this module had: on real Futures traffic, `U` is not
+    required to equal `prev_u + 1` even with zero updates missed — only
+    `pu == prev_u` is the actual continuity guarantee (see module
+    docstring). A diff whose `U` jumps far ahead of `prev_u + 1` but whose
+    `pu` correctly matches the last applied `u` must be ACCEPTED, not
+    flagged as a gap."""
+    book = LocalOrderBook("BTCUSDT")
+    book.apply_snapshot(_snapshot(last_update_id=100))
+    assert book.apply_diff(_diff(first_update_id=101, final_update_id=105)) is True
+    # U jumps from 106 all the way to 150 — would trip the old U==prev_u+1
+    # rule — but pu=105 correctly matches the last applied u (105).
+    result = book.apply_diff(
+        _diff(first_update_id=150, final_update_id=160, prev_final_update_id=105)
+    )
+    assert result is True
+    assert book.synced is True
+    assert book.last_update_id() == 160
+
+
+def test_apply_diff_pu_present_ignores_u_discontinuity_entirely():
+    """Same scenario as above, but confirms the accepted diff's bid/ask
+    payload is actually applied to the book (not just that the sequence
+    check passed) — guards against a fix that returns True without
+    updating state."""
+    book = LocalOrderBook("BTCUSDT")
+    book.apply_snapshot(_snapshot(last_update_id=100))
+    book.apply_diff(_diff(first_update_id=101, final_update_id=105))
+    book.apply_diff(_diff(
+        first_update_id=150, final_update_id=160, prev_final_update_id=105,
+        bids=[(99.7, 4.0)], asks=[],
+    ))
+    bids, _ = book.top_levels(10)
+    assert (99.7, 4.0) in bids
+
+
 def test_apply_diff_after_gap_requires_resync_not_further_apply():
     book = LocalOrderBook("BTCUSDT")
     book.apply_snapshot(_snapshot(last_update_id=100))

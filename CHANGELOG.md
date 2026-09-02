@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## [Unreleased] — Fix: HFT-1 Local Order-Book False-Positive Resync on Futures `U` Discontinuity
+
+Root cause: `data/local_order_book.py::LocalOrderBook.apply_diff()`
+validated diff continuity using Binance **SPOT** semantics
+(`U == prev_u + 1`, exact match) instead of **Futures** semantics
+(`pu == prev_u`), even though the module docstring already documented
+that `pu` exists specifically for Futures streams. On real Futures
+traffic, `U` legitimately jumps ahead of `prev_u + 1` with zero
+updates missed, so the old primary check misread nearly every diff as
+a gap and forced a REST resync that could never catch up. Confirmed by
+an independent fresh-clone code audit ahead of wiring HFT-1 into a
+future decision-consuming phase — **zero live-money impact today**,
+since neither `data/local_order_book.py` nor
+`data/binance_ws_client.py` is consumed by `ConfidenceEngine`,
+`RiskEngine`, or any `execution/*` module, and `BinanceWSClient` is
+only constructed when `settings.HFT_WS_ENABLED=True` (default `False`).
+See `docs/architecture.md` §55 for the full root-cause writeup.
+
+### Fixed
+- `data/local_order_book.py::LocalOrderBook.apply_diff()` — `pu`
+  (`prev_final_update_id`), when present in the diff payload, is now
+  the sole authoritative continuity check; the strict
+  `U == prev_u + 1` check is used only as a fallback for payloads that
+  omit `pu` entirely (unchanged behavior in that case).
+
+### Added
+- `tests/test_local_order_book.py` — 2 new regression tests covering a
+  large `U` jump with a matching `pu` (must be accepted) and
+  confirming the accepted diff's bid/ask data is actually applied to
+  book state.
+
+### Unaffected (explicitly out of scope)
+- Every other consumer of `data/local_order_book.py`: there are none
+  yet — this module is HFT-1 only, gated behind
+  `settings.HFT_WS_ENABLED` (default off), and not imported by any
+  live or paper decision/execution path.
+
+---
+
 ## [Unreleased] — Fix: Training Lane Position TIMEOUT Firing at ~32 Minutes Instead of ~24 Hours
 
 Root cause: `paper/paper_position.py::PaperPosition.TIMEOUT_BARS=96`
