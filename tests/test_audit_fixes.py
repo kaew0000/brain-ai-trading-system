@@ -562,17 +562,109 @@ class TestRiskEngine:
         eng.clear_consecutive_loss_override()   # must not raise
         assert eng.has_consecutive_loss_override() is False
 
-    def test_report_shows_override_armed_before_consumption(self):
+    # ── V16 BUG-LIVE-RISK-06: report()/peek must never consume the override ─
+
+    def test_report_never_consumes_the_override(self):
+        """Regression test (2026-09-06): report() is a status read --
+        called every cycle by RiskManagerAgent purely for dashboard
+        narrative (agents/risk_manager.py), and on-demand by Commander's
+        "show risk" (api/app.py's _build_commander_context) -- neither is
+        "about to place a real trade". Before this fix, report() called
+        can_trade() internally, which silently consumed an armed one-shot
+        override as a side effect of a routine status read, long before
+        the operator's intended probe trade ever reached the real gate.
+        report() must now be read-only no matter how many times it's
+        called."""
         eng = self._engine_with_journal(consec=3)
         eng.override_next_trade_despite_streak("visible in report")
+
         rep = eng.report(10_000.0)
         assert rep["consecutive_loss_override_armed"] is True
         assert rep["consecutive_loss_override_reason"] == "visible in report"
-        assert rep["can_trade"] is True   # report()'s own can_trade() consumed it
+        assert rep["can_trade"] is True          # peek reflects what WOULD happen
+        assert eng.has_consecutive_loss_override() is True   # NOT consumed
 
-        # Next report call: already consumed, should show cleared.
-        rep2 = eng.report(10_000.0)
-        assert rep2["consecutive_loss_override_armed"] is False
+        # Calling report() any number of further times (e.g. once per
+        # cycle, or once per dashboard/Commander query) must never
+        # consume it either -- this is the exact bug being fixed.
+        for _ in range(5):
+            rep_n = eng.report(10_000.0)
+            assert rep_n["consecutive_loss_override_armed"] is True
+            assert eng.has_consecutive_loss_override() is True
+
+        # The override is still live for the actual trade-decision gate.
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is True
+        assert reason == ""
+        assert eng.has_consecutive_loss_override() is False   # NOW consumed
+
+        # And it's gone for good -- a subsequent report() reflects that.
+        rep_after = eng.report(10_000.0)
+        assert rep_after["consecutive_loss_override_armed"] is False
+
+    def test_peek_can_trade_never_mutates_state(self):
+        """peek_can_trade() must be safe to call any number of times:
+        no override consumption, no _disabled_today latch flip."""
+        eng = self._engine_with_journal(consec=3)
+        eng.override_next_trade_despite_streak("peek should not consume")
+
+        for _ in range(3):
+            ok, reason = eng.peek_can_trade(10_000.0)
+            assert ok is True
+            assert reason == ""
+            assert eng.has_consecutive_loss_override() is True
+            assert eng._disabled_today is False
+
+        # can_trade() still consumes normally afterward -- peek is purely
+        # additive, it doesn't change can_trade()'s own behavior.
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is True
+        assert eng.has_consecutive_loss_override() is False
+
+    def test_peek_can_trade_matches_can_trade_when_no_override_armed(self):
+        """Without an override, peek and the real gate must agree exactly
+        -- peek is a read-only view of the same logic, not a different,
+        weaker check."""
+        eng = self._engine_with_journal(consec=3)
+        peek_ok, peek_reason = eng.peek_can_trade(10_000.0)
+        assert peek_ok is False
+        assert "Consecutive losses" in peek_reason
+        assert eng._disabled_today is False   # peeking must not itself latch
+
+        real_ok, real_reason = eng.can_trade(10_000.0)
+        assert real_ok is False
+        assert real_reason == peek_reason
+        assert eng._disabled_today is True    # the real call does latch, as before
+
+    def test_peek_can_trade_does_not_bypass_manual_hold(self):
+        eng = self._engine_with_journal(consec=0)
+        eng.set_manual_hold("orphaned position found")
+        ok, reason = eng.peek_can_trade(10_000.0)
+        assert ok is False
+        assert reason == "orphaned position found"
+
+    def test_peek_can_trade_does_not_clear_the_sticky_latch(self):
+        """Mirrors test_override_bypasses_the_sticky_latched_block, but
+        for peek_can_trade(): reading status while an override is armed
+        against an already-latched block must report the bypass without
+        actually clearing the latch or consuming the override -- only
+        can_trade() (the real gate) may do that."""
+        eng = self._engine_with_journal(consec=3)
+        eng.can_trade(10_000.0)          # latches _disabled_today=True
+        assert eng._disabled_today is True
+
+        eng.override_next_trade_despite_streak("reviewed, confirmed stale")
+        ok, reason = eng.peek_can_trade(10_000.0)
+        assert ok is True
+        assert reason == ""
+        assert eng._disabled_today is True                   # NOT cleared by peek
+        assert eng.has_consecutive_loss_override() is True   # NOT consumed by peek
+
+        # The real gate still works correctly afterward.
+        ok, reason = eng.can_trade(10_000.0)
+        assert ok is True
+        assert eng._disabled_today is False
+        assert eng.has_consecutive_loss_override() is False
 
 
 

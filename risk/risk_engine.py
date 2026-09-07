@@ -244,12 +244,16 @@ class RiskEngine:
         return max(1, lev)
 
     # ── Gate ─────────────────────────────────────────────────────────────
+    #
+    # V16 BUG-LIVE-RISK-06 (2026-09-06): can_trade() and peek_can_trade()
+    # share one evaluation core so there is exactly one place the actual
+    # gate logic lives, but only can_trade() is allowed to mutate state
+    # (latch _disabled_today, consume an armed one-shot override).
+    # peek_can_trade() computes and returns the identical verdict for
+    # status/telemetry callers without spending anything -- see
+    # peek_can_trade()'s docstring for why this split exists.
 
-    def can_trade(self, balance: float) -> tuple[bool, str]:
-        """
-        Full risk gate.  Returns (ok, reason_string).
-        Side-effects: disables today when limit is hit.
-        """
+    def _evaluate(self, balance: float, *, mutate: bool) -> tuple[bool, str]:
         self._reset_if_new_day()
 
         if self._manual_hold_reason is not None:
@@ -267,37 +271,72 @@ class RiskEngine:
             # daily_loss-caused latch is untouched by this override.
             if (self._disabled_by == "consecutive_losses"
                     and self._consecutive_loss_override_reason is not None):
-                override_reason = self._consecutive_loss_override_reason
-                self._consecutive_loss_override_reason = None   # one-shot: consume now
-                self._disabled_today = False
-                self._disable_date   = None
-                self._disabled_by    = None
-                logger.critical(
-                    "RISK OVERRIDE CONSUMED: bypassing latched consecutive-"
-                    f"loss block | override_reason={override_reason}"
-                )
+                if mutate:
+                    override_reason = self._consecutive_loss_override_reason
+                    self._consecutive_loss_override_reason = None   # one-shot: consume now
+                    self._disabled_today = False
+                    self._disable_date   = None
+                    self._disabled_by    = None
+                    logger.critical(
+                        "RISK OVERRIDE CONSUMED: bypassing latched consecutive-"
+                        f"loss block | override_reason={override_reason}"
+                    )
                 return True, ""
             return False, "Trading disabled for today"
 
         ok, reason = self.check_daily_loss(balance)
         if not ok:
-            self.disable_trading_today(reason, cause="daily_loss")
+            if mutate:
+                self.disable_trading_today(reason, cause="daily_loss")
             return False, reason
 
         ok, reason = self.check_consecutive_losses()
         if not ok:
             if self._consecutive_loss_override_reason is not None:
-                override_reason = self._consecutive_loss_override_reason
-                self._consecutive_loss_override_reason = None   # one-shot: consume now
-                logger.critical(
-                    f"RISK OVERRIDE CONSUMED: bypassing consecutive-loss "
-                    f"block ({reason}) | override_reason={override_reason}"
-                )
+                if mutate:
+                    override_reason = self._consecutive_loss_override_reason
+                    self._consecutive_loss_override_reason = None   # one-shot: consume now
+                    logger.critical(
+                        f"RISK OVERRIDE CONSUMED: bypassing consecutive-loss "
+                        f"block ({reason}) | override_reason={override_reason}"
+                    )
                 return True, ""
-            self.disable_trading_today(reason, cause="consecutive_losses")
+            if mutate:
+                self.disable_trading_today(reason, cause="consecutive_losses")
             return False, reason
 
         return True, ""
+
+    def can_trade(self, balance: float) -> tuple[bool, str]:
+        """
+        Full risk gate -- call this ONLY immediately before actually
+        placing a real trade (main.py's per-cycle gate,
+        portfolio/capital_manager.py's Gate 0). Returns (ok, reason_string).
+        Side-effects: disables today when a limit is hit, and consumes an
+        armed one-shot override if one applies.
+
+        Do NOT call this from a status/report/telemetry context -- use
+        peek_can_trade() there instead. Before V16 BUG-LIVE-RISK-06 was
+        fixed, report() called this internally, so routine polling (the
+        RiskManagerAgent's every-cycle dashboard narrative, Commander's
+        "show risk" queries) silently spent the operator's one-shot
+        override long before any real trade decision ever ran.
+        """
+        return self._evaluate(balance, mutate=True)
+
+    def peek_can_trade(self, balance: float) -> tuple[bool, str]:
+        """
+        Read-only twin of can_trade(), for status/reporting/telemetry
+        contexts (RiskManagerAgent's per-cycle narrative, Commander's
+        "show risk" queries, the dashboard risk panel). Returns the same
+        (ok, reason_string) can_trade() would right now, computed from
+        the same checks -- but never mutates engine state: an armed
+        one-shot override stays armed, and a fresh daily-loss /
+        consecutive-loss breach is reported without latching
+        _disabled_today. Safe to call any number of times, including
+        every trading cycle, purely for telemetry (V16 BUG-LIVE-RISK-06).
+        """
+        return self._evaluate(balance, mutate=False)
 
     # ── Report ────────────────────────────────────────────────────────────
 
@@ -314,13 +353,16 @@ class RiskEngine:
         # calls, which are unrelated to this risk report.
         today      = self.journal.get_daily_stats(execution_lane="LIVE")
         streak     = self.journal.get_consecutive_losses(execution_lane="LIVE")
-        # Captured before can_trade() below, since can_trade() consumes a
-        # one-shot override as a side effect -- this reflects "was an
-        # override present going into this check" rather than "is one
-        # still armed after" (which would always show False the instant
-        # it's used).
-        override_armed_before = self._consecutive_loss_override_reason
-        ok, reason = self.can_trade(balance)
+        # V16 BUG-LIVE-RISK-06: peek_can_trade(), not can_trade() --
+        # report() is a status read (called every cycle by
+        # RiskManagerAgent for dashboard narrative, and on-demand by
+        # Commander's "show risk"), not a trade decision, so it must
+        # never consume an armed one-shot override or latch
+        # _disabled_today as a side effect of being read. Because peek
+        # never mutates, reading _consecutive_loss_override_reason
+        # directly below is accurate both before and after this call --
+        # no separate "before" snapshot needed anymore.
+        ok, reason = self.peek_can_trade(balance)
         return {
             "can_trade":          ok,
             "block_reason":       reason,
@@ -342,6 +384,6 @@ class RiskEngine:
             "manual_hold":        self._manual_hold_reason is not None,
             "manual_hold_reason": self._manual_hold_reason,
             # V16 BUG-LIVE-RISK-03 additions. New keys only.
-            "consecutive_loss_override_armed":  override_armed_before is not None,
-            "consecutive_loss_override_reason": override_armed_before,
+            "consecutive_loss_override_armed":  self._consecutive_loss_override_reason is not None,
+            "consecutive_loss_override_reason": self._consecutive_loss_override_reason,
         }

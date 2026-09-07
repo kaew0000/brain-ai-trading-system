@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## [Unreleased] — Fix: report() Silently Consuming the One-Shot Risk Override (V16 BUG-LIVE-RISK-06)
+
+Root cause: `risk/risk_engine.py::report()` (a status/telemetry read,
+called every cycle by `RiskManagerAgent` and on-demand by Commander's
+"show risk") called `can_trade()` internally, which has a documented
+side effect of consuming an armed one-shot consecutive-loss override.
+Routine status reads could therefore silently spend an operator's
+override before any real trade decision ever ran — arming it via the
+dashboard and then simply checking status would burn it for nothing.
+See `docs/architecture.md` §56 for the full root-cause writeup and a
+flagged, not-yet-fixed related finding in
+`portfolio/capital_manager.py`'s Gate 0 (currently dormant,
+`SCHEDULER_ENABLED=False` by default).
+
+### Fixed
+- `risk/risk_engine.py` — gate logic extracted into a shared
+  `_evaluate(balance, *, mutate: bool)`; `can_trade()` is unchanged
+  (`mutate=True`); new `peek_can_trade()` (`mutate=False`) never
+  consumes an override or latches `_disabled_today`. `report()` now
+  calls `peek_can_trade()` instead of `can_trade()`.
+
+### Added
+- `tests/test_audit_fixes.py` — 4 new regression tests
+  (`test_peek_can_trade_never_mutates_state`,
+  `test_peek_can_trade_matches_can_trade_when_no_override_armed`,
+  `test_peek_can_trade_does_not_bypass_manual_hold`,
+  `test_peek_can_trade_does_not_clear_the_sticky_latch`) plus a
+  rewrite of `test_report_shows_override_armed_before_consumption`
+  (renamed `test_report_never_consumes_the_override`), which
+  previously asserted the bug's behavior as correct.
+
+### Unaffected (explicitly out of scope)
+- `portfolio/capital_manager.py`'s Gate 0 `can_trade()` call — flagged
+  as a known follow-up, not patched this phase (see PATCH_NOTES.md).
+- No public method signatures changed; `can_trade()`'s behavior for
+  its two real call sites (`main.py`, `portfolio/capital_manager.py`)
+  is byte-for-byte unchanged.
+
+---
+
 ## [Unreleased] — Fix: HFT-1 Local Order-Book False-Positive Resync on Futures `U` Discontinuity
 
 Root cause: `data/local_order_book.py::LocalOrderBook.apply_diff()`

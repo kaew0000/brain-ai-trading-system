@@ -1,41 +1,43 @@
-# MIGRATION — Fix: Training Lane Position TIMEOUT Firing at ~32 Minutes Instead of ~24 Hours
+# MIGRATION — Fix: report() Silently Consuming the One-Shot Risk Override (V16 BUG-LIVE-RISK-06)
 
 ## Do you need to do anything?
 
-**No action required to get the fix.** The new setting
-`BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS` defaults to `24.0` and is
-picked up automatically on the next restart — no `.env` change needed
-unless you want a different timeout window than 24 hours.
+**No action required to get the fix.** No new settings, no `.env`
+changes, no config migration. Restart the bot after this branch is
+merged and the fix is active immediately.
 
 ## What changes in behavior after this restart
 
-- The Background Training Lane (Track C) will hold a position open for
-  up to ~24 real hours (its actual intended behavior) instead of
-  force-closing it after ~32 minutes.
-- Any position that was already open in this lane when you restart is
-  restored via `TrainingLaneRunner._restore_state()` and will pick up
-  the newly-calibrated timeout automatically — it does not keep
-  counting toward the old 96-bar/32-minute limit.
-- Expect the training lane's balance trajectory to look different (and
-  likely much less noisy) going forward, since trades will now
-  actually get the time they were designed to need to reach TP.
-- Manual `EXECUTION_MODE=paper` sessions are unaffected — same
-  behavior as before this patch.
-- Live trading is unaffected — this patch never touches
-  `execution/execution_coordinator.py` or any order-placing path.
-
-## Optional: tuning the timeout window
-
-If 24 hours isn't the window you want, set in `.env`:
-```
-BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS=12
-```
-and restart. The actual bar count is recomputed automatically from
-whatever `BACKGROUND_TRAINING_POLL_INTERVAL_SECONDS` currently is — you
-never need to hand-calculate a bar count yourself.
+- Arming a one-shot override via the dashboard/API
+  (`override_next_trade_despite_streak()` /
+  `POST /api/system/risk_override_next_trade`) now reliably survives
+  until the **next actual trade decision** — checking the dashboard,
+  asking Commander "show risk," or simply waiting through normal
+  per-cycle telemetry no longer burns it early.
+- `RiskEngine.report()`'s returned dict is unchanged in shape (same
+  keys as before) — `consecutive_loss_override_armed` and
+  `consecutive_loss_override_reason` now stay `True`/populated across
+  repeated `report()` calls instead of flipping to cleared after the
+  first one.
+- The real trade gate (`main.py`'s per-cycle `rsk.can_trade(balance)`,
+  `portfolio/capital_manager.py`'s Gate 0) behaves exactly as before —
+  still consumes the override on the first real check, still
+  genuinely one-shot.
+- No behavior change at all if you have never used
+  `override_next_trade_despite_streak()` / the dashboard's "override
+  next trade" control — this only changes what happens while an
+  override is armed.
 
 ## Rollback
 
-Revert this branch and restart — `PaperPosition.TIMEOUT_BARS` returns
-to being the sole, unconditional default (96 bars at whatever cadence
-each caller ticks at), exactly as before this patch.
+Revert this branch and restart. `RiskEngine.can_trade()` and
+`RiskEngine.report()` return to their previous coupled behavior
+(`report()` consumes the override as a side effect) — no data
+migration either direction, since no persisted state format changed.
+
+## Note for whoever merges the sibling branch
+
+`fix/risk-override-persists-across-restart` (commit `61cea14`) touches
+the same methods in `risk/risk_engine.py` and will conflict with this
+branch textually. See PATCH_NOTES.md's "Known follow-up" section for
+details before merging both.
