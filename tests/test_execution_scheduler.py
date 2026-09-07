@@ -91,10 +91,29 @@ class FakeDataProvider:
         return self.balance
 
 
-def make_scheduler(ranker=None, pm=None, dp=None, orch=None, **kwargs):
+class FakeRiskEngine:
+    """V16 BUG-LIVE-RISK-06 follow-up: ExecutionScheduler.run_once() now
+    calls risk_engine.can_trade() directly (the real, consuming gate),
+    immediately before real orders go out -- previously nothing in this
+    class touched risk_engine itself, only passed it through to
+    portfolio_manager.decide(), so the old default of a bare object()
+    was enough. Defaults to always-allow so existing happy-path tests
+    don't need to configure this explicitly."""
+    def __init__(self, allow=True, reason=""):
+        self.allow = allow
+        self.reason = reason
+        self.can_trade_calls = 0
+
+    def can_trade(self, balance):
+        self.can_trade_calls += 1
+        return self.allow, self.reason
+
+
+def make_scheduler(ranker=None, pm=None, dp=None, orch=None, risk_engine=None, **kwargs):
     ranker = ranker or FakeRanker()
     pm = pm or FakePortfolioManager()
     dp = dp or FakeDataProvider()
+    risk_engine = risk_engine if risk_engine is not None else FakeRiskEngine()
     if orch is None:
         orch = ExecutionOrchestrator(
             execution_lane="LIVE",
@@ -105,7 +124,7 @@ def make_scheduler(ranker=None, pm=None, dp=None, orch=None, **kwargs):
     kwargs.setdefault("interval_seconds", 1)
     kwargs.setdefault("candidate_limit", 20)
     return ExecutionScheduler(
-        opportunity_ranker=ranker, portfolio_manager=pm, risk_engine=object(),
+        opportunity_ranker=ranker, portfolio_manager=pm, risk_engine=risk_engine,
         execution_orchestrator=orch, data_provider=dp,
         **kwargs,
     )
@@ -180,6 +199,53 @@ class TestBlockedDecision:
         batch = sched.run_once()
         assert batch is None
         assert sched.last_error is None  # blocked is a normal outcome, not a failure
+
+
+class TestRealRiskGate:
+    """V16 BUG-LIVE-RISK-06 follow-up (2026-09-07): the real, consuming
+    risk_engine.can_trade() call added to run_once(), separate from
+    decide()'s own read-only Gate 0 (portfolio/capital_manager.py, now
+    peek_can_trade())."""
+
+    def test_real_gate_called_exactly_once_on_a_successful_cycle(self):
+        rsk = FakeRiskEngine()
+        sched = make_scheduler(risk_engine=rsk)
+        batch = sched.run_once()
+        assert batch is not None
+        assert rsk.can_trade_calls == 1
+
+    def test_real_gate_blocks_execution_even_though_decide_was_not_blocked(self):
+        rsk = FakeRiskEngine(allow=False, reason="consecutive losses")
+        sched = make_scheduler(risk_engine=rsk)
+        batch = sched.run_once()
+        assert batch is None
+        assert sched.last_error is None  # a real block, not an error
+        assert sched.portfolio_state.has_position("BTCUSDT") is False
+
+    def test_real_gate_not_called_when_nothing_selected_or_replaced(self):
+        """Nothing to act on this cycle -- the real gate must not even
+        be asked, so an armed one-shot override isn't spent for a cycle
+        that was never going to place an order anyway."""
+        def empty_decide(candidates, risk_engine, state, balance):
+            return OrchestratedDecision(generated_at=time.time(), blocked=False, block_reason=None)
+
+        pm = FakePortfolioManager(decision_fn=empty_decide)
+        rsk = FakeRiskEngine()
+        sched = make_scheduler(pm=pm, risk_engine=rsk)
+        batch = sched.run_once()
+        assert batch is None
+        assert sched.last_error is None
+        assert rsk.can_trade_calls == 0
+
+    def test_real_gate_not_called_when_decide_itself_is_blocked(self):
+        def blocked_decide(candidates, risk_engine, state, balance):
+            return OrchestratedDecision(generated_at=time.time(), blocked=True, block_reason="daily_loss_limit")
+
+        pm = FakePortfolioManager(decision_fn=blocked_decide)
+        rsk = FakeRiskEngine()
+        sched = make_scheduler(pm=pm, risk_engine=rsk)
+        sched.run_once()
+        assert rsk.can_trade_calls == 0
 
 
 class TestErrorHandling:

@@ -142,7 +142,19 @@ class CapitalManager:
         # ── Gate 0: RiskEngine's own account-level circuit breaker ────────
         # "Never allocate if RiskEngine already blocks trading" — checked
         # before anything else, unconditionally.
-        can_trade, block_reason = risk_engine.can_trade(balance)
+        #
+        # V16 BUG-LIVE-RISK-06 follow-up (2026-09-07): peek_can_trade(),
+        # not can_trade() -- this is a pre-check, not the moment a real
+        # order is about to go out. Everything below this point (position
+        # caps, per-candidate liquidity/spread/coverage/correlation gates,
+        # capital/risk budget exhaustion) can still reduce the final
+        # `selected` list to empty even when this check passes, so
+        # consuming an armed one-shot override here could spend it for a
+        # cycle that ends up placing zero orders. The real, consuming
+        # can_trade() call now happens in execution/execution_scheduler.py,
+        # immediately before ExecutionOrchestrator.execute() actually
+        # places orders for a non-empty decision.
+        can_trade, block_reason = risk_engine.peek_can_trade(balance)
         if not can_trade:
             return PortfolioDecision(
                 generated_at=now, blocked=True, block_reason=block_reason,

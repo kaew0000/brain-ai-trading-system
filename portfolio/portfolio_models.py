@@ -201,7 +201,7 @@ class PortfolioDecision:
     places an order, calls set_leverage, or touches an exchange client.
     """
     generated_at:          float
-    blocked:               bool                          # True if RiskEngine.can_trade() said no
+    blocked:               bool                          # True if RiskEngine.peek_can_trade() said no
     block_reason:           str | None
     selected:               list[PortfolioAllocation] = field(default_factory=list)
     rejected:                list[RejectedCandidate]    = field(default_factory=list)

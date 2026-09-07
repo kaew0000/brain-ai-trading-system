@@ -50,7 +50,15 @@ def make_risk_engine(pnl=0.0, streak=0, blocked=False, block_reason=None) -> Ris
     journal.get_daily_stats.return_value = {"total_pnl": pnl, "total_trades": 0, "win_rate": 0.0}
     eng = RiskEngine(journal)
     if blocked:
-        eng.can_trade = MagicMock(return_value=(False, block_reason or "blocked for test"))
+        # V16 BUG-LIVE-RISK-06 follow-up: CapitalManager.decide()'s Gate 0
+        # calls peek_can_trade() (read-only pre-check), not can_trade()
+        # (the real, consuming gate now called separately in
+        # execution/execution_scheduler.py right before real orders go
+        # out) — both are mocked identically here so "blocked" behaves
+        # the same regardless of which one a caller under test checks.
+        blocked_result = MagicMock(return_value=(False, block_reason or "blocked for test"))
+        eng.can_trade = blocked_result
+        eng.peek_can_trade = blocked_result
     return eng
 
 
