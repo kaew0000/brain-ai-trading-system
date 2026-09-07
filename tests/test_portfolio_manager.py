@@ -51,7 +51,11 @@ def make_risk_engine(pnl=0.0, streak=0, blocked=False, block_reason=None) -> Ris
     journal.get_daily_stats.return_value = {"total_pnl": pnl, "total_trades": 0, "win_rate": 0.0}
     eng = RiskEngine(journal)
     if blocked:
-        eng.can_trade = MagicMock(return_value=(False, block_reason or "blocked for test"))
+        # V16 BUG-LIVE-RISK-06 follow-up: Gate 0 (via CapitalManager.decide())
+        # calls peek_can_trade(), not can_trade() -- mocked identically here.
+        blocked_result = MagicMock(return_value=(False, block_reason or "blocked for test"))
+        eng.can_trade = blocked_result
+        eng.peek_can_trade = blocked_result
     return eng
 
 

@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## [Unreleased] — Close Out V16 BUG-LIVE-RISK-06: Scheduler-Path Gate 0 + Restart Persistence
+
+Closes both items flagged as "known follow-up, not fixed" in the
+previous entry below: `portfolio/capital_manager.py`'s Gate 0 still
+calling the consuming `can_trade()` (dormant today,
+`SCHEDULER_ENABLED=False`, but wrong once the multi-symbol scheduler
+path is enabled), and the unmerged sibling branch
+`fix/risk-override-persists-across-restart` (`61cea14`) that would
+otherwise conflict on merge. See `docs/architecture.md` §57 for the
+full root-cause writeup.
+
+### Fixed
+- `portfolio/capital_manager.py` — Gate 0 now calls `peek_can_trade()`
+  instead of `can_trade()`; downstream portfolio filtering
+  (position caps, correlation, liquidity, cooldowns, sector limits)
+  can still reduce `selected` to empty after Gate 0 passes, so
+  consuming an override there could spend it on a cycle that places no
+  order.
+- `execution/execution_scheduler.py` — added the real, consuming
+  `can_trade()` call in `run_once()`, immediately before
+  `ExecutionOrchestrator.execute()`, only reached when there is
+  something to actually execute this cycle.
+
+### Added
+- `risk/risk_engine.py`, `journal/journal_v2.py` — one-shot override
+  now persists across a bot restart (`risk_engine_state` table,
+  `save_risk_override()` / `get_risk_override()` /
+  `clear_risk_override()`), integrating
+  `fix/risk-override-persists-across-restart` (`61cea14`) on top of
+  the `_evaluate(mutate=bool)` refactor from the previous entry.
+- `tests/test_risk_override_persistence.py` — 11 tests (from the
+  superseded branch, unmodified).
+- `tests/test_execution_scheduler.py` — `FakeRiskEngine` + 4 new tests
+  in `TestRealRiskGate`.
+
+### Unaffected (explicitly out of scope, documented)
+- If `CapitalManager.decide()` selects more than one allocation in a
+  single cycle while an override is armed, the whole batch executes,
+  not just one probe trade — a known divergence from the
+  single-symbol-loop "one `can_trade()` call = one trade" model,
+  flagged rather than redesigned this phase. Dormant either way today.
+
+### Superseded
+- `fix/risk-override-persists-across-restart` (`61cea14`, unmerged, no
+  PR opened) — fully incorporated here; recommend closing without
+  merging.
+
+---
+
 ## [Unreleased] — Fix: report() Silently Consuming the One-Shot Risk Override (V16 BUG-LIVE-RISK-06)
 
 Root cause: `risk/risk_engine.py::report()` (a status/telemetry read,

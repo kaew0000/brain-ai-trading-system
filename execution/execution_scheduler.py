@@ -14,7 +14,13 @@ This class is that caller. One cycle (run_once()):
   1. candidates = OpportunityRanker.rank()[:SCHEDULER_CANDIDATE_LIMIT]
   2. balance = data_provider.get_account_balance()
   3. decision = PortfolioManager.decide(candidates, risk_engine, state, balance)
-  4. batch = ExecutionOrchestrator.execute(decision, state, balance)
+     — uses RiskEngine.peek_can_trade() internally (Gate 0), a read-only
+     pre-check that does not consume an armed one-shot override.
+  4. If decision has anything to act on (selected allocations or
+     replacements), risk_engine.can_trade(balance) — the real, consuming
+     gate, called only once real orders are actually about to be placed
+     (V16 BUG-LIVE-RISK-06 follow-up, see step 5's note).
+  5. batch = ExecutionOrchestrator.execute(decision, state, balance)
 
 Threading model mirrors scanner/market_scanner.py's MarketScanner
 exactly (daemon threading.Thread + threading.Event for stop, same
@@ -127,9 +133,9 @@ class ExecutionScheduler:
         as a no-op, matching this project's "safety wrapping at every
         touchpoint" rule (the scheduler thread must never die from an
         auxiliary failure). Returns None if nothing was executed (no
-        candidates, decision blocked, or an error occurred) — check
-        `.last_error` after a None return to distinguish "genuinely
-        nothing to do" from "something failed"."""
+        candidates, decision blocked, nothing to act on, or an error
+        occurred) — check `.last_error` after a None return to
+        distinguish "genuinely nothing to do" from "something failed"."""
         self._cycle_count += 1
         self._last_error = None
         try:
@@ -145,6 +151,30 @@ class ExecutionScheduler:
 
             if decision.blocked:
                 logger.info(f"ExecutionScheduler: decision blocked ({decision.block_reason})")
+                return None
+
+            if not decision.selected and not decision.replacements:
+                logger.debug("ExecutionScheduler: nothing to act on after portfolio filtering")
+                return None
+
+            # V16 BUG-LIVE-RISK-06 follow-up: the real, consuming risk
+            # gate. decide()'s own Gate 0 (portfolio/capital_manager.py)
+            # uses peek_can_trade() and never spends an armed one-shot
+            # override, because sector-limit/cooldown/capital-budget
+            # filtering downstream of it can still reduce `selected` to
+            # empty (handled above) even after Gate 0 said yes. This is
+            # the first point in the cycle where we know for certain real
+            # orders are about to be placed -- mirrors main.py's own
+            # can_trade() placement immediately before execution for the
+            # legacy single-symbol loop. If multiple allocations are
+            # selected in the same cycle, one consumed override lets the
+            # whole batch through, not just one order -- a known
+            # divergence from the single-symbol "one probe trade" model,
+            # documented rather than silently redesigned this phase (see
+            # docs/architecture.md §57).
+            ok, reason = self.risk_engine.can_trade(balance)
+            if not ok:
+                logger.warning(f"ExecutionScheduler: risk gate blocked at execution time: {reason}")
                 return None
 
             batch = self.execution_orchestrator.execute(decision, self.portfolio_state, balance)

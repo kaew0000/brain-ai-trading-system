@@ -5661,3 +5661,117 @@ clean. `vulture risk/risk_engine.py --min-confidence 80` clean.
   restart). Will produce a textual merge conflict with this phase
   regardless of merge order — needs manual reconciliation, not an
   independent merge of both.
+## 57. Close Out V16 BUG-LIVE-RISK-06: Scheduler-Path Gate 0 + Restart Persistence (2026-09-07)
+
+### Context
+
+§56 fixed `report()` consuming the one-shot consecutive-loss override
+as a side effect of a routine status read. That entry flagged two
+related items as known follow-up rather than guessing at a fix:
+`portfolio/capital_manager.py`'s Gate 0 (a second, currently-dormant
+`can_trade()` call site with the same underlying problem), and a
+sibling unmerged branch (`fix/risk-override-persists-across-restart`,
+`61cea14`) that would conflict with §56's changes on merge. This entry
+closes both.
+
+### Part 1 — Scheduler-path Gate 0
+
+Traced the full scheduler execution flow to confirm the concern from
+§56 was real, not hypothetical:
+
+```
+ExecutionScheduler.run_once()
+  → PortfolioManager.decide(candidates, risk_engine, state, balance)
+      → CapitalManager.decide(...)            # Gate 0 lived here
+          — per-candidate: portfolio_full, already_held,
+            liquidity_below_minimum, spread_below_minimum,
+            coverage_below_minimum, correlation_hard_reject,
+            risk_budget_exhausted, no_capital_remaining
+      → _apply_cooldown(...), _enforce_sector_limits(...)  # further filtering
+  → ExecutionOrchestrator.execute(decision, state, balance)  # never touches RiskEngine
+```
+
+Every layer after Gate 0 can reduce the final `selected`/
+`replacements` lists to empty. `ExecutionOrchestrator.execute()`
+itself never calls `RiskEngine` at all — Gate 0 was the *only* risk
+check in this entire path. So the exact §56 failure mode applied one
+layer deeper: Gate 0 consuming an armed override with no guarantee a
+real order would follow.
+
+**Fix:** `CapitalManager.decide()`'s Gate 0 now calls
+`peek_can_trade()` (read-only). `ExecutionScheduler.run_once()` gained
+a new, real `can_trade()` call — placed immediately before
+`ExecutionOrchestrator.execute()`, gated behind `decision.selected or
+decision.replacements` being non-empty, so it's only ever reached when
+a real order is actually about to be placed. This mirrors `main.py`'s
+own gate placement for the legacy single-symbol loop: peek early,
+consume late, right next to the code that actually executes.
+
+**Documented, not fixed, divergence:** the override was designed
+("Bypasses check_consecutive_losses() for exactly the next
+can_trade() call... a single 'let one probe trade through' lever") for
+a loop that evaluates one trade per `can_trade()` call. The scheduler
+path can select multiple simultaneous allocations in one `decide()`
+call; one consumed override now lets the whole batch through, not
+strictly one trade. Flagged in code comments and PATCH_NOTES rather
+than redesigned — the override's single-symbol semantics don't map
+cleanly onto a multi-candidate batch, and doing that redesign properly
+is out of scope for closing this specific bug. Moot today regardless:
+`SCHEDULER_ENABLED=False` by default.
+
+### Part 2 — Restart persistence (V16 BUG-LIVE-RISK-04)
+
+Integrated `fix/risk-override-persists-across-restart` (`61cea14`)
+onto §56's `_evaluate(mutate=bool)` structure (diffed against its own
+base `c0d12a0` in isolation to read its intent cleanly, rather than
+against a `main` it had already drifted from):
+
+- `journal/journal_v2.py`: new `risk_engine_state` key/value table
+  (`CREATE TABLE IF NOT EXISTS`, created lazily on first use — same
+  pattern as every other schema addition in this project), plus
+  `save_risk_override()` / `get_risk_override()` /
+  `clear_risk_override()`.
+- `risk/risk_engine.py::__init__`: restores a persisted override on
+  construction. Guarded with `isinstance(restored, str)` — not just
+  `getattr(journal, "get_risk_override", None)` — because most
+  existing `RiskEngine` tests construct it with a bare, unconfigured
+  `MagicMock()` journal, on which `getattr(..., None)` returns a
+  truthy `MagicMock`, and calling it returns another truthy
+  `MagicMock`, not `None`. Without the `str` check, every one of those
+  tests would silently arm a fake override on construction.
+- `override_next_trade_despite_streak()` / `clear_consecutive_loss_
+  override()`: now write-through / clear the journal copy.
+- Both consumption points inside `_evaluate()`'s `if mutate:` branches:
+  now also call `_clear_persisted_override()` — persistence is
+  cleared only on real consumption, never by `peek_can_trade()`,
+  preserving §56's mutate/peek split.
+
+### Testing
+
+- `tests/test_risk_override_persistence.py` — 11 tests brought in
+  unchanged from the superseded branch: journal round-trip,
+  restore-on-construction, end-to-end restore-then-consume via
+  `can_trade()`, and the `MagicMock` false-positive guard.
+- `tests/test_execution_scheduler.py` — added `FakeRiskEngine` (the
+  previous default of a bare `object()` only worked because nothing
+  in this class called `risk_engine` directly before this phase) and
+  4 new tests in `TestRealRiskGate`: real gate called exactly once on
+  a successful cycle; blocks execution even when `decide()` itself
+  wasn't blocked; NOT called when nothing was selected or replaced;
+  NOT called when `decide()` was already blocked.
+- `tests/test_capital_manager.py`, `tests/test_portfolio_manager.py`
+  — `make_risk_engine(blocked=True)` now mocks both `can_trade` and
+  `peek_can_trade` identically, since Gate 0 calls the latter now.
+
+Full suite: 3023 passed, 4 skipped, 45 deselected. Same 3
+pre-existing `tests/test_dashboard_serving.py` failures as §55/§56
+(missing frontend build artifact), unrelated and unaffected. `ruff
+check .` clean repo-wide. `vulture --min-confidence 80` clean on every
+changed file. `python -c "import main"` succeeds.
+
+### Superseded branch
+
+`fix/risk-override-persists-across-restart` (`61cea14`, pushed, no PR
+opened) is fully superseded by this phase — its intent is incorporated
+here, rebased onto §56's refactor. Recommend closing that branch
+without merging.
