@@ -5543,3 +5543,121 @@ missing-build-artifact cause as §54, confirmed identical on baseline
 repo-wide (`ruff check . --exclude dashboard_src --exclude dashboard`,
 the exact CI command).
 
+## 56. Fix: `report()` Silently Consuming the One-Shot Risk Override — V16 BUG-LIVE-RISK-06 (2026-09-06)
+
+### Root cause
+
+`risk/risk_engine.py::report()` is a status/telemetry read — called
+every trading cycle by `RiskManagerAgent` (`agents/risk_manager.py`,
+purely for dashboard narrative and HALT/ELEVATED/CAUTION
+classification) and on-demand by Commander's
+`_build_commander_context()` (`api/app.py`, every time an operator
+asks "show risk"). It computed its `can_trade`/`block_reason` fields
+by calling `self.can_trade(balance)` internally.
+
+`can_trade()` has a documented, intentional side effect from
+BUG-LIVE-RISK-03 (§ see `override_next_trade_despite_streak()`'s
+docstring): it consumes an armed one-shot consecutive-loss override on
+first use, so the override behaves as "let exactly one trade through,"
+not a standing disable. `report()` had no way to compute "would this
+pass right now" without also triggering "and spend the one-shot lever
+if it does" — the two concerns were fused into one method with no way
+to separate them.
+
+Concretely: an operator arms an override via the dashboard, intending
+it for the next real trade attempt. Before this fix, the very next
+`RiskManagerAgent` cycle (which runs regardless, for telemetry only)
+or the next "show risk" Commander query would call `report()` →
+`can_trade()` → consume the override and return `True` — with no trade
+ever placed, since neither call site is a trade-decision path. The
+next *real* trade-decision call (`main.py`'s per-cycle
+`rsk.can_trade(balance)`) would then find the override already spent
+and re-block normally if the underlying streak condition still held.
+
+### Fix
+
+Refactored `risk/risk_engine.py` to separate "compute the verdict"
+from "commit to it":
+
+- `_evaluate(self, balance, *, mutate: bool) -> tuple[bool, str]` —
+  the single shared implementation of the full gate (manual hold →
+  sticky daily-disable latch, with override punch-through → daily-loss
+  check → consecutive-loss check, with override consumption). Every
+  state mutation (`disable_trading_today()`, consuming
+  `_consecutive_loss_override_reason`) is now conditional on
+  `mutate=True`.
+- `can_trade(balance)` → `self._evaluate(balance, mutate=True)`.
+  Byte-for-byte identical observable behavior to the pre-fix
+  `can_trade()`. Still the only method that should run immediately
+  before actually placing a real trade — both of its real call sites
+  (`main.py`'s per-cycle gate, `portfolio/capital_manager.py`'s
+  Gate 0) are unchanged.
+- `peek_can_trade(balance)` → `self._evaluate(balance, mutate=False)`
+  (new). Returns the identical `(ok, reason)` verdict `can_trade()`
+  would, but never mutates: an armed override stays armed, and a fresh
+  daily-loss/consecutive-loss breach is reported without latching
+  `_disabled_today`. Documented as the correct choice for
+  status/reporting/telemetry contexts.
+- `report()` now calls `self.peek_can_trade(balance)`. This single
+  internal change fixes every existing caller of `report()`
+  (`agents/risk_manager.py`, `api/app.py`'s Commander context,
+  `main.py::daily_report()`, `commander/commander_service.py`'s
+  docstring example) with no changes needed at those call sites.
+
+### Testing
+
+`tests/test_audit_fixes.py::TestRiskEngine`:
+- `test_report_shows_override_armed_before_consumption` **rewritten**
+  as `test_report_never_consumes_the_override` — the old test
+  asserted the bug as correct behavior (a second `report()` call was
+  expected to show the override cleared); the new version asserts the
+  override survives any number of `report()` calls and is only spent
+  by an actual `can_trade()` call.
+- 4 new tests: `test_peek_can_trade_never_mutates_state`,
+  `test_peek_can_trade_matches_can_trade_when_no_override_armed`
+  (peek and the real gate must agree exactly when nothing is armed),
+  `test_peek_can_trade_does_not_bypass_manual_hold`,
+  `test_peek_can_trade_does_not_clear_the_sticky_latch` (mirrors the
+  existing sticky-latch override test, for the peek path).
+- All pre-existing override tests (`test_override_bypasses_a_fresh_
+  consecutive_loss_block`, `test_override_bypasses_the_sticky_latched_
+  block`, `test_override_does_not_bypass_daily_loss_block`,
+  `test_override_second_losing_trade_reblocks_immediately`, etc.) pass
+  unchanged — `can_trade()`'s own behavior was not touched, only
+  extracted into a shared core.
+
+Full suite: 3007 passed, 4 skipped, 45 deselected. 3 failures in
+`tests/test_dashboard_serving.py` are pre-existing and unrelated
+(missing `dashboard_src/dist/index.html` build artifact) — confirmed
+identical on unmodified `main` before this change. `ruff check .`
+clean. `vulture risk/risk_engine.py --min-confidence 80` clean.
+`python -c "import main"` succeeds.
+
+### Known follow-up (not this phase)
+
+- **`portfolio/capital_manager.py:145`** (`CapitalManager.decide()`'s
+  "Gate 0", `# Never allocate if RiskEngine already blocks trading —
+  checked before anything else, unconditionally`) also calls
+  `risk_engine.can_trade(balance)`, once per portfolio-evaluation
+  cycle, before any candidate is ranked or selected. Currently
+  **dormant** — `SCHEDULER_ENABLED=False` by default (confirmed in
+  `.env.example` and `config/settings.py`), so this path does not run
+  in the current live single-symbol deployment. It will matter once
+  the multi-symbol/scheduler path is enabled. Simply swapping this
+  call to `peek_can_trade()` would be **wrong**: nothing else
+  currently traced in `execution/execution_scheduler.py` /
+  `execution/execution_orchestrator.py` calls the mutating
+  `can_trade()`, so an armed override would never actually get
+  consumed and would keep bypassing the block indefinitely — the
+  opposite of one-shot. Needs its own inspection pass to find (or
+  add) the actual point in the scheduler flow where a selected
+  candidate becomes a real order, and move consumption there.
+- **Sibling branch collision:** `fix/risk-override-persists-across-
+  restart` (commit `61cea14`, pushed, no PR opened) independently
+  modifies the same class (`__init__`,
+  `override_next_trade_despite_streak()`,
+  `clear_consecutive_loss_override()`, both override-consumption call
+  sites) to fix a different bug (override doesn't survive a bot
+  restart). Will produce a textual merge conflict with this phase
+  regardless of merge order — needs manual reconciliation, not an
+  independent merge of both.
