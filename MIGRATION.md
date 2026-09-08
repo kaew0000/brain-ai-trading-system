@@ -1,45 +1,58 @@
-# MIGRATION — Close Out V16 BUG-LIVE-RISK-06: Scheduler-Path Gate 0 + Restart Persistence
+# MIGRATION — Nightly Retrain Governance Gate, Phase 2 (V16 §58)
 
 ## Do you need to do anything?
 
-**No `.env` changes required.** One thing happens automatically on
-first use after this restart: a new `risk_engine_state` table is
-created in the trade journal DB (lazy `CREATE TABLE IF NOT EXISTS`,
-same pattern every other schema addition in this project uses) the
-first time an override is armed, persisted, or checked. No manual
-migration step, no downtime.
+**Behavior changes automatically on restart — read this before your
+next nightly retrain runs.** As of this merge, a model that beats
+`should_promote()`'s gate will **no longer go active on its own**. It
+gets registered (saved, inactive) and a pending proposal is created
+instead. If you take no action, that model simply never goes live —
+the previous model stays active indefinitely. This is the intended
+behavior (that's the whole point of the gate), but it means **you now
+need to check `GET /api/governance/proposals?status=pending`
+periodically** (e.g. the morning after a nightly retrain) or nothing
+new will ever get promoted.
 
-## What changes in behavior after this restart
+## How to approve or reject a pending proposal today
 
-- **Scheduler path** (currently dormant — `SCHEDULER_ENABLED=False`
-  by default, so this has zero effect on today's live single-symbol
-  trading): once the multi-symbol scheduler is turned on, arming an
-  override via the dashboard now reliably waits for an actual order to
-  be about to go out before being spent, instead of potentially being
-  consumed by a portfolio pre-check that ends up selecting nothing.
-- **Restart persistence** (this one is live-relevant today): arming a
-  one-shot override and then restarting the bot before it gets used no
-  longer silently discards it. On the next startup, `RiskEngine`
-  restores it from the journal DB and logs `RISK OVERRIDE RESTORED
-  from previous session`. It is still genuinely one-shot — the next
-  real `can_trade()` call (or a manual `clear_consecutive_loss_
-  override()`) still spends/clears it, exactly as before, just now
-  surviving a restart in between.
-- No change to `daily_loss` blocking, `manual_hold`, or any other risk
-  gate behavior.
+No dashboard button yet (see PATCH_NOTES.md's "Known follow-up") — use
+the API directly:
+
+```bash
+# List what's pending
+curl -H "Authorization: Bearer $YOUR_API_KEY" \
+  "http://<host>:<port>/api/governance/proposals?status=pending"
+
+# Approve #7 -- this immediately promotes the model too (one step)
+curl -X POST -H "Authorization: Bearer $YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"proposal_id": 7}' \
+  "http://<host>:<port>/api/governance/proposals/approve"
+
+# Or reject it
+curl -X POST -H "Authorization: Bearer $YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"proposal_id": 7, "reason": "sample size too small"}' \
+  "http://<host>:<port>/api/governance/proposals/reject"
+```
+
+Both `approve` and `reject` require `OPERATOR`-tier auth (same as
+arming a risk override) — a `VIEWER`-scoped key will get a 403.
+
+## If you want the old unattended behavior back
+
+Set `MODEL_PROMOTION_REQUIRES_APPROVAL=False` in your environment and
+restart. `run_nightly_retrain()` goes back to promoting a model the
+moment it beats `should_promote()`, with no proposal, no review, no
+human step — identical to pre-§58 behavior. Not recommended for the
+live account; reasonable for a dev/testnet environment where
+unattended promotion is actually wanted.
 
 ## Rollback
 
-Revert this branch and restart. `CapitalManager.decide()`'s Gate 0
-goes back to calling `can_trade()` directly, `ExecutionScheduler`
-loses its own real-gate check, and `RiskEngine` stops
-reading/writing `risk_engine_state`. The `risk_engine_state` table
-itself is harmless to leave behind in the DB file if you roll back —
-nothing reads it once this code is reverted.
-
-## Closing the superseded branch
-
-`fix/risk-override-persists-across-restart` (`61cea14`) is fully
-superseded by this branch. No PR was ever opened for it, so nothing to
-formally close on GitHub — just don't merge it; delete the branch
-whenever convenient.
+Revert this branch and restart. `run_nightly_retrain()` goes back to
+calling `ModelRegistry.promote()` directly and unconditionally; the
+three new `/api/governance/proposals*` endpoints disappear (any
+pending proposals created while this branch was live stay harmlessly
+in the `update_proposals` table, just no longer reachable via the API
+until this branch is reapplied).

@@ -5775,3 +5775,123 @@ changed file. `python -c "import main"` succeeds.
 opened) is fully superseded by this phase — its intent is incorporated
 here, rebased onto §56's refactor. Recommend closing that branch
 without merging.
+## 58. Nightly Retrain Governance Gate — Phase 2 (2026-09-08)
+
+### Context
+
+`governance/__init__.py`'s module docstring, written when the Phase 1
+proposal record/store/review-agent primitives were delivered, states
+plainly: "Wiring an actual proposal producer — e.g.
+ml/learning_mode.py's nightly retrain creating a 'model_promotion'
+proposal instead of calling ModelRegistry.promote() directly — is
+Phase 2 and not part of this delivery." Confirmed by inspection before
+writing any code: `ml/learning_mode.py::run_nightly_retrain()` still
+called `ModelRegistry.promote(model_id, model_type)` directly and
+unconditionally the instant a freshly retrained model beat
+`should_promote()`'s algorithmic gate (win rate up, profit factor up,
+drawdown not worse) — no human review, no pause, no visibility, run
+unattended by the nightly retrain cron. Zero references to
+`governance` or `proposal` existed anywhere in `api/app.py` or
+`dashboard_src/` at the time this entry was written.
+
+### Fix — Track A (backend) only
+
+`ml/learning_mode.py` rewritten around a new
+`_register_and_gate_promotion()` helper, called only after
+`should_promote()` already returned True (identical to the pre-§58
+call pattern — a model that doesn't beat the gate is still never even
+registered). The model is always registered (saved to disk/DB,
+`active=0`) as a candidate. What happens next depends on
+`settings.MODEL_PROMOTION_REQUIRES_APPROVAL` (new, default `True`):
+
+- `False` — promotes immediately. Byte-for-byte the pre-§58 behavior,
+  kept for dev/testnet environments that deliberately want unattended
+  promotion.
+- `True` (default) — creates an `UpdateProposal`
+  (`proposal_type="model_promotion"`, `target=f"model_registry.
+  {model_type}"`, `before`=current active model's stored metrics via
+  `reg.get_active(model_type)`, `after`=the new metrics, `metrics`
+  additionally carrying `model_id`/`model_type` — the only place this
+  information is recorded for `apply_proposal()` to find later — and,
+  when available, `training_rows_by_lane` from the new
+  `DatasetBuilder.get_lane_breakdown()`), persists it via
+  `ProposalStore.create()`, and runs it through Phase 1's
+  `UpdateReviewAgent` for a first-pass deterministic opinion
+  (`ProposalStore.set_review()`). Does **not** promote. If proposal
+  creation itself raises, the model is left un-promoted and the
+  failure logged — deliberately does not fall back to auto-promoting,
+  since that would silently defeat the entire purpose of the flag.
+
+New `governance/apply_proposal.py::apply_proposal(proposal_id)` — the
+one place an approved proposal actually takes effect. Re-validates
+`status == "approved"` and `proposal_type == "model_promotion"`
+itself rather than trusting the caller (Phase 2 scope is
+`model_promotion` only, mirroring `UpdateReviewAgent`'s own Phase 1
+scope note for the identical reason — no other proposal type has a
+defined "what does approving this actually DO" answer yet). Calls
+`ModelRegistry.promote()`, reloads `MLAdvisor` if `model_type ==
+"meta_label"` (best-effort — a failed reload doesn't undo the
+promotion), and marks the proposal `"applied"` on success or
+`"apply_failed"` on any exception. Never leaves a proposal silently
+stuck at `"approved"` with no record of what happened.
+
+Three new endpoints in `api/app.py` — the human side:
+
+- `GET /api/governance/proposals?status=&proposal_type=&limit=` —
+  `VIEWER` role (read-only, same tier as `/api/ml/models`).
+- `POST /api/governance/proposals/approve` `{"proposal_id": N}` —
+  `OPERATOR` role. Sets `status="approved"`, then for
+  `model_promotion` proposals immediately calls `apply_proposal()` —
+  approve and apply are one atomic operator action rather than two
+  separate steps, since a human clicking "approve" expects the model
+  to actually go live, not to have to remember a second step.
+  409 if not `"pending"`; 500 (approval already recorded, not rolled
+  back) if apply fails.
+- `POST /api/governance/proposals/reject` `{"proposal_id": N,
+  "reason": "..."}` — `OPERATOR` role, pure status write.
+
+Both POST routes added to `_AUTH_OPERATOR_ROUTES` — same trust tier as
+`/api/system/risk/override-next-trade`, for the same reason (a human
+overriding/authorizing something that changes real-money trading
+behavior). Uses a `proposal_id` body field rather than a
+`{proposal_id}` path parameter specifically because
+`_AUTH_OPERATOR_ROUTES` matches on exact `request.url.path` string
+membership and has no path-template matching — every existing entry
+in that set is a static path; a parameterized path would silently
+never match and the route would fall through to `VIEWER`-only auth.
+
+### Known follow-up (not this phase — flagged, not built)
+
+- **No dashboard/frontend UI.** This phase is Track A only, per
+  `docs/SEPARATION_POLICY.md`'s two-track discipline. An operator can
+  already list/approve/reject via the three endpoints above (curl,
+  Postman, any HTTP client) — there's no button in `dashboard_src/`
+  yet. A dedicated Track B phase (React component + its own
+  `npm run build` quality gates) would close this.
+- **`get_ensemble_learning_dataset()`'s N+1 query pattern** and
+  **`feature_store.get_training_rows()`'s missing `execution_lane`
+  filter** (LIVE and paper-training rows mix in every retrain) are
+  separate, pre-existing, still-open issues, not touched here.
+  `get_lane_breakdown()` only makes the LIVE/paper mix *visible* on a
+  proposal, per `governance/lane_breakdown.py`'s own docstring — it
+  doesn't fix the mixing itself.
+
+### Testing
+
+`tests/test_governance_phase2.py` — 23 new tests across
+`_register_and_gate_promotion()` (gated creates a proposal and leaves
+the model inactive; ungated promotes directly; proposal-creation
+failure does not fall back to auto-promote; lane breakdown attached
+when the builder provides it), `run_nightly_retrain()`'s end-to-end
+wiring, `apply_proposal()` (not-found, wrong status, wrong type,
+missing model metadata, success, and apply-failure all correctly
+recorded), and all three API endpoints (list + status/type filtering
+and validation, approve applying a `model_promotion` immediately,
+approve on a non-`model_promotion` type leaving it unapplied,
+approve/reject's 404/409 handling, and operator-route registration).
+
+Full suite: 3046 passed, 4 skipped, 45 deselected. Same 3 pre-existing
+`tests/test_dashboard_serving.py` failures as §55–§57 (missing
+frontend build artifact), unrelated and unaffected. `ruff check .`
+clean repo-wide. `vulture --min-confidence 80` clean on every changed
+file. `python -c "import main"` succeeds.

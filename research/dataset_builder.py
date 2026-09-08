@@ -59,6 +59,26 @@ class DatasetBuilder:
         try: return self._store.count(labelled_only=labelled_only)
         except Exception: return 0
 
+    def get_lane_breakdown(self, limit: int=10_000, symbol: str | None=None) -> dict[str, int]:
+        """V16 §58: how many training rows came from each execution_lane
+        (LIVE/TRAINING/PAPER) for the same row set export_training_dataframe()
+        would use — export_training_dataframe() itself drops the
+        execution_lane column (see its own `keep` list) before returning,
+        so this is a separate read rather than something callable on its
+        result. Exists so a governance model_promotion proposal
+        (ml/learning_mode.py) can honestly disclose what the training data
+        was actually made of — see governance/lane_breakdown.py's
+        docstring for why this matters (get_training_rows() has no lane
+        filter, so every retrain mixes LIVE with paper-training data
+        today)."""
+        from governance.lane_breakdown import compute_lane_breakdown
+        try:
+            rows = self._store.get_training_rows(limit=limit, symbol=symbol)
+            return compute_lane_breakdown(rows)
+        except Exception as exc:
+            logger.error(f"DatasetBuilder.get_lane_breakdown failed: {exc}", exc_info=True)
+            return {}
+
 _db: DatasetBuilder | None = None
 _db_lock = threading.Lock()
 
