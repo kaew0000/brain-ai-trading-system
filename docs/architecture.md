@@ -5895,3 +5895,71 @@ Full suite: 3046 passed, 4 skipped, 45 deselected. Same 3 pre-existing
 frontend build artifact), unrelated and unaffected. `ruff check .`
 clean repo-wide. `vulture --min-confidence 80` clean on every changed
 file. `python -c "import main"` succeeds.
+## 59. CORS: Deny by Default (2026-09-08)
+
+### Root cause
+
+`api/app.py`'s `CORSMiddleware` was configured `allow_origins=["*"]`
+— any website's JavaScript could read a response from any
+unauthenticated endpoint of this API, and probe others (server
+reachability permitting). Flagged as "CORS wide open" in this
+project's own `reports/SECURITY_AUDIT.md` and
+`docs/V16_AUDIT_REPORT.md`; had zero test coverage before this entry.
+
+Before changing it, traced every place this project's own browser
+code actually talks to the API, to confirm the wildcard wasn't secretly
+load-bearing:
+
+- The production dashboard is served *by this same FastAPI app*
+  (`/assets` `StaticFiles` mount) — same-origin, CORS isn't involved.
+- `dashboard_src/vite.config.ts`'s dev server proxies `/api` and `/ws`
+  server-side (`changeOrigin: true`) — the browser only ever talks to
+  `localhost:5173`, never directly to the backend.
+- `dashboard_src/src/lib/api.ts`: `const BASE = ''` — every request is
+  a relative URL, always same-origin, in every mode. No env-based
+  override to a different host exists.
+- The one credentialed flow (`credentials: 'include'`, the httpOnly
+  refresh cookie from Phase 4C) would have needed
+  `allow_credentials=True` on the middleware to ever function
+  cross-origin — never set (defaults `False`), so it could never have
+  worked cross-origin even before this fix.
+
+Conclusion: the wildcard served no actual function for this project
+and was pure attack surface.
+
+### Fix
+
+- `config/settings.py`: new `CORS_ALLOWED_ORIGINS: list[str]`, default
+  `[]` — deny-by-default, matching this project's posture for every
+  other safety toggle. Parses a JSON array from the env var, same
+  mechanism as the existing `API_KEYS: dict[str, str]`.
+- `api/app.py`: `CORSMiddleware(allow_origins=settings.
+  CORS_ALLOWED_ORIGINS, ...)`. `allow_methods`/`allow_headers` left as
+  `["*"]` — out of scope for this finding, and moot for any origin
+  that doesn't already pass the (now real) origin check.
+
+An empty allowlist doesn't reject requests server-side — this was
+never an auth mechanism. A disallowed-origin request still executes
+normally; it just receives no `Access-Control-Allow-Origin` header,
+which is what makes a browser withhold the response from that origin's
+JavaScript. Confirmed empirically in this phase's tests against the
+real running app.
+
+### Testing
+
+`tests/test_cors.py` — 7 tests: `CORS_ALLOWED_ORIGINS` defaults to
+`[]` and correctly parses a JSON-array env value; the real app's
+`CORSMiddleware` is wired from settings rather than a hardcoded
+wildcard, and an end-to-end request from an arbitrary origin against
+the real running app gets no CORS header; three tests against an
+isolated Starlette+CORSMiddleware instance pin the underlying
+mechanism itself (empty allowlist rejects everything, a populated one
+allows exactly its listed origin, and still rejects anything not on
+it) since nothing in this repo tested that library behavior before.
+
+Full suite: 3053 passed (up from 3046 in §58), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as §55–§58 (missing frontend build artifact), unrelated and
+unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` clean on every changed file. `python -c "import
+main"` succeeds.

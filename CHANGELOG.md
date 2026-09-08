@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## [Unreleased] — CORS: Deny by Default (V16 §59)
+
+`api/app.py`'s `CORSMiddleware` allowed any origin
+(`allow_origins=["*"]`) — flagged "CORS wide open" in
+`reports/SECURITY_AUDIT.md` / `docs/V16_AUDIT_REPORT.md`, never
+tested. Traced every actual browser call path in this project (the
+production dashboard, the Vite dev-server proxy, and
+`dashboard_src/src/lib/api.ts`'s `BASE = ''`) and confirmed none of
+them are cross-origin — the wildcard had zero functional purpose. See
+`docs/architecture.md` §59.
+
+### Fixed
+- `api/app.py` — `CORSMiddleware(allow_origins=settings.
+  CORS_ALLOWED_ORIGINS)` instead of a hardcoded `["*"]`.
+
+### Added
+- `config/settings.py` — `CORS_ALLOWED_ORIGINS: list[str]` (default
+  `[]`, deny-by-default).
+- `.env.example` — documented example for adding a genuine future
+  cross-origin browser client.
+- `tests/test_cors.py` — 7 tests (settings parsing, real-app wiring,
+  end-to-end origin rejection, and isolated middleware-behavior pins).
+
+Full suite: 3053 passed (up from 3046), 4 skipped, 45 deselected, same
+3 pre-existing/unrelated dashboard-build failures. ruff clean, vulture
+clean, import main succeeds.
+
+---
+
 ## [Unreleased] — Nightly Retrain Governance Gate, Phase 2 (V16 §58)
 
 `ml/learning_mode.py::run_nightly_retrain()` promoted a freshly
