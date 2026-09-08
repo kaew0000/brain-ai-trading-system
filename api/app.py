@@ -468,7 +468,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # V16 §59: was allow_origins=["*"]. See config/settings.py's own
+    # CORS_ALLOWED_ORIGINS docstring for why an empty default allowlist
+    # has zero functional impact on this project's actual deployment
+    # (same-origin production dashboard, proxied Vite dev server) while
+    # closing the "CORS wide open" finding from reports/SECURITY_AUDIT.md.
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

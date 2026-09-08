@@ -146,6 +146,24 @@ class Settings(BaseSettings):
     # JSON object mapping raw API key -> role ("admin"|"operator"|"viewer").
     # e.g. API_KEYS={"changeme-op-key":"operator","changeme-view-key":"viewer"}
     API_KEYS: dict[str, str] = Field(default_factory=dict, alias="API_KEYS")
+    # V16 §59: browser-facing origins allowed to make cross-origin requests
+    # to this API. Empty by default — deny-by-default, matching this
+    # project's own posture for every other safety-relevant toggle
+    # (SCHEDULER_ENABLED, MODEL_PROMOTION_REQUIRES_APPROVAL, etc.). This is
+    # safe as a default with zero functional loss: the production
+    # dashboard is served BY this same FastAPI app (see api/app.py's
+    # /assets StaticFiles mount) — same-origin, no CORS involved at all —
+    # and the Vite dev server (dashboard_src/vite.config.ts) proxies
+    # /api and /ws server-side (changeOrigin: true), so the browser never
+    # sees a cross-origin request there either. An empty allowlist was
+    # previously "*" (any origin), which had no legitimate use case this
+    # project actually needs and was flagged in reports/SECURITY_AUDIT.md
+    # / docs/V16_AUDIT_REPORT.md as "CORS wide open". Add an origin here
+    # only for a genuine new cross-origin browser client (e.g. a separate
+    # mobile-web or third-party dashboard) — e.g.
+    # CORS_ALLOWED_ORIGINS=["https://mydash.example.com"]. Does not affect
+    # curl/server-to-server calls, which were never subject to CORS.
+    CORS_ALLOWED_ORIGINS: list[str] = Field(default_factory=list, alias="CORS_ALLOWED_ORIGINS")
     # HMAC signing secret for bearer JWTs. If left blank while
     # API_AUTH_ENABLED=true, api/auth.py generates a random per-process
     # secret and logs a critical warning (tokens won't survive a restart).
