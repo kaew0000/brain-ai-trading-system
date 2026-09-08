@@ -544,6 +544,17 @@ _AUTH_OPERATOR_ROUTES = {
     # real-money safety gate (risk/risk_engine.py).
     ("POST", "/api/system/risk/override-next-trade"),
     ("POST", "/api/system/risk/clear-override"),
+    # V16 §58: approving/rejecting a governance proposal is at least the
+    # same trust level -- approving a model_promotion proposal makes a
+    # new model start driving real trading decisions with real money
+    # (see governance/apply_proposal.py). proposal_id is a body field,
+    # not a path param (same shape as override-next-trade's `reason`
+    # above) -- _AUTH_OPERATOR_ROUTES below matches on exact
+    # request.url.path, which can't express a {proposal_id} path
+    # template, so these two are static paths like every other entry
+    # here. GET (listing proposals) stays VIEWER, same as /api/ml/models.
+    ("POST", "/api/governance/proposals/approve"),
+    ("POST", "/api/governance/proposals/reject"),
 }
 
 
@@ -1940,6 +1951,146 @@ async def system_risk_clear_override():
         raise
     except Exception as exc:
         logger.error(f"/api/system/risk/clear-override error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── V16 §58 — Governance proposal endpoints ─────────────────────────────────
+# See governance/__init__.py, governance/proposal_store.py,
+# agents/update_review_agent.py, governance/apply_proposal.py, and
+# ml/learning_mode.py's MODEL_PROMOTION_REQUIRES_APPROVAL gate. A
+# model_promotion proposal is created here indirectly — by the nightly
+# retrain, not by an API call — these three endpoints are the human side:
+# see what's pending, approve it (which also applies it immediately, see
+# governance/apply_proposal.py's docstring for why approve+apply are one
+# atomic operator action rather than two separate steps), or reject it.
+
+@app.get("/api/governance/proposals")
+async def governance_list_proposals(
+    status: str | None = Query(default=None),
+    proposal_type: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """List governance proposals, newest first. VIEWER role -- read-only,
+    same trust level as /api/ml/models."""
+    try:
+        from governance.proposal_store import get_proposal_store
+        from governance.update_proposal import STATUSES, PROPOSAL_TYPES
+        if status is not None and status not in STATUSES:
+            raise HTTPException(status_code=400, detail=f"status must be one of {STATUSES}")
+        if proposal_type is not None and proposal_type not in PROPOSAL_TYPES:
+            raise HTTPException(status_code=400, detail=f"proposal_type must be one of {PROPOSAL_TYPES}")
+        proposals = get_proposal_store().list(status=status, proposal_type=proposal_type, limit=limit)
+        return _ok({
+            "proposals": [p.to_row() | {"id": p.id} for p in proposals],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"/api/governance/proposals error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/governance/proposals/approve")
+async def governance_approve_proposal(request: Request, body: dict):
+    """Approve a pending proposal and, for proposal_type=="model_promotion"
+    (the only type with a defined apply behavior in Phase 2 -- see
+    governance/apply_proposal.py), immediately apply it: promote the
+    model and reload MLAdvisor if it's the meta_label model. If apply
+    fails, the proposal is left at status="apply_failed" (not silently
+    "approved" forever) and this endpoint returns 500 with the failure
+    reason -- the approval itself did happen and is not rolled back.
+
+    Body: { "proposal_id": 42 }. OPERATOR role required -- this makes a
+    new model start driving real trading decisions with real money.
+    """
+    proposal_id = (body or {}).get("proposal_id")
+    if not isinstance(proposal_id, int):
+        raise HTTPException(status_code=400, detail="proposal_id (int) is required")
+    try:
+        from governance.proposal_store import get_proposal_store
+        from governance.apply_proposal import apply_proposal, ProposalApplyError
+        store = get_proposal_store()
+        proposal = store.get(proposal_id)
+        if proposal is None:
+            raise HTTPException(status_code=404, detail=f"proposal #{proposal_id} not found")
+        if proposal.status != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=f"proposal #{proposal_id} is {proposal.status!r}, not 'pending'",
+            )
+
+        auth_ctx = getattr(request.state, "auth", None)
+        operator = auth_ctx.principal if auth_ctx is not None else "unauthenticated"
+        store.set_status(proposal_id, "approved")
+        logger.critical(f"GOVERNANCE: proposal #{proposal_id} approved by operator={operator}")
+
+        if proposal.proposal_type != "model_promotion":
+            return _ok({
+                "approved": True, "applied": False,
+                "proposal": store.get(proposal_id).to_row() | {"id": proposal_id},
+                "note": f"no defined apply behavior for {proposal.proposal_type!r} yet (Phase 2 scope: model_promotion only)",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+
+        try:
+            applied = apply_proposal(proposal_id)
+        except ProposalApplyError as exc:
+            raise HTTPException(status_code=500, detail=f"approved but apply failed: {exc}")
+        return _ok({
+            "approved": True, "applied": True,
+            "proposal": applied.to_row() | {"id": proposal_id},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"/api/governance/proposals/approve error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/governance/proposals/reject")
+async def governance_reject_proposal(request: Request, body: dict):
+    """Reject a pending proposal. Purely a status write -- the
+    registered-but-inactive model (for model_promotion proposals) is
+    left on disk for audit purposes, never applied.
+
+    Body: { "proposal_id": 42, "reason": "..." (optional) }. OPERATOR
+    role required, same trust level as approve.
+    """
+    proposal_id = (body or {}).get("proposal_id")
+    if not isinstance(proposal_id, int):
+        raise HTTPException(status_code=400, detail="proposal_id (int) is required")
+    reason = (body or {}).get("reason", "").strip()
+    try:
+        from governance.proposal_store import get_proposal_store
+        store = get_proposal_store()
+        proposal = store.get(proposal_id)
+        if proposal is None:
+            raise HTTPException(status_code=404, detail=f"proposal #{proposal_id} not found")
+        if proposal.status != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=f"proposal #{proposal_id} is {proposal.status!r}, not 'pending'",
+            )
+
+        auth_ctx = getattr(request.state, "auth", None)
+        operator = auth_ctx.principal if auth_ctx is not None else "unauthenticated"
+        if reason:
+            store.set_review(proposal_id, proposal.review_verdict,
+                              f"{proposal.review_reasoning} | rejected by {operator}: {reason}".strip(" |"),
+                              proposal.review_score)
+        store.set_status(proposal_id, "rejected")
+        logger.critical(f"GOVERNANCE: proposal #{proposal_id} rejected by operator={operator} ({reason or 'no reason given'})")
+        return _ok({
+            "rejected": True,
+            "proposal": store.get(proposal_id).to_row() | {"id": proposal_id},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"/api/governance/proposals/reject error: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

@@ -1,5 +1,6 @@
 """
 ml/learning_mode.py — Phase 3C: Nightly retrain + safe promotion
+V16 §58: gated promotion via the governance layer (Phase 2)
 
 Behavior (per spec):
   1. Export training DataFrame from FeatureStore
@@ -8,11 +9,122 @@ Behavior (per spec):
   4. Promote ONLY IF: Win Rate↑ AND Profit Factor↑ AND Drawdown not worse
   5. Never auto-promote a failing model
   6. Reload MLAdvisor on promotion
+
+§58 addition: "promote" above no longer always means "make it active
+immediately". When settings.MODEL_PROMOTION_REQUIRES_APPROVAL is True
+(the default), a model that beats should_promote()'s gate is registered
+as a candidate (saved, but left inactive) and a governance
+UpdateProposal is created for a human to review instead — see
+governance/__init__.py and docs/architecture.md §58 for the full
+rationale. Only when MODEL_PROMOTION_REQUIRES_APPROVAL is explicitly
+set False does this module still promote unattended, exactly as it did
+before §58.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
+from config.settings import settings
 from utils.logger import get_logger
 logger = get_logger(__name__)
+
+
+def _register_and_gate_promotion(
+    reg, model_type: str, model_obj, algorithm: str, metrics: dict,
+    notes: str, builder, symbol: str | None,
+) -> tuple[bool, str, int | None]:
+    """Only call this once reg.should_promote(metrics, model_type) is
+    already True — mirrors the pre-§58 call pattern exactly: register()
+    only ever runs for a model that already beat the promotion gate.
+
+    Registers the model (always saved to disk/DB as a candidate,
+    active=0), then either promotes it immediately
+    (MODEL_PROMOTION_REQUIRES_APPROVAL=False) or creates a pending
+    governance proposal for a human to review (True, the default).
+
+    Returns (promoted, reason, proposal_id) — proposal_id is None
+    whenever promoted is True (nothing pending) or a proposal couldn't
+    be created.
+    """
+    model_id = reg.register(
+        model_type, model_obj, algorithm,
+        int(metrics.get("training_rows", 0)), metrics, notes=notes,
+    )
+
+    if not settings.MODEL_PROMOTION_REQUIRES_APPROVAL:
+        reg.promote(model_id, model_type)
+        if model_type == "meta_label":
+            try:
+                from ml.ml_advisor import get_ml_advisor
+                get_ml_advisor().reload()
+            except Exception:
+                pass
+        return True, (
+            f"promoted #{model_id} "
+            f"wr={metrics.get('win_rate', 0):.3f} "
+            f"pf={metrics.get('profit_factor', 0):.3f}"
+        ), None
+
+    try:
+        from governance.proposal_store import get_proposal_store
+        from governance.update_proposal import UpdateProposal
+        from agents.update_review_agent import get_update_review_agent
+
+        before = reg.get_active(model_type) or {}
+        proposal_metrics = dict(metrics)
+        proposal_metrics["model_id"] = model_id
+        proposal_metrics["model_type"] = model_type
+        if builder is not None:
+            lane_breakdown = builder.get_lane_breakdown(symbol=symbol)
+            if lane_breakdown:
+                proposal_metrics["training_rows_by_lane"] = lane_breakdown
+
+        proposal = UpdateProposal(
+            proposal_type="model_promotion",
+            target=f"model_registry.{model_type}",
+            before=before,
+            after=metrics,
+            rationale=(
+                f"Nightly retrain: {model_type} #{model_id} beat "
+                f"should_promote()'s gate (win_rate "
+                f"{before.get('win_rate', 0):.3f}->{metrics.get('win_rate', 0):.3f}, "
+                f"profit_factor {before.get('profit_factor', 0):.3f}->"
+                f"{metrics.get('profit_factor', 0):.3f}, max_drawdown "
+                f"{before.get('max_drawdown', 0):.3f}->{metrics.get('max_drawdown', 0):.3f})."
+            ),
+            metrics=proposal_metrics,
+            generated_by="ml.learning_mode.run_nightly_retrain",
+        )
+        store = get_proposal_store()
+        proposal_id = store.create(proposal)
+        proposal.id = proposal_id
+
+        review = get_update_review_agent().review(proposal)
+        store.set_review(proposal_id, review.verdict, review.reasoning, review.score)
+
+        logger.critical(
+            f"GOVERNANCE: {model_type} #{model_id} registered but NOT "
+            f"promoted -- pending human approval as proposal #{proposal_id} "
+            f"(review: {review.verdict or 'unscored'}, score={review.score:.2f})"
+        )
+        return False, (
+            f"registered #{model_id} but not promoted -- pending human "
+            f"approval as proposal #{proposal_id} "
+            f"(review: {review.verdict or 'unscored'})"
+        ), proposal_id
+    except Exception as exc:
+        # A failure to create the proposal must NOT fall back to
+        # promoting unattended — that would silently defeat the whole
+        # point of MODEL_PROMOTION_REQUIRES_APPROVAL. The model stays
+        # registered (inactive) either way; whoever notices this error
+        # can create/approve a proposal manually.
+        logger.error(
+            f"LearningMode: failed to create governance proposal for "
+            f"{model_type} #{model_id} -- left un-promoted, NOT falling "
+            f"back to auto-promote: {exc}", exc_info=True,
+        )
+        return False, (
+            f"registered #{model_id} but governance proposal creation "
+            f"failed ({exc}) -- left un-promoted, needs manual review"
+        ), None
 
 
 def run_nightly_retrain(min_rows: int = 50, symbol: str | None = None) -> dict:
@@ -54,25 +166,15 @@ def run_nightly_retrain(min_rows: int = 50, symbol: str | None = None) -> dict:
             model, metrics = train_result
             result["meta_label"]["trained"] = True
             if reg.should_promote(metrics, "meta_label"):
-                model_id = reg.register(
-                    "meta_label", model, "xgboost_or_gbm",
-                    int(metrics.get("training_rows", 0)), metrics,
-                    notes="auto-promoted by learning_mode",
+                promoted, reason, proposal_id = _register_and_gate_promotion(
+                    reg, "meta_label", model, "xgboost_or_gbm", metrics,
+                    "auto-promoted by learning_mode", builder, symbol,
                 )
-                reg.promote(model_id, "meta_label")
-                result["meta_label"]["promoted"] = True
-                result["meta_label"]["reason"] = (
-                    f"promoted #{model_id} "
-                    f"wr={metrics.get('win_rate',0):.3f} "
-                    f"pf={metrics.get('profit_factor',0):.3f}"
-                )
-                # Reload advisor so it picks up the new model immediately
-                try:
-                    from ml.ml_advisor import get_ml_advisor
-                    get_ml_advisor().reload()
-                except Exception:
-                    pass
-                logger.info(f"LearningMode: meta_label promoted #{model_id}")
+                result["meta_label"]["promoted"] = promoted
+                result["meta_label"]["reason"] = reason
+                if proposal_id is not None:
+                    result["meta_label"]["proposal_id"] = proposal_id
+                logger.info(f"LearningMode: meta_label {reason}")
             else:
                 result["meta_label"]["reason"] = "metrics did not beat current model"
                 logger.info("LearningMode: meta_label trained but not promoted (metrics worse)")
@@ -86,13 +188,14 @@ def run_nightly_retrain(min_rows: int = 50, symbol: str | None = None) -> dict:
             op_model, op_metrics = op_result
             result["outcome_predictor"]["trained"] = True
             if reg.should_promote(op_metrics, "outcome_predictor"):
-                op_id = reg.register(
-                    "outcome_predictor", op_model, "logistic_regression",
-                    int(op_metrics.get("training_rows", 0)), op_metrics,
+                promoted, reason, proposal_id = _register_and_gate_promotion(
+                    reg, "outcome_predictor", op_model, "logistic_regression",
+                    op_metrics, "", builder, symbol,
                 )
-                reg.promote(op_id, "outcome_predictor")
-                result["outcome_predictor"]["promoted"] = True
-                result["outcome_predictor"]["reason"] = f"promoted #{op_id}"
+                result["outcome_predictor"]["promoted"] = promoted
+                result["outcome_predictor"]["reason"] = reason
+                if proposal_id is not None:
+                    result["outcome_predictor"]["proposal_id"] = proposal_id
             else:
                 result["outcome_predictor"]["reason"] = "metrics did not beat current"
 

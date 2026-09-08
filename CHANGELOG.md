@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## [Unreleased] — Nightly Retrain Governance Gate, Phase 2 (V16 §58)
+
+`ml/learning_mode.py::run_nightly_retrain()` promoted a freshly
+retrained model straight to active the moment it beat
+`should_promote()`'s algorithmic gate, unattended, with no human ever
+seeing it first. The governance building blocks to prevent this
+already existed (`governance/proposal_store.py`,
+`agents/update_review_agent.py`, the `update_proposals` table) but
+were completely unwired — `governance/__init__.py`'s own docstring
+said as much: "Phase 2 and not part of this delivery." This entry is
+that Phase 2. See `docs/architecture.md` §58.
+
+### Added
+- `config/settings.py` — `MODEL_PROMOTION_REQUIRES_APPROVAL: bool`
+  (default `True`).
+- `governance/apply_proposal.py` — applies an approved
+  `model_promotion` proposal (promotes the model, reloads `MLAdvisor`
+  if `meta_label`); marks `"applied"` or `"apply_failed"`, never
+  silent.
+- `research/dataset_builder.py::get_lane_breakdown()` — wires up
+  `governance/lane_breakdown.py`'s already-written
+  `compute_lane_breakdown()` (its own docstring: "that's Phase 2's
+  job") so proposals can disclose LIVE/paper training-data mix.
+- `api/app.py` — `GET /api/governance/proposals`,
+  `POST .../approve` (`OPERATOR` role, applies `model_promotion`
+  immediately on approval), `POST .../reject` (`OPERATOR` role).
+- `tests/test_governance_phase2.py` — 23 tests.
+
+### Changed
+- `ml/learning_mode.py` — rewritten: a model that beats
+  `should_promote()` is now registered and, by default, held as a
+  pending governance proposal instead of promoted immediately.
+  `MODEL_PROMOTION_REQUIRES_APPROVAL=False` restores the exact
+  pre-§58 unattended-promotion behavior.
+
+### Unaffected (explicitly out of scope, documented)
+- No dashboard/frontend UI (Track B) — operators use the API directly
+  for now. See PATCH_NOTES.md.
+- `apply_proposal()` only has defined behavior for
+  `proposal_type="model_promotion"` — mirrors `UpdateReviewAgent`'s
+  pre-existing Phase 1 scope.
+
+---
+
 ## [Unreleased] — Close Out V16 BUG-LIVE-RISK-06: Scheduler-Path Gate 0 + Restart Persistence
 
 Closes both items flagged as "known follow-up, not fixed" in the

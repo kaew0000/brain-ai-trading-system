@@ -290,6 +290,20 @@ class Settings(BaseSettings):
     # hard gate is verdict="approve_recommended" rather than "caution".
     REVIEW_SCORE_APPROVE_THRESHOLD: float = Field(default=0.6, alias="REVIEW_SCORE_APPROVE_THRESHOLD")
 
+    # V16 §58 (Phase 2): gates ml/learning_mode.py::run_nightly_retrain()
+    # between "create a governance proposal for a human to review" (True,
+    # the default) and the pre-§58 behaviour of promoting a model straight
+    # to active the moment it beats should_promote()'s gate, with no human
+    # ever seeing it first (False). Defaults True — a model that changes
+    # live trading decisions with real money going active unattended
+    # overnight, with only an algorithmic win_rate/profit_factor/drawdown
+    # check standing between it and production, is exactly the kind of
+    # thing this project's own governance/__init__.py module docstring was
+    # written to prevent. Set False only to restore the old unattended
+    # behaviour deliberately (e.g. a dev/testnet environment where nightly
+    # auto-promotion is actually wanted).
+    MODEL_PROMOTION_REQUIRES_APPROVAL: bool = Field(default=True, alias="MODEL_PROMOTION_REQUIRES_APPROVAL")
+
     # ── Market Scanner (V16 Phase 2, Part 1) ───────────────
     # Off by default: (1) this is a brand-new background thread making live
     # exchange calls — it must never auto-start just because main.py or a

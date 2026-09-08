@@ -1,142 +1,131 @@
-# PATCH NOTES — Close Out V16 BUG-LIVE-RISK-06: Scheduler-Path Gate 0 + Restart Persistence
+# PATCH NOTES — Nightly Retrain Governance Gate, Phase 2 (V16 §58)
 
-Branch: `fix/risk-override-scheduler-gate-and-restart-persistence`
-Base: `main` @ `a1fe1c2` (merge of PR #92, report()/peek_can_trade() fix)
+Branch: `feat/nightly-retrain-governance-gate`
+Base: `main` @ `29784c1` (merge of PR #93, scheduler Gate 0 + restart persistence)
 
-This phase closes both items flagged as "known follow-up, not fixed"
-in PR #92's PATCH_NOTES:
+## Root cause / gap
 
-1. `portfolio/capital_manager.py`'s Gate 0 still calling the
-   consuming `can_trade()` (dormant today, `SCHEDULER_ENABLED=False`,
-   but wrong once the multi-symbol scheduler path is enabled).
-2. The sibling branch `fix/risk-override-persists-across-restart`
-   (commit `61cea14`, unmerged, no PR opened) that would otherwise
-   conflict with PR #92 on merge.
+`ml/learning_mode.py::run_nightly_retrain()` called `ModelRegistry.
+promote(model_id, model_type)` directly, unconditionally, the moment a
+freshly retrained model beat `should_promote()`'s algorithmic gate
+(win rate up, profit factor up, drawdown not worse). No human ever
+saw the model before it started driving live trading decisions with
+real money — the nightly cron makes that call unattended.
 
-## Part 1 — Scheduler-path Gate 0 (root cause)
+The governance building blocks to prevent exactly this already
+existed in the codebase (`governance/proposal_store.py`,
+`governance/update_proposal.py`, `agents/update_review_agent.py`,
+the `update_proposals` DB table in `database/schema_v13.sql`) but were
+completely unwired: `governance/__init__.py`'s own module docstring
+states "Wiring an actual proposal producer... is Phase 2 and not part
+of this delivery." Confirmed by grep: zero references to `proposal`
+or `governance` anywhere in `api/app.py` or `dashboard_src/`, and zero
+imports of the `governance` package from `ml/learning_mode.py`.
 
-`portfolio/capital_manager.py:157` (`CapitalManager.decide()`'s
-"Gate 0", `# Never allocate if RiskEngine already blocks trading —
-checked before anything else, unconditionally`) called
-`risk_engine.can_trade(balance)` — the consuming gate — as a
-pre-check, before any candidate had been ranked, filtered, or
-allocated capital.
+## Fix (Track A / backend only — see Known follow-up)
 
-Traced the full scheduler flow (`execution/execution_scheduler.py` →
-`portfolio/portfolio_manager.py::decide()` →
-`portfolio/capital_manager.py::decide()` →
-`execution/execution_orchestrator.py::execute()`) to confirm: after
-Gate 0 passes, `CapitalManager.decide()` runs per-candidate
-eligibility gates (`portfolio_full`, `already_held`,
-`liquidity_below_minimum`, `spread_below_minimum`,
-`coverage_below_minimum`, `correlation_hard_reject`,
-`risk_budget_exhausted`, `no_capital_remaining`), and
-`PortfolioManager.decide()` layers on further cooldown and
-sector-exposure filtering on top of that. Any of these can reduce the
-final `selected`/`replacements` lists to empty. `execute()` itself
-never touches `RiskEngine` at all. So an armed one-shot override could
-be consumed by Gate 0 and then never actually used for a real order —
-the same failure mode as the just-fixed `report()` bug, one layer
-deeper.
+- **`config/settings.py`** — new `MODEL_PROMOTION_REQUIRES_APPROVAL: bool`
+  (default `True`).
+- **`ml/learning_mode.py`** — rewritten. New
+  `_register_and_gate_promotion()` helper: always registers the
+  candidate model (unchanged — a model that doesn't beat
+  `should_promote()` is still never even saved, exactly as before).
+  When the model beats the gate:
+  - `MODEL_PROMOTION_REQUIRES_APPROVAL=False` → promotes immediately,
+    byte-for-byte the old behavior (for dev/testnet environments that
+    deliberately want unattended promotion).
+  - `MODEL_PROMOTION_REQUIRES_APPROVAL=True` (default) → creates an
+    `UpdateProposal` (`proposal_type="model_promotion"`, `before`=
+    current active model's metrics, `after`=new metrics, `metrics`
+    carries `model_id`/`model_type` so the proposal knows what to
+    apply later), persists it via `ProposalStore`, runs it through
+    `UpdateReviewAgent` (Phase 1's deterministic
+    hard-gate-then-composite-score reviewer) for a first-pass opinion,
+    and stops — does **not** promote. If proposal creation itself
+    fails, the model is left un-promoted and the failure is logged —
+    deliberately does **not** fall back to auto-promoting, which would
+    silently defeat the whole point of the flag.
+- **`governance/apply_proposal.py`** (new) — the one place an
+  `status="approved"` proposal actually takes effect:
+  re-validates status is `"approved"` and `proposal_type` is
+  `"model_promotion"` (Phase 2 scope, mirrors
+  `UpdateReviewAgent`'s own Phase 1 scope note), then calls
+  `ModelRegistry.promote()` and reloads `MLAdvisor` if it's the
+  `meta_label` model. Marks the proposal `"applied"` on success or
+  `"apply_failed"` on any exception — never leaves it silently stuck.
+- **`research/dataset_builder.py`** — new `get_lane_breakdown()`
+  method (thin wrapper around `governance/lane_breakdown.py`'s
+  `compute_lane_breakdown()`, which was already written and already
+  said in its own docstring "that's Phase 2's job in
+  ml/learning_mode.py"). Attaches `training_rows_by_lane` to a
+  proposal's metrics for audit honesty about what the training data
+  actually contained (relevant given `feature_store.get_training_rows()`
+  has no `execution_lane` filter — LIVE and paper-training rows mix in
+  every retrain today, a separate known issue, not fixed here).
+- **`api/app.py`** — three new endpoints, the human side of this:
+  - `GET /api/governance/proposals?status=&proposal_type=&limit=` —
+    list, `VIEWER` role (read-only, same tier as `/api/ml/models`).
+  - `POST /api/governance/proposals/approve` `{"proposal_id": N}` —
+    `OPERATOR` role. Sets `status="approved"`, then for
+    `model_promotion` proposals immediately calls `apply_proposal()`
+    (approve+apply is one atomic operator action, not two separate
+    steps — see the endpoint's own docstring for why). Returns 409 if
+    the proposal isn't `"pending"`, 500 (with the approval already
+    recorded) if apply fails.
+  - `POST /api/governance/proposals/reject` `{"proposal_id": N,
+    "reason": "..."}` — `OPERATOR` role. Pure status write; a
+    rejected model_promotion's registered-but-inactive model is left
+    on disk for audit purposes.
+  - `("POST", ".../approve")` and `("POST", ".../reject")` added to
+    `_AUTH_OPERATOR_ROUTES` — same trust tier as arming a risk
+    override (`api/app.py`'s own comment there says why: this makes a
+    new model start driving real trading decisions with real money).
+    Uses a body field (`proposal_id`), not a path parameter, because
+    `_AUTH_OPERATOR_ROUTES` matches on exact `request.url.path` and
+    can't express a `{proposal_id}` template — same shape as the
+    existing `override-next-trade` endpoint's `reason` body field.
 
-### Fix
+## Known follow-up (not this phase — flagged, not built)
 
-- `portfolio/capital_manager.py` — Gate 0 now calls
-  `risk_engine.peek_can_trade(balance)` (read-only, added in PR #92).
-  Manual holds and genuine account-level blocks (daily loss latch,
-  consecutive-loss latch with no override armed) still short-circuit
-  the whole cycle exactly as before — only the "consume an armed
-  override just to pre-check" behavior changes.
-- `execution/execution_scheduler.py::run_once()` — added the real,
-  consuming `risk_engine.can_trade(balance)` call, placed immediately
-  before `ExecutionOrchestrator.execute()`, and only reached when
-  `decision.selected` or `decision.replacements` is non-empty (i.e.
-  there is definitely something about to be executed this cycle).
-  Mirrors `main.py`'s own gate placement for the legacy single-symbol
-  loop — same principle (peek early, consume late), same relative
-  position (immediately before the code that actually places orders).
-- `portfolio/portfolio_models.py` — one docstring comment updated for
-  accuracy (`PortfolioDecision.blocked` now documents
-  `peek_can_trade()`, not `can_trade()`).
+**No dashboard UI.** This phase is Track A (backend) only, per this
+project's own `docs/SEPARATION_POLICY.md` two-track discipline. An
+operator can review and act on pending proposals today via
+`GET /api/governance/proposals` and the two POST endpoints (curl,
+Postman, or any HTTP client) — there is no button in
+`dashboard_src/` yet. Building that is a separate, dedicated
+Track B/frontend phase (React component, `npm run build`, its own
+quality gates) and was not started here.
 
-**Known, documented divergence (not fixed this phase):** if
-`CapitalManager.decide()` selects more than one allocation in the same
-cycle, one consumed override now lets the entire batch through, not
-just one probe trade — because the override is single-symbol-loop
-"one `can_trade()` call = one trade" by design, and the scheduler path
-can produce multiple simultaneous orders per cycle. Flagged in
-`docs/architecture.md` §57 and in `execution_scheduler.py`'s own
-comment at the new call site, not silently redesigned. Dormant either
-way today (`SCHEDULER_ENABLED=False` default).
-
-## Part 2 — Restart persistence (BUG-LIVE-RISK-04)
-
-Integrated `fix/risk-override-persists-across-restart` (commit
-`61cea14`) on top of PR #92's `_evaluate(mutate=bool)` refactor,
-faithfully reproducing its design (verified by diffing that commit
-against its own base `c0d12a0` in isolation, not against current
-`main`, to see its changes cleanly):
-
-- `journal/journal_v2.py` — new `risk_engine_state` table
-  (lazily created, `CREATE TABLE IF NOT EXISTS`) plus
-  `save_risk_override()` / `get_risk_override()` /
-  `clear_risk_override()`.
-- `risk/risk_engine.py::__init__` — restores a persisted override on
-  construction, guarded by `isinstance(restored, str)` specifically
-  because most existing `RiskEngine` tests construct it with a bare
-  `MagicMock()` journal, and `getattr(mock, "get_risk_override", None)`
-  is truthy on an unconfigured mock (returns another MagicMock, not
-  `None`) — the `str` check is what stops every one of those tests
-  from silently getting a fake override armed on construction.
-- `override_next_trade_despite_streak()` / `clear_consecutive_loss_
-  override()` — now write-through / clear the persisted copy.
-- Both consumption points inside `_evaluate()`'s `if mutate:` branches
-  — now also call `_clear_persisted_override()`. Persistence is
-  cleared only on real consumption (`mutate=True`), never by
-  `peek_can_trade()`, consistent with PR #92's mutate/peek split.
-- `tests/test_risk_override_persistence.py` — brought in unchanged
-  (11 tests): journal round-trip, restore-on-construction, end-to-end
-  restore-then-consume, and the MagicMock false-positive guard.
+**Proposal apply is scoped to `model_promotion` only.** Approving any
+other `proposal_type` (e.g. a future `agent_weight` proposal) sets
+`status="approved"` and stops there with no further effect — see the
+approve endpoint's response `note` field and
+`governance/apply_proposal.py`'s own docstring. This mirrors
+`UpdateReviewAgent`'s pre-existing Phase 1 scope limitation, not a new
+gap introduced here.
 
 ## Tests
 
-New/updated:
-- `tests/test_execution_scheduler.py` — `FakeRiskEngine` added
-  (previous `risk_engine=object()` default silently worked only
-  because nothing called it directly before this phase; now
-  `run_once()` does). 4 new tests in `TestRealRiskGate`: called
-  exactly once on a successful cycle, blocks execution even when
-  `decide()` itself wasn't blocked, NOT called when nothing was
-  selected/replaced, NOT called when `decide()` was already blocked.
-- `tests/test_capital_manager.py`, `tests/test_portfolio_manager.py`
-  — `make_risk_engine(blocked=True)` now mocks both `can_trade` and
-  `peek_can_trade` identically (Gate 0 calls the latter now).
-- `tests/test_risk_override_persistence.py` — new, 11 tests (from the
-  sibling branch, unmodified).
+New: `tests/test_governance_phase2.py` — 23 tests across
+`_register_and_gate_promotion()`/`run_nightly_retrain()` wiring,
+`apply_proposal()` (not-found, wrong status, wrong type, missing
+metadata, success, failure-marks-apply_failed), and all three API
+endpoints (list/filter, approve success + applies immediately, approve
+on a non-`model_promotion` type leaves it unapplied, approve/reject
+validation and 404/409 handling, operator-route registration).
 
-Full suite: `pytest tests/` → **3023 passed, 4 skipped, 45
+Full suite: `pytest tests/` → **3046 passed, 4 skipped, 45
 deselected**. Same 3 pre-existing `tests/test_dashboard_serving.py`
-failures as PR #91/#92 (missing frontend build artifact) — unrelated,
-confirmed unaffected by this diff.
+failures as every prior phase this week (missing frontend build
+artifact) — unrelated, unaffected.
 
-`ruff check .` → all checks passed (repo-wide). `vulture` on every
-changed source file, `--min-confidence 80` → no dead code.
+`ruff check .` → all checks passed, repo-wide. `vulture
+--min-confidence 80` → clean on every changed file.
 `python -c "import main"` → succeeds.
 
 ## Files changed
 
-`risk/risk_engine.py`, `journal/journal_v2.py`,
-`portfolio/capital_manager.py`, `portfolio/portfolio_models.py`,
-`execution/execution_scheduler.py`, `tests/test_audit_fixes.py`
-(unchanged from PR #92, carried forward), `tests/test_capital_manager.py`,
-`tests/test_portfolio_manager.py`, `tests/test_execution_scheduler.py`,
-`tests/test_risk_override_persistence.py` (new), `PATCH_NOTES.md`,
-`MIGRATION.md`, `CHANGELOG.md`, `docs/architecture.md` (§57).
-
-## Superseded branch
-
-This branch supersedes `fix/risk-override-persists-across-restart`
-(`61cea14`) — its intent is fully incorporated here, rebased onto
-PR #92's refactor. Recommend closing that branch/PR without merging
-once this one lands, rather than merging both (they touch identical
-lines and would conflict).
+`config/settings.py`, `ml/learning_mode.py` (rewritten),
+`governance/apply_proposal.py` (new), `research/dataset_builder.py`,
+`api/app.py`, `tests/test_governance_phase2.py` (new), `PATCH_NOTES.md`,
+`MIGRATION.md`, `CHANGELOG.md`, `docs/architecture.md` (§58).
