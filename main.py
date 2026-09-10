@@ -1482,6 +1482,14 @@ def monitor_open_trades(sys: dict) -> None:
     """
     Check whether open journal records have been closed by SL/TP on the
     exchange, and update results accordingly.
+
+    V16 §60: when settings.SCHEDULER_ENABLED is true, checks each open
+    journal record against its OWN symbol's exchange position (via
+    data_provider.get_all_positions()) instead of the single
+    get_position_info() check below, which only ever asks about
+    settings.SYMBOL and would otherwise misread a genuinely-still-open
+    position in any other symbol as closed. See docs/architecture.md
+    §60 for the corruption bug this fixes.
     """
     try:
         get_heartbeat().beat("monitor_loop")
@@ -1503,14 +1511,33 @@ def monitor_open_trades(sys: dict) -> None:
         if not open_trades:
             return
 
-        pos = dp.get_position_info()
-        if pos is not None:
-            return   # still in a position
+        # V16 §60: SCHEDULER_ENABLED=true can have several genuinely
+        # open positions at once (one per traded symbol). The pre-§60
+        # single check below — dp.get_position_info() with no symbol,
+        # which only ever asks about settings.SYMBOL — would read as
+        # "no position" the instant a trade opened in ANY OTHER symbol,
+        # and this loop would then mark that still-genuinely-open
+        # position CLOSED in the journal. dp.get_all_positions() (V16
+        # §60) fetches every open exchange position in one call so each
+        # journal record can be checked against its own symbol instead.
+        if settings.SCHEDULER_ENABLED:
+            open_positions = {p["symbol"]: p for p in dp.get_all_positions()}
+            trades_to_process = [
+                t for t in open_trades
+                if (t.get("symbol") or settings.SYMBOL) not in open_positions
+            ]
+            if not trades_to_process:
+                return
+            mark_price_cache: dict[str, float] = {}
+        else:
+            pos = dp.get_position_info()
+            if pos is not None:
+                return   # still in a position
+            # Position closed – update journal records
+            mark = dp.get_mark_price()
+            trades_to_process = open_trades
 
-        # Position closed – update journal records
-        mark = dp.get_mark_price()
-
-        for trade in open_trades:
+        for trade in trades_to_process:
             tid       = trade["id"]
             entry     = float(trade["entry_price"])
             sl        = float(trade["stop_loss"])
@@ -1518,6 +1545,11 @@ def monitor_open_trades(sys: dict) -> None:
             direction = trade["direction"]
             qty       = float(trade.get("quantity", 0.0))
             symbol    = trade.get("symbol") or settings.SYMBOL
+
+            if settings.SCHEDULER_ENABLED:
+                if symbol not in mark_price_cache:
+                    mark_price_cache[symbol] = dp.get_mark_price(symbol=symbol)
+                mark = mark_price_cache[symbol]
 
             # Signed PnL — positive for profit, negative for loss
             if direction == "LONG":
@@ -2024,16 +2056,70 @@ def main() -> None:
     )
     _open_browser(api_port)
 
-    schedule.every(settings.LOOP_INTERVAL).seconds.do(run_trading_cycle,  components)
-    schedule.every(30).seconds.do(monitor_open_trades, components)
-    schedule.every(60).seconds.do(run_position_reconciliation, components)
-    # Track C3 Phase 2 — off by default; see config/settings.py
-    # ORDER_RECONCILIATION_ENABLED and run_ghost_reconciliation_check()'s
-    # own docstring above.
-    if settings.ORDER_RECONCILIATION_ENABLED:
-        schedule.every(settings.ORDER_RECONCILIATION_INTERVAL_SECONDS).seconds.do(
-            run_ghost_reconciliation_check, components
+    # V16 §60: run_trading_cycle (the classic single-symbol loop, fixed
+    # to settings.SYMBOL) and ExecutionScheduler (started above inside
+    # build_system() when SCHEDULER_ENABLED=True, on its OWN daemon
+    # thread — see execution/execution_scheduler.py::start()) must never
+    # both be live at once. Both independently decide whether to trade
+    # against the SAME balance/risk_engine/journal with no coordination
+    # between them — running concurrently risks two uncoordinated trade
+    # decisions in the same window, not just a wasted BTCUSDT cycle.
+    # SCHEDULER_ENABLED is the one flag that means "the scheduler is the
+    # sole source of new trade decisions this run" — enforced here by
+    # simply never registering the classic loop's job at all, rather
+    # than a runtime guard inside run_trading_cycle() itself, so the
+    # `schedule` job list stays a truthful picture of what can actually
+    # run (same principle already used for every other conditional job
+    # below).
+    if settings.SCHEDULER_ENABLED:
+        logger.info(
+            "SCHEDULER_ENABLED=true — classic single-symbol run_trading_cycle() "
+            "NOT scheduled; ExecutionScheduler's multi-symbol path is the "
+            "sole source of new trade decisions this run."
         )
+    else:
+        schedule.every(settings.LOOP_INTERVAL).seconds.do(run_trading_cycle, components)
+
+    # V16 §60: monitor_open_trades() itself is scheduled either way (see
+    # its own docstring for the SCHEDULER_ENABLED-aware multi-symbol
+    # branch inside it — it correctly handles either mode).
+    schedule.every(30).seconds.do(monitor_open_trades, components)
+
+    # V16 §60: run_position_reconciliation() (-> ReconciliationEngine.run()
+    # -> data_provider.get_position_info(), no symbol filter) and
+    # run_ghost_reconciliation_check() (same underlying read path — see
+    # that function's own docstring) are built around a single-current-
+    # position data model (has_position: bool, one side, one qty) that
+    # only ever checks settings.SYMBOL. Under SCHEDULER_ENABLED=true this
+    # is worse than merely blind to other symbols: system_health/
+    # recovery_engine.py's attempt_reconciliation_recovery() treats the
+    # exchange as root authority and CLEARS any journal/runtime record
+    # of a position the exchange view claims doesn't exist — a real,
+    # still-open position in any symbol other than settings.SYMBOL would
+    # read as exchange-flat (wrong symbol checked) and get auto-cleared
+    # as a "ghost", corrupting tracking of a genuinely live position.
+    # Not scheduling these here is the safe choice until reconciliation
+    # gets its own multi-symbol-aware redesign (a substantially larger,
+    # separate piece of work — see docs/architecture.md §60's Known
+    # follow-up) — the alternative, running it with known-wrong data,
+    # is actively dangerous rather than merely incomplete.
+    if settings.SCHEDULER_ENABLED:
+        logger.warning(
+            "SCHEDULER_ENABLED=true — run_position_reconciliation() and "
+            "run_ghost_reconciliation_check() NOT scheduled (both assume "
+            "a single position in settings.SYMBOL; see docs/architecture.md "
+            "§60's Known follow-up). Exchange-orphan-position auto-recovery "
+            "is unavailable for any symbol while running in scheduler mode."
+        )
+    else:
+        schedule.every(60).seconds.do(run_position_reconciliation, components)
+        # Track C3 Phase 2 — off by default; see config/settings.py
+        # ORDER_RECONCILIATION_ENABLED and run_ghost_reconciliation_check()'s
+        # own docstring above.
+        if settings.ORDER_RECONCILIATION_ENABLED:
+            schedule.every(settings.ORDER_RECONCILIATION_INTERVAL_SECONDS).seconds.do(
+                run_ghost_reconciliation_check, components
+            )
     schedule.every(1).hours.do(daily_report,            components)
     schedule.every().day.at("02:00").do(run_nightly_retrain_job)
     # V16 Phase 4C Step 4 — refresh _state["learning_recommendations"]

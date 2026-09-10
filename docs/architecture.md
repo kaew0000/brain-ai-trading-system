@@ -5963,3 +5963,133 @@ failures as §55–§58 (missing frontend build artifact), unrelated and
 unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` clean on every changed file. `python -c "import
 main"` succeeds.
+## 60. Multi-Symbol Scheduler Safety (2026-09-08)
+
+### Context
+
+Requested: move off a single fixed BTCUSDT symbol — its 50 USDT
+Binance minimum notional (raised from 100 USDT on 2026-04-14) doesn't
+size well against the account's actual $20 starting balance, given
+`RISK_PER_TRADE_MIN/MAX=0.5%/1%` and `MAX_MARGIN_USAGE=20%` at
+`LEVERAGE=5` (margin-cap ceiling works out to exactly $20 notional,
+already below BTCUSDT's floor before even considering stop-distance)
+— to true multi-symbol auto-selection via the existing but
+never-enabled-in-live-production `SCANNER_ENABLED`/`SCHEDULER_ENABLED`
+path. Rather than simply recommending the flags be flipped, traced
+what would actually happen first, since this path has never run
+against the live account.
+
+### Root causes found (three, none of them config)
+
+**1. No mutual exclusion.** `main.py::main()` scheduled
+`run_trading_cycle()` (classic single-symbol loop) unconditionally via
+the cooperative `schedule` library. `ExecutionScheduler` runs on its
+own genuinely separate `threading.Thread(daemon=True)` (see
+`execution/execution_scheduler.py::start()`). `SCHEDULER_ENABLED=true`
+alone would have left both live at once — two independent,
+uncoordinated decision-makers against the same
+balance/`risk_engine`/journal.
+
+**2. `monitor_open_trades()` could corrupt journal state for any
+non-default symbol.** Scheduled every 30s, unconditionally. Called
+`data_provider.get_position_info()` with no symbol argument, which
+traced into `data/binance_provider.py::BinanceDataProvider.
+get_position_info()` being hardcoded to `self.symbol` — the
+provider's single configured default (`settings.SYMBOL`). With more
+than one symbol capable of holding a position at once (the entire
+point of multi-symbol trading), a real open position in any symbol
+other than `settings.SYMBOL` reads as "no position," and this function
+then marks every open journal row (unfiltered by symbol) CLOSED,
+computing a WIN/LOSS and PnL that don't correspond to reality, while
+the actual position stays open and untracked on the exchange.
+
+**3. `run_position_reconciliation()`/`ReconciliationEngine` share the
+identical blind spot, with a worse failure mode.**
+`system_health/reconciliation.py::_read_exchange()` also calls
+`get_position_info()` with no symbol, feeding a data model
+(`has_position: bool`, one `side`, one `qty`) that has no concept of
+"which symbol." `system_health/recovery_engine.py::
+attempt_reconciliation_recovery()` treats the exchange as root
+authority: when its (wrongly single-symbol) view says flat, it
+**auto-clears** any journal/runtime record still claiming a position,
+believing it a stale "ghost." A real open position in a non-default
+symbol would trigger exactly this — its own journal record deleted by
+the recovery engine, purely from checking the wrong symbol.
+
+### Fix
+
+`data/binance_provider.py`:
+- `get_position_info(self, symbol: str | None = None)` — optional
+  `symbol` param, default `self.symbol` (every existing call site
+  unaffected; confirmed by re-running all 426 pre-existing tests
+  across every file touching this method or `monitor_open_trades()`).
+- New `get_all_positions(self) -> list[dict]` — one
+  `/fapi/v2/positionRisk` call with no symbol filter, every symbol
+  currently holding a non-zero position.
+
+`main.py`:
+- `main()`'s scheduling block: `run_trading_cycle` registered only
+  when `SCHEDULER_ENABLED=False`.
+- `monitor_open_trades()`: new `SCHEDULER_ENABLED=True` branch —
+  `get_all_positions()` once, then each open journal row checked
+  against its own symbol; per-symbol mark price fetched (and cached
+  per call) only for rows that actually need closing.
+  `SCHEDULER_ENABLED=False` path byte-for-byte unchanged.
+- `run_position_reconciliation`/`run_ghost_reconciliation_check`: not
+  scheduled when `SCHEDULER_ENABLED=True` (logged warning at startup)
+  — deliberate: running with known-wrong single-symbol data is worse
+  than not running at all, given recovery_engine's auto-clear
+  behavior above.
+
+### Known follow-up (not this phase)
+
+No multi-symbol-aware `ReconciliationEngine` exists. Its entire data
+model — mismatch classification, recovery actions, event publishing,
+repeat-fire suppression — is built around exactly one position. A
+proper fix is a real redesign of that class's data model, not a patch,
+and was out of scope to do safely alongside the fixes above. Practical
+consequence while running in scheduler mode: an orphaned exchange
+position (no journal record — e.g. from before this bot session) will
+not get the automatic protective-stop-loss treatment
+`_protect_orphaned_exchange_position()` already provides for the
+single-symbol path.
+
+Flags are not flipped by this patch — `SCHEDULER_ENABLED` stays
+`False` by default, matching this project's established posture for
+every dormant feature. See MIGRATION.md for exactly what to set and a
+recommendation to test on `BINANCE_TESTNET=true` first, since this is
+the first time this path will run against a live account regardless
+of what this patch fixed.
+
+### Testing
+
+`tests/test_multi_symbol_position_tracking.py` — 13 tests:
+`get_position_info(symbol=...)` default/override/no-position behavior;
+`get_all_positions()` correctness (non-zero-only, no symbol filter
+sent, empty-account case); `monitor_open_trades()`'s scheduler-mode
+branch via the real production function with a fake data
+provider/journal — the core bug (a position open in a different symbol
+is left alone), only-the-actually-closed-symbol gets processed,
+correct per-symbol mark price used for PnL, mark price fetched once
+per symbol even with multiple rows for the same symbol,
+nothing-to-process short-circuits cleanly, no-open-trades
+short-circuits before any exchange call; and a regression guard
+proving `SCHEDULER_ENABLED=False` never calls `get_all_positions()`.
+
+Re-ran all 426 pre-existing tests across every file touching
+`get_position_info`/`monitor_open_trades` — unaffected, confirming the
+`symbol=None` default preserves exact existing behavior.
+
+Full suite: 3066 passed (up from 3053 in §59), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as §55–§59 (missing frontend build artifact), unrelated and
+unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` clean on both changed source files (one
+pre-existing, unrelated finding in `main.py`'s signal-handler `frame`
+parameter, confirmed identical on unmodified `main`). `python -c
+"import main"` succeeds.
+
+Not automated: `main()`'s scheduling-block change itself (which job
+gets registered under which flag) — `main()` is a large,
+side-effecting entry point not designed for unit testing; verified by
+direct code review instead of an unrelated test-harness refactor.

@@ -464,12 +464,22 @@ class BinanceDataProvider:
             raise
 
     @retry_api_call(retries=3, delay=2.0, backoff=2.0)
-    def get_position_info(self) -> dict | None:
-        """Return open position dict or None."""
+    def get_position_info(self, symbol: str | None = None) -> dict | None:
+        """Return open position dict or None, for `symbol` (default:
+        this provider's configured self.symbol — unchanged behavior for
+        every existing caller that doesn't pass one).
+
+        V16 §60: symbol parameter added so callers with a genuine
+        multi-symbol open position to check (monitor_open_trades() when
+        SCHEDULER_ENABLED=True — see main.py) can ask about a specific
+        symbol instead of only ever getting this provider's single
+        default. See get_all_positions() below for checking every
+        symbol with an open position in one call."""
+        target_symbol = symbol or self.symbol
         try:
             with _TRADE_BREAKER:
                 raw = self.trade_client.get_position_risk(
-                    symbol=self.symbol, recvWindow=5000
+                    symbol=target_symbol, recvWindow=5000
                 )
             for p in raw:
                 amt = float(p.get("positionAmt", 0.0))
@@ -490,6 +500,49 @@ class BinanceDataProvider:
         except ClientError as exc:
             logger.error(f"Position info error: {exc}")
             raise
+
+    def get_all_positions(self) -> list[dict]:
+        """V16 §60: every symbol with a currently open (non-zero) position
+        on this account, in one call — Binance's /fapi/v2/positionRisk
+        returns positions for every symbol when called without a symbol
+        filter. Same dict shape as get_position_info()'s return value,
+        one entry per open symbol.
+
+        Exists for exactly one caller today: main.py's
+        monitor_open_trades()/run_position_reconciliation() under
+        SCHEDULER_ENABLED=True, which can have several genuinely open
+        positions at once (one per traded symbol) and needs to check
+        each journal record against ITS OWN symbol's exchange state,
+        not just this provider's single configured self.symbol (see
+        that function's own module-level comment for the corruption bug
+        this fixes: without this, an open position in any symbol other
+        than self.symbol was invisible to get_position_info(), causing
+        monitor_open_trades() to mark it CLOSED in the journal while it
+        was still genuinely open on the exchange)."""
+        try:
+            with _TRADE_BREAKER:
+                raw = self.trade_client.get_position_risk(recvWindow=5000)
+        except CircuitBreakerOpen as exc:
+            logger.warning(f"get_all_positions skipped — trade circuit open: {exc}")
+            raise
+        except ClientError as exc:
+            logger.error(f"get_all_positions error: {exc}")
+            raise
+
+        positions = []
+        for p in raw:
+            amt = float(p.get("positionAmt", 0.0))
+            if amt != 0.0:
+                positions.append({
+                    "symbol":            p.get("symbol"),
+                    "side":              "LONG" if amt > 0 else "SHORT",
+                    "positionAmt":       abs(amt),
+                    "entryPrice":        float(p.get("entryPrice", 0.0)),
+                    "unrealizedProfit":  float(p.get("unRealizedProfit", 0.0)),
+                    "leverage":          int(p.get("leverage", settings.LEVERAGE)),
+                    "markPrice":         float(p.get("markPrice", 0.0)),
+                })
+        return positions
 
     def get_all_market_data(self) -> dict:
         """Fetch all market data needed for one pipeline cycle."""
