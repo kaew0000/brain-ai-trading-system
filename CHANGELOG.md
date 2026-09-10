@@ -1,5 +1,52 @@
 # CHANGELOG
 
+## [Unreleased] — Multi-Symbol Scheduler Safety (V16 §60)
+
+Triggered by a request to move off a single fixed BTCUSDT symbol
+(50 USDT Binance minimum notional doesn't size well against a $20
+account) to true multi-symbol auto-selection. Before recommending
+"just flip SCHEDULER_ENABLED," traced the actual runtime behavior of a
+path that has never run live before and found three real bugs, not
+config gaps. See `docs/architecture.md` §60.
+
+### Fixed
+- `main.py` — the classic single-symbol loop (`run_trading_cycle`) and
+  `ExecutionScheduler` (its own daemon thread) could run concurrently
+  with no coordination, both deciding trades against the same
+  balance/risk_engine/journal. Now mutually exclusive on
+  `SCHEDULER_ENABLED`.
+- `main.py::monitor_open_trades()` — could mark a genuinely-still-open
+  position CLOSED in the journal if it wasn't in `settings.SYMBOL`,
+  because `data_provider.get_position_info()` only ever checked that
+  one hardcoded symbol. Real data-corruption bug once more than one
+  symbol can be open at once.
+- `main.py` — `run_position_reconciliation`/`run_ghost_reconciliation_
+  check` share the same single-symbol blind spot, and
+  `system_health/recovery_engine.py`'s auto-clear-on-exchange-flat
+  logic made this actively dangerous (could delete the journal record
+  of a real, open, non-default-symbol position). Not scheduled at all
+  under `SCHEDULER_ENABLED=true` — safety choice, not an oversight;
+  full multi-symbol reconciliation is flagged as follow-up.
+
+### Added
+- `data/binance_provider.py` — `get_position_info(symbol=...)` (backward
+  compatible, default unchanged) and new `get_all_positions()`.
+- `tests/test_multi_symbol_position_tracking.py` — 13 tests.
+
+### Unaffected (explicitly out of scope, documented)
+- No multi-symbol-aware `ReconciliationEngine` yet — its entire data
+  model is single-position-shaped; a real redesign, not a patch.
+- Flags not flipped by this patch — `SCHEDULER_ENABLED` stays `False`
+  by default; see MIGRATION.md for what to set.
+
+Re-ran all 426 pre-existing tests touching the changed functions —
+unaffected. Full suite: 3066 passed (up from 3053), 4 skipped, 45
+deselected, 3 pre-existing/unrelated dashboard-build failures. ruff
+clean, vulture clean (one pre-existing unrelated finding), import main
+succeeds.
+
+---
+
 ## [Unreleased] — CORS: Deny by Default (V16 §59)
 
 `api/app.py`'s `CORSMiddleware` allowed any origin
