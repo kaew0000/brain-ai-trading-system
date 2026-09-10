@@ -6093,3 +6093,75 @@ Not automated: `main()`'s scheduling-block change itself (which job
 gets registered under which flag) — `main()` is a large,
 side-effecting entry point not designed for unit testing; verified by
 direct code review instead of an unrelated test-harness refactor.
+
+## 61. SCHEDULER_ENABLED Implies Dynamic Symbols (2026-09-08)
+
+### Root cause
+
+Found while writing §60's own MIGRATION.md, before it could recommend
+an incomplete step: traced the full execution path a scanner-selected
+trade actually takes —
+
+```
+MarketScanner            → discovers candidates across the full Binance
+                            universe (execution/execution_coordinator.py's
+                            own module docstring), filtered only by
+                            SCANNER_MIN_QUOTE_VOLUME, not by any
+                            pre-configured symbol list
+CapitalManager            → selects from those candidates
+ExecutionOrchestrator     → execution_engine.execute_trade(symbol=alloc.symbol, ...)
+ExecutionCoordinator.get_manager(symbol) → raises ValueError if symbol
+                            not in self._symbols and not
+                            self._allow_dynamic_symbols
+```
+
+`settings.symbol_list` (the coordinator's pre-configured `_symbols`)
+defaults to `[settings.SYMBOL]` = `["BTCUSDT"]` when `SYMBOLS` is
+unset. `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` — the flag that lets
+`get_manager()` register a fresh `TradeManager` for a symbol it wasn't
+pre-configured with — defaults `False`, independently of
+`SCHEDULER_ENABLED`. Net effect: `SCANNER_ENABLED=true` +
+`SCHEDULER_ENABLED=true` alone (exactly what §60's own migration notes
+were about to recommend) would have every trade attempt in any symbol
+other than BTCUSDT hit this `ValueError` and fail. Fails loud and
+safe, not silently wrong — but the multi-symbol scheduler this project
+spent two phases making safe to enable would not, in practice, trade
+more than one symbol without a third, undocumented flag.
+
+### Fix
+
+`execution/execution_factory.py::build_execution_engine()`:
+`allow_dynamic_symbols=(settings.EXECUTION_COORDINATOR_DYNAMIC_
+SYMBOLS or settings.SCHEDULER_ENABLED)` instead of reading the first
+flag alone. Rationale: "trade every symbol the scanner finds" is the
+entire point of turning `SCHEDULER_ENABLED` on — requiring a separate,
+undiscovered flag just to make that actually work is a documentation
+gap, not a deliberate additional safety gate (unlike
+`SCHEDULER_ENABLED` itself, or `MODEL_PROMOTION_REQUIRES_APPROVAL`,
+which genuinely do gate something worth an operator pausing on).
+
+An operator who wants the opposite — scheduler on, but strictly
+confined to a fixed symbol list — already has that path and it's
+unaffected: set `settings.SYMBOLS` explicitly. Dynamic registration
+only ever *adds* symbols beyond a configured list, never overrides or
+bypasses it.
+
+### Testing
+
+`tests/test_execution_factory.py` — 2 new tests: the fix itself
+(`SCHEDULER_ENABLED=True` with the standalone flag left `False` still
+produces `_allow_dynamic_symbols is True`), and the reverse case
+pinned explicitly (`SCHEDULER_ENABLED=False` + flag `False` stays
+`False`) so this `or` can never silently widen the default posture for
+a deployment that isn't using the scheduler at all. Both pre-existing
+dynamic-symbol tests pass unchanged (neither touches
+`SCHEDULER_ENABLED`, so the new `or` term stays `False` for them).
+
+Full suite: 3068 passed (base 3066 from §60 + 2 new), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as every phase this week (missing frontend build artifact),
+unrelated and unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` on the changed source file: 3 pre-existing,
+unrelated findings only (`_PaperAdapter.execute_trade`'s
+`balance`/`leverage`/`symbol` params, confirmed identical against
+unmodified `main`). `python -c "import main"` succeeds.

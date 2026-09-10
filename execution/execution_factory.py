@@ -78,10 +78,36 @@ def build_execution_engine(data_provider=None, paper_balance: float = 10_000.0):
                 f"EXECUTION_MODE={mode} requires a BinanceDataProvider instance"
             )
         from execution.execution_coordinator import ExecutionCoordinator
+        # V16 §61: allow_dynamic_symbols is True whenever EITHER the
+        # operator explicitly asked for it OR SCHEDULER_ENABLED is on.
+        # Found during §60's own migration write-up: SCANNER_ENABLED +
+        # SCHEDULER_ENABLED alone was not enough to actually trade any
+        # symbol beyond settings.symbol_list (which defaults to just
+        # [settings.SYMBOL]) — MarketScanner/OpportunityRanker discover
+        # candidates across the full Binance universe (this class's own
+        # module docstring), but every one of them outside that
+        # single-symbol default would hit get_manager()'s ValueError
+        # ("not configured on this coordinator") the moment the
+        # scheduler tried to execute it, since EXECUTION_COORDINATOR_
+        # DYNAMIC_SYMBOLS defaults False independently of
+        # SCHEDULER_ENABLED. Enabling "trade every symbol the scanner
+        # finds" was the entire point of turning SCHEDULER_ENABLED on —
+        # requiring a THIRD, separately-discovered flag just to make
+        # that actually work was a real gap in what operators need to
+        # know, not a deliberate extra safety gate (unlike
+        # SCHEDULER_ENABLED itself, or MODEL_PROMOTION_REQUIRES_APPROVAL,
+        # which genuinely do gate something worth pausing on). An
+        # operator who wants the OPPOSITE — scheduler on, but strictly
+        # confined to a fixed symbol list — should set settings.SYMBOLS
+        # explicitly rather than relying on this default; that already
+        # works today (symbol_list is a superset check either way,
+        # dynamic registration only ever ADDS symbols beyond it).
         coordinator = ExecutionCoordinator(
             data_provider,
             symbols=settings.symbol_list,
-            allow_dynamic_symbols=settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS,
+            allow_dynamic_symbols=(
+                settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS or settings.SCHEDULER_ENABLED
+            ),
             max_dynamic_symbols=settings.EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS,
         )
         mode_label = "Binance Testnet" if mode == "testnet" else "Binance LIVE ⚠️"

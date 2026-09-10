@@ -88,6 +88,47 @@ class TestExecutionFactory:
         assert coordinator._allow_dynamic_symbols is True
         assert coordinator._max_dynamic_symbols == 7
 
+    def test_scheduler_enabled_implies_dynamic_symbols_even_when_flag_left_off(self, monkeypatch):
+        """V16 §61: SCANNER_ENABLED+SCHEDULER_ENABLED alone was not
+        enough to actually execute a trade in any symbol beyond
+        settings.symbol_list (defaults to just [SYMBOL]) — the scanner
+        discovers candidates across the full Binance universe, but
+        every one outside that single-symbol default hit
+        ExecutionCoordinator.get_manager()'s ValueError the moment the
+        scheduler tried to execute it, since
+        EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS defaults False
+        independently of SCHEDULER_ENABLED. Turning on \"trade every
+        symbol the scanner finds\" is the entire point of
+        SCHEDULER_ENABLED, so it must not require a third,
+        separately-discovered flag to actually work."""
+        from unittest.mock import MagicMock
+        ef = self._factory("testnet")
+        provider = MagicMock()
+        provider.client = MagicMock()
+        monkeypatch.setattr("config.settings.settings.SYMBOL", "BTCUSDT")
+        monkeypatch.setattr("config.settings.settings.SYMBOLS", None)
+        monkeypatch.setattr("config.settings.settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS", False)
+        monkeypatch.setattr("config.settings.settings.SCHEDULER_ENABLED", True)
+        coordinator = ef.build_execution_engine(data_provider=provider)
+        assert coordinator._allow_dynamic_symbols is True
+
+    def test_scheduler_disabled_and_flag_off_still_confines_to_configured_symbols(self, monkeypatch):
+        """The reverse case, explicitly pinned: with the classic
+        single-symbol loop (SCHEDULER_ENABLED=False) and no explicit
+        opt-in, dynamic symbols must stay OFF -- this OR must not
+        silently widen the default posture for the deployment that
+        doesn't use the scheduler at all."""
+        from unittest.mock import MagicMock
+        ef = self._factory("testnet")
+        provider = MagicMock()
+        provider.client = MagicMock()
+        monkeypatch.setattr("config.settings.settings.SYMBOL", "BTCUSDT")
+        monkeypatch.setattr("config.settings.settings.SYMBOLS", None)
+        monkeypatch.setattr("config.settings.settings.EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS", False)
+        monkeypatch.setattr("config.settings.settings.SCHEDULER_ENABLED", False)
+        coordinator = ef.build_execution_engine(data_provider=provider)
+        assert coordinator._allow_dynamic_symbols is False
+
     def test_paper_starting_balance(self):
         ef = self._factory("paper")
         engine = ef.build_execution_engine(data_provider=None, paper_balance=5000.0)

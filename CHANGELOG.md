@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## [Unreleased] — SCHEDULER_ENABLED Implies Dynamic Symbols (V16 §61)
+
+Found while writing §60's own migration notes: `SCANNER_ENABLED=true`
++ `SCHEDULER_ENABLED=true` alone was not enough to actually trade any
+symbol beyond `settings.symbol_list` (defaults to just `[SYMBOL]`).
+`ExecutionCoordinator.get_manager()` raises `ValueError` for any
+scanner-discovered symbol outside that pre-configured list unless
+`EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` is also separately set —
+defaults `False`, independently of `SCHEDULER_ENABLED`. Fails loud and
+safe, not silently wrong, but meant the multi-symbol scheduler
+wouldn't actually trade more than one symbol without a third,
+undocumented flag. See `docs/architecture.md` §61.
+
+### Fixed
+- `execution/execution_factory.py::build_execution_engine()` —
+  `allow_dynamic_symbols` is now `EXECUTION_COORDINATOR_DYNAMIC_
+  SYMBOLS or SCHEDULER_ENABLED`. Turning on "trade every symbol the
+  scanner finds" is the entire point of `SCHEDULER_ENABLED`; it
+  shouldn't need a separate, undiscovered flag to actually work.
+
+### Added
+- `tests/test_execution_factory.py` — 2 new tests (the fix itself,
+  and the reverse case pinned so this `or` can't silently widen the
+  default posture for non-scheduler deployments).
+
+Full suite: 3068 passed (base 3066 from §60 + 2 new), 4 skipped, 45
+deselected, 3 pre-existing/unrelated dashboard-build failures. ruff
+clean, vulture clean (pre-existing unrelated findings only), import
+main succeeds.
+
+---
+
 ## [Unreleased] — Multi-Symbol Scheduler Safety (V16 §60)
 
 Triggered by a request to move off a single fixed BTCUSDT symbol
@@ -44,7 +76,6 @@ unaffected. Full suite: 3066 passed (up from 3053), 4 skipped, 45
 deselected, 3 pre-existing/unrelated dashboard-build failures. ruff
 clean, vulture clean (one pre-existing unrelated finding), import main
 succeeds.
-
 ---
 
 ## [Unreleased] — CORS: Deny by Default (V16 §59)

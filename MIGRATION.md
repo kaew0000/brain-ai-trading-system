@@ -1,59 +1,45 @@
-# MIGRATION — Multi-Symbol Scheduler Safety (V16 §60)
+# MIGRATION — SCHEDULER_ENABLED Implies Dynamic Symbols (V16 §61)
 
 ## Do you need to do anything?
 
-**No, if you keep running as today (single-symbol BTCUSDT loop).**
-`SCHEDULER_ENABLED` defaults `False` — nothing in this patch changes
-behavior until you deliberately turn it on. All 426 pre-existing tests
-touching the changed functions pass unchanged, confirming this.
+**No, if `SCHEDULER_ENABLED` is `false` (the default).** Nothing
+changes — `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` still defaults
+`False`, and `False or False` is still `False`.
 
-## To actually turn on multi-symbol auto-selection
+## If you're enabling multi-symbol trading (§60 + this patch)
 
-This patch makes it *safe*; it does not turn it on. In your `.env`:
+This **replaces** a step §60's own MIGRATION.md told you to do
+manually. You no longer need to separately set
+`EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS=true` — setting
+`SCHEDULER_ENABLED=true` now implies it automatically. The full
+`.env` needed is just:
 
 ```bash
-SCANNER_ENABLED=true      # required — ExecutionScheduler needs it for candidates
-SCHEDULER_ENABLED=true    # the multi-symbol path itself
+SCANNER_ENABLED=true
+SCHEDULER_ENABLED=true
 ```
 
-Restart the bot after setting these. What changes:
+If you already added `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS=true`
+manually after reading §60's notes, it's harmless to leave it — the
+`or` makes either one sufficient.
 
-- The classic single-symbol BTCUSDT loop **stops running entirely**
-  (not just "less relevant" — literally not scheduled). All new trade
-  decisions come from the scanner + portfolio manager + scheduler
-  instead, across every symbol passing `SCANNER_MIN_QUOTE_VOLUME`
-  (default: $1,000,000 24h quote volume — already a sensible liquidity
-  floor, no change needed there).
-- `monitor_open_trades()` (every 30s) correctly tracks a position in
-  *any* symbol, not just `settings.SYMBOL`.
-- `run_position_reconciliation()` and `run_ghost_reconciliation_check()`
-  **stop running** (logged as a warning at startup) — see
-  PATCH_NOTES.md's "Known follow-up": running them with single-symbol
-  data while genuinely multi-symbol would be actively dangerous
-  (the recovery engine auto-clears what it thinks are "ghost"
-  positions). This means: while in scheduler mode, an orphaned
-  exchange position (opened outside the bot, e.g. manually or from a
-  previous session) will **not** get an automatic protective stop-loss
-  the way it would in single-symbol mode. Check positions manually if
-  you suspect this could happen, until multi-symbol reconciliation is
-  built.
-- `settings.SYMBOL`/`LEVERAGE` still matter as the *default provider
-  symbol* (used by anything that doesn't specify one) but no longer
-  drive what actually gets traded.
+## If you want the scheduler confined to specific symbols
 
-### Recommended: test on Binance Testnet first
+Set `SYMBOLS` explicitly instead of relying on the default, e.g.:
 
-This is the first time this code path (`SCHEDULER_ENABLED=true`) will
-run against a live account. Per this project's own tooling
-(`BINANCE_TESTNET=true`), recommend at least one full day on testnet
-before enabling on the live $20 account, purely because "never run in
-production before" carries its own risk independent of anything fixed
-in this patch.
+```bash
+SYMBOLS=["XRPUSDT","DOGEUSDT","ADAUSDT"]
+```
+
+This still works exactly as before — dynamic registration (now
+automatic under `SCHEDULER_ENABLED=true`) only ever *adds* symbols
+beyond this list as the scanner discovers new candidates, up to
+`EXECUTION_COORDINATOR_MAX_DYNAMIC_SYMBOLS` (default 50). It does not
+restrict or override an explicit `SYMBOLS` list.
 
 ## Rollback
 
-Set `SCHEDULER_ENABLED=false` (or revert this branch) and restart.
-The classic single-symbol loop resumes exactly as before;
-`monitor_open_trades()` and reconciliation both fall back to their
-pre-§60 single-symbol behavior automatically (the branch is keyed off
-the same flag). No data migration either direction.
+Revert this branch and restart. `allow_dynamic_symbols` goes back to
+reading only `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` — you'd need to
+set that flag explicitly again for multi-symbol trading to actually
+execute trades outside the default symbol.
