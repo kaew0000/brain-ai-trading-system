@@ -1,12 +1,33 @@
-"""system_health/reconciliation.py — Position reconciliation (Exchange/Bot/Journal)"""
+"""system_health/reconciliation.py — Position reconciliation (Exchange/Bot/Journal)
+
+V16 §62: multi-symbol-aware reconciliation. The original single-symbol
+comparison logic (_classify()) was already symbol-agnostic — it only
+ever compares abstract has_position/side/qty dicts, never reads
+settings.SYMBOL itself. What WAS single-symbol-hardcoded was the
+data-gathering layer (_read_exchange/_read_bot/_read_journal, all
+implicitly scoped to settings.SYMBOL) and the suppression/buffer state
+(one set of instance attributes, meaning only one position's worth of
+"have we already reported this" tracking existed at all).
+
+run() — unchanged, byte-for-byte, for the classic single-symbol loop.
+run_all_symbols() — new: runs the identical classify() logic once per
+symbol discovered across exchange positions / open journal trades /
+portfolio_state, with independent per-symbol suppression state, so two
+different symbols mismatching at the same time are each tracked (and
+suppressed once reported) on their own, not conflated into one shared
+signature.
+"""
 from __future__ import annotations
 import threading
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from utils.logger import get_logger
 from events.event_bus import get_event_bus
 logger = get_logger(__name__)
+
+_DEFAULT_KEY = "__default__"   # run()'s internal state key -- see module docstring
+
 
 @dataclass
 class ReconciliationEvent:
@@ -14,68 +35,129 @@ class ReconciliationEvent:
     exchange_view: dict; journal_view: dict; bot_view: dict
     severity: str; detail: str
     recovery_attempted: bool = False; recovery_result: str | None = None
+    # V16 §62: which symbol this event is about. "" for run()'s pre-§62
+    # single-symbol call sites that didn't pass one explicitly (callers
+    # should treat that as settings.SYMBOL, matching this engine's own
+    # prior behavior) -- run() itself always fills in settings.SYMBOL,
+    # so "" only appears if a caller constructs ReconciliationEvent
+    # directly, which no code in this project does.
+    symbol: str = ""
     def to_dict(self) -> dict: return asdict(self)
+
+
+@dataclass
+class _SymbolState:
+    """Per-key (per-symbol, or _DEFAULT_KEY for the classic single-
+    symbol path) reconciliation state — everything run() used to keep
+    as flat instance attributes, now one of these per key so multiple
+    symbols' suppression/buffer state can't bleed into each other."""
+    buf: list[ReconciliationEvent] = field(default_factory=list)
+    last_run: str | None = None
+    last_result: str | None = None
+    last_fired_sig: tuple | None = None
+    suppressed_repeat_count: int = 0
+    last_views: dict | None = None
+
 
 class ReconciliationEngine:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._buf: list[ReconciliationEvent] = []
-        self._last_run: str | None = None
-        self._last_result: str | None = None
-        # Signature (mismatch_type, severity, detail) of the last mismatch
-        # we actually published/logged/attempted-recovery-for. Used to
-        # suppress re-firing the *identical* mismatch every cycle while a
-        # pre-existing condition (e.g. a startup PRESENCE_MISMATCH on an
-        # exchange position opened before this bot session) remains open.
-        # Reset to None once the system goes flat/clean, so a *new*
-        # mismatch — even of the same type — always fires fresh.
-        self._last_fired_sig: tuple | None = None
-        self._suppressed_repeat_count: int = 0
-        # V16 Phase ORDER-01: the freshest exchange/journal/bot views and
-        # classification, updated on EVERY run() call regardless of the
-        # publish-suppression logic below. _last_fired_sig/_buf only track
-        # what was actually *published*; a caller that needs "what does
-        # reconciliation currently see" every cycle (e.g.
-        # system_health/order_state.py) needs this even while an unchanged
-        # mismatch is being suppressed from re-publishing.
-        self._last_views: dict | None = None
+        # V16 §62: every key's worth of state lives here now, keyed by
+        # symbol (or _DEFAULT_KEY for run()'s classic single-symbol
+        # path). get_recent()/status()/get_last_views() below read only
+        # _DEFAULT_KEY, unchanged in observable behavior from before
+        # this dict existed.
+        self._states: dict[str, _SymbolState] = {_DEFAULT_KEY: _SymbolState()}
+
+    def _state(self, key: str) -> _SymbolState:
+        with self._lock:
+            if key not in self._states:
+                self._states[key] = _SymbolState()
+            return self._states[key]
 
     def run(self, sys: dict) -> ReconciliationEvent | None:
+        """Unchanged: single-symbol (settings.SYMBOL) reconciliation for
+        the classic single-symbol loop. See run_all_symbols() for the
+        SCHEDULER_ENABLED-mode equivalent."""
+        from config.settings import settings
+        return self._run_for_key(sys, symbol=settings.SYMBOL, key=_DEFAULT_KEY)
+
+    def run_all_symbols(self, sys: dict) -> list[ReconciliationEvent]:
+        """V16 §62: one reconciliation pass per symbol discovered across
+        every open exchange position, open journal trade, and
+        portfolio_state entry — the union, not the intersection, since
+        a symbol appearing in only ONE of those views is exactly the
+        kind of mismatch this engine exists to catch (a symbol missing
+        from the union entirely, by definition, can't be a mismatch at
+        all — nothing claims it has a position). Each symbol gets its
+        own independent suppression state (a mismatch on XRPUSDT
+        publishing/logging/recovering doesn't suppress a *different*
+        mismatch on DOGEUSDT, and vice versa)."""
+        symbols = self._discover_symbols(sys)
+        events: list[ReconciliationEvent] = []
+        for symbol in symbols:
+            evt = self._run_for_key(sys, symbol=symbol, key=symbol)
+            if evt is not None:
+                events.append(evt)
+        return events
+
+    def _discover_symbols(self, sys: dict) -> set[str]:
+        symbols: set[str] = set()
+        dp = sys.get("data_provider")
+        if dp is not None:
+            try:
+                for p in dp.get_all_positions():
+                    s = p.get("symbol")
+                    if s:
+                        symbols.add(s)
+            except Exception as exc:
+                logger.debug(f"Recon symbol discovery: get_all_positions failed: {exc}")
+        jrn = sys.get("journal_v2")
+        if jrn is not None:
+            try:
+                for t in jrn.get_open_trades():
+                    s = t.get("symbol")
+                    if s:
+                        symbols.add(s)
+            except Exception as exc:
+                logger.debug(f"Recon symbol discovery: get_open_trades failed: {exc}")
+        ps = sys.get("portfolio_state")
+        if ps is not None:
+            try:
+                symbols.update(ps.held_symbols())
+            except Exception as exc:
+                logger.debug(f"Recon symbol discovery: held_symbols failed: {exc}")
+        return symbols
+
+    def _run_for_key(self, sys: dict, symbol: str, key: str) -> ReconciliationEvent | None:
+        st = self._state(key)
         try:
-            ex = self._read_exchange(sys)
-            bot = self._read_bot(sys, ex)
-            jv = self._read_journal(sys)
-            self._last_run = datetime.now(timezone.utc).isoformat()
+            ex = self._read_exchange(sys, symbol)
+            bot = self._read_bot(sys, ex, symbol)
+            jv = self._read_journal(sys, symbol)
+            st.last_run = datetime.now(timezone.utc).isoformat()
             mt, sev, detail = self._classify(ex, jv, bot)
-            self._last_views = {
+            st.last_views = {
                 "exchange": ex, "journal": jv, "bot": bot,
                 "mismatch_type": mt, "severity": sev, "detail": detail,
-                "checked_at": self._last_run,
+                "checked_at": st.last_run, "symbol": symbol,
             }
             if mt is None:
-                self._last_result = "OK"
-                # Condition cleared — next mismatch (even if same type as
-                # before) should fire fresh rather than staying suppressed.
-                self._last_fired_sig = None
-                self._suppressed_repeat_count = 0
+                st.last_result = "OK"
+                st.last_fired_sig = None
+                st.suppressed_repeat_count = 0
                 return None
-            self._last_result = "MISMATCH"
+            st.last_result = "MISMATCH"
 
             sig = (mt, sev, detail)
-            if sig == self._last_fired_sig:
-                # Identical mismatch to the one already reported — don't
-                # re-publish/re-log/re-attempt-recovery every cycle. Recovery
-                # already returned its verdict once; nothing changed, so
-                # re-asking gives the same answer for the cost of an exchange
-                # round trip plus log noise every 60s for as long as the
-                # position stays open.
-                self._suppressed_repeat_count += 1
+            if sig == st.last_fired_sig:
+                st.suppressed_repeat_count += 1
                 return None
 
             evt = ReconciliationEvent(
-                id=uuid.uuid4().hex[:12], timestamp=self._last_run,
+                id=uuid.uuid4().hex[:12], timestamp=st.last_run,
                 mismatch_type=mt, exchange_view=ex, journal_view=jv,
-                bot_view=bot, severity=sev, detail=detail,
+                bot_view=bot, severity=sev, detail=detail, symbol=symbol,
             )
             try:
                 bus = sys.get("event_bus") or get_event_bus()
@@ -90,43 +172,70 @@ class ReconciliationEngine:
             except Exception as exc:
                 evt.recovery_attempted = True; evt.recovery_result = f"error:{exc}"
             with self._lock:
-                self._buf.append(evt)
-                if len(self._buf) > 200: self._buf.pop(0)
-            logger.warning(f"Recon MISMATCH | {mt} {sev} | {detail}")
-            self._last_fired_sig = sig
-            self._suppressed_repeat_count = 0
+                st.buf.append(evt)
+                if len(st.buf) > 200: st.buf.pop(0)
+            logger.warning(f"Recon MISMATCH | {symbol} | {mt} {sev} | {detail}")
+            st.last_fired_sig = sig
+            st.suppressed_repeat_count = 0
             return evt
         except Exception as exc:
-            logger.error(f"ReconciliationEngine.run failed: {exc}", exc_info=True)
+            logger.error(f"ReconciliationEngine.run failed ({symbol}): {exc}", exc_info=True)
             return None
 
     def get_recent(self, limit: int = 50) -> list[dict]:
-        with self._lock: return [e.to_dict() for e in self._buf[-limit:][::-1]]
+        st = self._state(_DEFAULT_KEY)
+        with self._lock: return [e.to_dict() for e in st.buf[-limit:][::-1]]
 
     def get_last_views(self) -> dict | None:
         """V16 Phase ORDER-01: the exchange/journal/bot views and
         classification from the most recent run() call, always fresh
         (unlike get_recent(), which only reflects *published*, non-
         suppressed mismatches). None if run() has never been called."""
-        return dict(self._last_views) if self._last_views is not None else None
+        st = self._state(_DEFAULT_KEY)
+        return dict(st.last_views) if st.last_views is not None else None
 
     def status(self) -> dict:
-        return {"last_run": self._last_run, "last_result": self._last_result,
-                "event_count": len(self._buf),
-                "suppressed_repeat_count": self._suppressed_repeat_count}
+        st = self._state(_DEFAULT_KEY)
+        return {"last_run": st.last_run, "last_result": st.last_result,
+                "event_count": len(st.buf),
+                "suppressed_repeat_count": st.suppressed_repeat_count}
 
-    def _read_exchange(self, sys: dict) -> dict:
+    # ── V16 §62: multi-symbol accessors — additive, mirror the single-
+    # symbol ones above but keyed/aggregated across every symbol
+    # run_all_symbols() has ever seen. ──────────────────────────────────
+
+    def get_recent_for_symbol(self, symbol: str, limit: int = 50) -> list[dict]:
+        st = self._state(symbol)
+        with self._lock: return [e.to_dict() for e in st.buf[-limit:][::-1]]
+
+    def get_last_views_for_symbol(self, symbol: str) -> dict | None:
+        st = self._state(symbol)
+        return dict(st.last_views) if st.last_views is not None else None
+
+    def status_all_symbols(self) -> dict[str, dict]:
+        """One status() dict per symbol currently tracked (excludes
+        _DEFAULT_KEY — that one's run()'s own, surfaced via status())."""
+        with self._lock:
+            keys = [k for k in self._states if k != _DEFAULT_KEY]
+        return {
+            k: {"last_run": s.last_run, "last_result": s.last_result,
+                "event_count": len(s.buf),
+                "suppressed_repeat_count": s.suppressed_repeat_count}
+            for k, s in ((k, self._state(k)) for k in keys)
+        }
+
+    def _read_exchange(self, sys: dict, symbol: str | None = None) -> dict:
         dp = sys.get("data_provider")
         if dp is None: return {"has_position": None, "side": None, "qty": None, "source": "unavailable"}
         try:
-            pos = dp.get_position_info()
+            pos = dp.get_position_info(symbol=symbol)
             if pos is None: return {"has_position": False, "side": None, "qty": None, "source": "exchange"}
             return {"has_position": True, "side": pos.get("side"),
                     "qty": abs(float(pos.get("positionAmt", 0))), "source": "exchange"}
         except Exception as exc:
             return {"has_position": None, "side": None, "qty": None, "source": "error", "error": str(exc)}
 
-    def _read_bot(self, sys: dict, exchange: dict) -> dict:
+    def _read_bot(self, sys: dict, exchange: dict, symbol: str | None = None) -> dict:
         pe = sys.get("paper_engine")
         if pe is not None:
             try:
@@ -144,27 +253,15 @@ class ReconciliationEngine:
         # live mode, so this engine could never detect a stale runtime
         # position cache (portfolio/portfolio_state.py's PortfolioState,
         # whose own docstring already admits nothing keeps it in sync with
-        # reality). PortfolioState.remove_position() is called from
-        # exactly one place in the codebase today
-        # (execution/execution_orchestrator.py's replacement-close path) —
-        # a position closed via stop-loss, take-profit, manual exchange
-        # close, or reconciliation recovery itself never clears it,
-        # leaving a ghost entry indefinitely. Reading it independently
-        # here is what makes that ghost visible to `_classify()` at all.
-        # execution/execution_scheduler.py owns the one live PortfolioState
-        # instance; main.py registers it into this same `sys` dict as
-        # "portfolio_state" (see main.py bootstrap + api/app.py set_state
-        # calls). Falls back to the old mirrored behavior when no
-        # PortfolioState is wired in (e.g. this bot session hasn't started
-        # ExecutionScheduler, or a test doesn't pass one) — that fallback
-        # cannot itself introduce a false ghost/desync, only under-detect,
-        # matching this engine's existing bias toward not firing on
-        # insufficient information (`_classify`'s `len(ver) < 2` guard).
+        # reality). Reading it independently here is what makes that ghost
+        # visible to `_classify()` at all. Falls back to the old mirrored
+        # behavior when no PortfolioState is wired in.
         ps = sys.get("portfolio_state")
         if ps is not None:
             try:
                 from config.settings import settings
-                pos = ps.get_position(settings.SYMBOL)
+                target_symbol = symbol or settings.SYMBOL
+                pos = ps.get_position(target_symbol)
                 if pos is None:
                     return {"has_position": False, "side": None, "qty": None, "source": "portfolio_state"}
                 return {"has_position": True, "side": pos.direction,
@@ -173,11 +270,19 @@ class ReconciliationEngine:
                 return {"has_position": None, "side": None, "qty": None, "source": "error", "error": str(exc)}
         return dict(exchange, source="exchange_mirrored")
 
-    def _read_journal(self, sys: dict) -> dict:
+    def _read_journal(self, sys: dict, symbol: str | None = None) -> dict:
         jrn = sys.get("journal_v2")
         if jrn is None: return {"has_position": None, "side": None, "qty": None, "source": "unavailable"}
         try:
-            ot = jrn.get_open_trades()
+            from config.settings import settings
+            target_symbol = symbol or settings.SYMBOL
+            ot_all = jrn.get_open_trades()
+            # V16 §62: scoped to target_symbol so run_all_symbols() sees
+            # "duplicate open trades for THIS symbol", not "the journal
+            # has more than one open trade anywhere" — the latter is
+            # completely normal and expected once more than one symbol
+            # can legitimately have an open position at once.
+            ot = [t for t in ot_all if (t.get("symbol") or settings.SYMBOL) == target_symbol]
             # Also fetch total trade count so _classify can distinguish
             # "bot never traded this session" (startup) from "position was closed"
             try:

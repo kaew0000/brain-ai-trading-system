@@ -240,7 +240,12 @@ class TestOrphanedExchangePosition:
         dp = MagicMock()
         dp.get_position_info.return_value = self._position()
         dp.get_account_balance.return_value = 10_000.0
-        tm = MagicMock()
+        # spec= so hasattr(tm, "get_manager") is correctly False, matching
+        # real TradeManager's shape (only ExecutionCoordinator has that
+        # method) -- an unspecced MagicMock auto-vivifies any attribute
+        # access as truthy, which would silently route place_stop_loss
+        # calls to a *different* child mock via tm.get_manager(symbol).
+        tm = MagicMock(spec=["place_stop_loss"])
         tm.place_stop_loss.return_value = {"orderId": 1, "status": "NEW"}
         risk = MagicMock()
         risk.has_manual_hold.return_value = False
@@ -268,7 +273,12 @@ class TestOrphanedExchangePosition:
         dp = MagicMock()
         dp.get_position_info.return_value = self._position(side="SHORT")
         dp.get_account_balance.return_value = 10_000.0
-        tm = MagicMock()
+        # spec= so hasattr(tm, "get_manager") is correctly False, matching
+        # real TradeManager's shape (only ExecutionCoordinator has that
+        # method) -- an unspecced MagicMock auto-vivifies any attribute
+        # access as truthy, which would silently route place_stop_loss
+        # calls to a *different* child mock via tm.get_manager(symbol).
+        tm = MagicMock(spec=["place_stop_loss"])
         tm.place_stop_loss.return_value = {"orderId": 1, "status": "NEW"}
         s = _sys(data_provider=dp, trade_manager=tm)
 
@@ -290,7 +300,12 @@ class TestOrphanedExchangePosition:
         dp = MagicMock()
         dp.get_position_info.return_value = self._position()
         dp.get_account_balance.return_value = 10_000.0
-        tm = MagicMock()
+        # spec= so hasattr(tm, "get_manager") is correctly False, matching
+        # real TradeManager's shape (only ExecutionCoordinator has that
+        # method) -- an unspecced MagicMock auto-vivifies any attribute
+        # access as truthy, which would silently route place_stop_loss
+        # calls to a *different* child mock via tm.get_manager(symbol).
+        tm = MagicMock(spec=["place_stop_loss"])
         tm.place_stop_loss.return_value = None  # exchange rejected it
         risk = MagicMock()
         s = _sys(data_provider=dp, trade_manager=tm, risk_engine=risk)
@@ -334,7 +349,12 @@ class TestOrphanedExchangePosition:
         dp = MagicMock()
         dp.get_position_info.return_value = self._position()
         dp.get_account_balance.return_value = 10_000.0
-        tm = MagicMock()
+        # spec= so hasattr(tm, "get_manager") is correctly False, matching
+        # real TradeManager's shape (only ExecutionCoordinator has that
+        # method) -- an unspecced MagicMock auto-vivifies any attribute
+        # access as truthy, which would silently route place_stop_loss
+        # calls to a *different* child mock via tm.get_manager(symbol).
+        tm = MagicMock(spec=["place_stop_loss"])
         tm.place_stop_loss.return_value = {"orderId": 1, "status": "NEW"}
         risk = MagicMock()
         risk.has_manual_hold.return_value = True
@@ -382,7 +402,12 @@ class TestAcknowledgeOrphanedPosition:
             "entryPrice": 67000.0, "markPrice": 67100.0, "leverage": 5,
         }
         dp.get_account_balance.return_value = 10_000.0
-        tm = MagicMock()
+        # spec= so hasattr(tm, "get_manager") is correctly False, matching
+        # real TradeManager's shape (only ExecutionCoordinator has that
+        # method) -- an unspecced MagicMock auto-vivifies any attribute
+        # access as truthy, which would silently route place_stop_loss
+        # calls to a *different* child mock via tm.get_manager(symbol).
+        tm = MagicMock(spec=["place_stop_loss"])
         tm.place_stop_loss.return_value = {"orderId": 1, "status": "NEW"}
         risk = MagicMock()
         s = _sys(data_provider=dp, trade_manager=tm, risk_engine=risk)
@@ -410,7 +435,12 @@ class TestAcknowledgeOrphanedPosition:
             "entryPrice": 67000.0, "markPrice": 67100.0, "leverage": 5,
         }
         dp.get_account_balance.return_value = 10_000.0
-        tm = MagicMock()
+        # spec= so hasattr(tm, "get_manager") is correctly False, matching
+        # real TradeManager's shape (only ExecutionCoordinator has that
+        # method) -- an unspecced MagicMock auto-vivifies any attribute
+        # access as truthy, which would silently route place_stop_loss
+        # calls to a *different* child mock via tm.get_manager(symbol).
+        tm = MagicMock(spec=["place_stop_loss"])
         tm.place_stop_loss.return_value = {"orderId": 1, "status": "NEW"}
         s = _sys(data_provider=dp, trade_manager=tm)
         evt = _FakeEvent(

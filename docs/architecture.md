@@ -6164,4 +6164,135 @@ unrelated and unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` on the changed source file: 3 pre-existing,
 unrelated findings only (`_PaperAdapter.execute_trade`'s
 `balance`/`leverage`/`symbol` params, confirmed identical against
-unmodified `main`). `python -c "import main"` succeeds.
+unmodified `main`). `python -c "import main"` succeeds.## 62. Multi-Symbol Reconciliation & Orphan Protection (2026-09-10)
+
+### Context
+
+§60 flagged this explicitly as a known follow-up: position
+reconciliation (`system_health/reconciliation.py`) and orphan-position
+auto-protection (`system_health/recovery_engine.py`) were
+single-symbol-hardcoded, and running them with known-wrong data under
+`SCHEDULER_ENABLED=true` would have been actively dangerous (the
+recovery engine's auto-clear-on-exchange-flat logic could delete the
+journal record of a real, open, non-default-symbol position, believing
+it a stale "ghost"). §60 disabled both jobs entirely under scheduler
+mode rather than ship that. This entry is the real fix.
+
+### Root cause
+
+`ReconciliationEngine._classify()` was already symbol-agnostic — it
+only ever compares abstract `has_position`/`side`/`qty` dicts, never
+reads `settings.SYMBOL` itself. What was hardcoded was everything
+around it:
+
+- `_read_exchange()`/`_read_bot()`/`_read_journal()` all implicitly
+  scoped to `settings.SYMBOL`.
+- Suppression/buffer state (`_last_fired_sig`, `_buf`, etc.) was one
+  set of flat instance attributes — only one position's worth of
+  "already reported" tracking existed at all, regardless of how many
+  symbols could legitimately be open at once under the scheduler.
+- `RecoveryEngine._clear_ghost_journal_row()` /
+  `_clear_runtime_ghost()` both used `settings.SYMBOL` directly for
+  the actual clearing action, regardless of which symbol the mismatch
+  was about.
+- `RecoveryEngine._protect_orphaned_exchange_position()` already
+  correctly read `symbol = pos.get("symbol")` from the exchange
+  response — but never used it. `dp.get_position_info()` (no symbol
+  arg) could only ever discover an orphan in the provider's own
+  default symbol. Worse: SL placement called `tm.place_stop_loss(...)`
+  with no symbol at all, and traced through
+  `execution/execution_coordinator.py`'s
+  `ExecutionCoordinator.__getattr__`, this silently falls through to
+  `get_manager()` with no argument — the *wrong* symbol's
+  `TradeManager` (and therefore its lot-size/precision filters) for
+  anything but the coordinator's own default.
+- `self._orphan_hold` was a single dict — two simultaneously orphaned
+  positions in different symbols could only ever be tracked one at a
+  time; discovering the second would silently drop tracking of the
+  first (though any SL already placed on the exchange would remain,
+  just untracked by the bot).
+
+### Fix
+
+`system_health/reconciliation.py` (rewritten, additive):
+`ReconciliationEvent` gained a `symbol` field.
+`_read_exchange`/`_read_bot`/`_read_journal` accept an optional
+`symbol` (default `settings.SYMBOL` — `run()` unchanged). New
+`run_all_symbols(sys)`: discovers every symbol across open exchange
+positions (`get_all_positions()`, from §60) ∪ open journal trades ∪
+`portfolio_state.held_symbols()` — the union, since a symbol missing
+from every view by definition isn't a mismatch — and runs `_classify()`
+once per symbol, each with independent suppression state. Internal
+state refactored into `dict[key, _SymbolState]`; the pre-existing
+single-view accessors (`get_recent()`, `status()`, `get_last_views()`)
+read only `run()`'s own sentinel key, unchanged in observable
+behavior. New `get_recent_for_symbol()` / `status_all_symbols()` /
+`get_last_views_for_symbol()` expose the full multi-symbol view.
+
+`system_health/recovery_engine.py`: `attempt_reconciliation_recovery()`
+reads `event.symbol` (falling back to `settings.SYMBOL` for events
+from the classic `run()` path) and threads it through
+`_clear_ghost_journal_row()`/`_clear_runtime_ghost()`.
+`_protect_orphaned_exchange_position()`: `dp.get_position_info(symbol=...)`
+finds an orphan in any symbol; SL placement routes through
+`tm.get_manager(symbol)` when `tm` is symbol-aware, falling back to
+calling `tm` directly otherwise (matching pre-§62 behavior exactly for
+a plain `TradeManager`). `_orphan_hold` → `_orphan_holds: dict[symbol,
+dict]`; `get_orphan_hold()` kept (returns one hold, back-compat), new
+`get_orphan_holds()` returns all. `acknowledge_orphaned_position()`
+gained an optional `symbol` — omitted clears everything (exact pre-§62
+behavior); given, clears just that one. The risk_engine manual hold
+only clears once `_orphan_holds` is empty, so acknowledging one
+symbol's orphan can't silently resume trading while a different
+symbol's is still unprotected.
+
+`main.py::run_position_reconciliation()`: `run_all_symbols(sys)` under
+`SCHEDULER_ENABLED=true`, `run(sys)` otherwise. Scheduled
+unconditionally again. `run_ghost_reconciliation_check()` remains
+un-scheduled under scheduler mode — see Known follow-up.
+
+`api/app.py`: `GET /api/system/reconciliation` gained `orphan_holds`
+(plural) and `status_by_symbol`, alongside the existing `orphan_hold`.
+`POST /api/system/reconciliation/acknowledge` accepts an optional
+`{"symbol": "..."}` body.
+
+### Known follow-up (not this phase)
+
+`run_ghost_reconciliation_check()` / `GhostReconciliationMonitor` goes
+through `system_health/order_state.py`'s `OrderStateManager`, not
+touched here — still single-symbol-only. Left un-scheduled under
+`SCHEDULER_ENABLED=true`, narrowing §60's original blanket caution to
+just this one job. Lower priority: it's off by default
+(`ORDER_RECONCILIATION_ENABLED`) even in single-symbol mode.
+
+### Testing
+
+`tests/test_multi_symbol_reconciliation.py` — 28 tests: symbol
+discovery (each source, union/dedup, one source's failure doesn't
+block the others); two symbols mismatching simultaneously each
+tracked/suppressed independently; `DUPLICATE_JOURNAL_TRADES` correctly
+scoped per symbol (two different symbols each holding one open trade
+is not a duplicate; two rows for the *same* symbol still is);
+multi-symbol accessors isolated from `run()`'s own state;
+`ReconciliationEvent.symbol` populated correctly on both paths;
+ghost-clearing uses the real symbol; orphan-protection routes to the
+symbol-correct manager and falls back correctly when `tm` isn't
+symbol-aware; multiple simultaneous orphan holds tracked/acknowledged
+independently (including "don't resume trading while another orphan
+remains"); `main.py`'s dispatch; both API endpoint extensions.
+
+`tests/test_recovery_engine.py`: 6 `tm = MagicMock()` → `MagicMock(spec=
+["place_stop_loss"])` in `TestOrphanedExchangePosition` — an unspecced
+mock made `hasattr(tm, "get_manager")` silently true (attribute
+auto-vivification), routing every test in that class through a
+different child mock than the one being asserted against once
+`_protect_orphaned_exchange_position()` started checking for
+`get_manager`. All 19 tests in that file pass unchanged in outcome
+with the corrected spec.
+
+Full suite: 3096 passed (up from 3068 in §61), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as §55–§61 (missing frontend build artifact), unrelated and
+unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` clean on every changed source file. `python -c
+"import main"` succeeds.

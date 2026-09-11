@@ -1,87 +1,161 @@
-# PATCH NOTES — SCHEDULER_ENABLED Implies Dynamic Symbols (V16 §61)
+# PATCH NOTES — Multi-Symbol Reconciliation & Orphan Protection (V16 §62)
 
-Branch: `fix/scheduler-implies-dynamic-symbols`
-Base: `main` @ `2c7ac33` (merge of PR #96, multi-symbol scheduler
-safety — rebased onto this after that PR merged; originally written
-against `e59e340`/pre-§60, see git history for the rebase).
+Branch: `feat/multi-symbol-reconciliation`
+Base: `main` @ `9299ce7` (merge of PR #97, SCHEDULER_ENABLED implies dynamic symbols)
+
+Closes the "Known follow-up" flagged in §60: position reconciliation
+and orphan-position protection were single-symbol-hardcoded, so §60
+left them disabled entirely under `SCHEDULER_ENABLED=true` rather than
+run them with known-wrong data. This phase builds the real fix instead
+of leaving them off.
 
 ## Root cause
 
-Found while writing §60's own MIGRATION.md: telling an operator to set
-`SCANNER_ENABLED=true` + `SCHEDULER_ENABLED=true` and nothing else was
-**incomplete**. Traced the actual execution path all the way through:
+`system_health/reconciliation.py::ReconciliationEngine._classify()`
+was already symbol-agnostic (it only ever compares abstract
+`has_position`/`side`/`qty` dicts) — what was hardcoded was the
+data-gathering layer beneath it. `_read_exchange()`/`_read_bot()`/
+`_read_journal()` all implicitly scoped to `settings.SYMBOL`, and the
+suppression/buffer state was one set of instance attributes — meaning
+only one position's worth of "have we already reported this" tracking
+existed at all, regardless of how many symbols the multi-symbol
+scheduler might actually have open at once.
 
-```
-MarketScanner  → discovers candidates across the full Binance universe
-                 (execution/execution_coordinator.py's own module
-                 docstring), filtered only by SCANNER_MIN_QUOTE_VOLUME
-                 (24h liquidity), not by any pre-configured symbol list
-CapitalManager → selects from those candidates
-ExecutionOrchestrator → calls execution_engine.execute_trade(symbol=alloc.symbol, ...)
-ExecutionCoordinator.get_manager(symbol) → if symbol not in self._symbols
-                 and not self._allow_dynamic_symbols: raise ValueError(...)
-```
-
-`settings.symbol_list` (the coordinator's pre-configured `_symbols`)
-defaults to `[settings.SYMBOL]` = `["BTCUSDT"]` when `SYMBOLS` is
-unset. `EXECUTION_COORDINATOR_DYNAMIC_SYMBOLS` (the flag that lets the
-coordinator register a `TradeManager` for a symbol it wasn't
-pre-configured with) defaults `False`, **independently** of
-`SCHEDULER_ENABLED`. Net effect: with only `SCANNER_ENABLED` +
-`SCHEDULER_ENABLED` set (exactly what §60's MIGRATION.md said to do),
-every trade attempt in any symbol other than BTCUSDT would hit
-`get_manager()`'s `ValueError` and fail. Not a silent-wrong-execution
-bug — it fails loud and safe — but it means the multi-symbol scheduler
-this project just spent two phases making safe to enable would not,
-in fact, trade more than one symbol without a third, undocumented flag.
+`system_health/recovery_engine.py::RecoveryEngine` acted on
+reconciliation's output with the same hardcoding, in three places:
+- `_clear_ghost_journal_row()` / `_clear_runtime_ghost()` both used
+  `settings.SYMBOL` directly, regardless of which symbol the mismatch
+  was actually about.
+- `_protect_orphaned_exchange_position()` already correctly read
+  `symbol = pos.get("symbol")` from the exchange response, but never
+  used it — `dp.get_position_info()` (no symbol arg) could only ever
+  discover an orphan in the provider's own default symbol, and SL
+  placement went through `tm.place_stop_loss(...)` with no symbol
+  either, which — traced through `execution/execution_coordinator.py`'s
+  `ExecutionCoordinator.__getattr__` — silently falls through to
+  `get_manager()` with no argument, i.e. the *wrong* symbol's
+  `TradeManager` (and therefore its lot-size/precision filters) for
+  anything but the default symbol.
+- `self._orphan_hold` was a single dict, not one per symbol — two
+  simultaneously orphaned positions in different symbols could only
+  ever be tracked one at a time.
 
 ## Fix
 
-`execution/execution_factory.py::build_execution_engine()` —
-`allow_dynamic_symbols` is now `settings.EXECUTION_COORDINATOR_
-DYNAMIC_SYMBOLS or settings.SCHEDULER_ENABLED` instead of reading the
-first flag alone. Rationale: turning on "trade every symbol the
-scanner finds" is the entire point of `SCHEDULER_ENABLED` — requiring
-a separate, undiscovered flag just to make that actually work is a gap
-in what operators need to know, not a deliberate extra safety gate
-(unlike `SCHEDULER_ENABLED` itself, which legitimately is one).
+**`system_health/reconciliation.py`** (rewritten, additive):
+- `ReconciliationEvent` gained a `symbol` field.
+- `_read_exchange`/`_read_bot`/`_read_journal` now accept an optional
+  `symbol` parameter (default: `settings.SYMBOL`, so `run()` — the
+  classic single-symbol path — is byte-for-byte unchanged; confirmed
+  by re-running all 69 pre-existing reconciliation/recovery/ghost
+  tests unmodified).
+- New `run_all_symbols(sys)`: discovers every symbol appearing across
+  open exchange positions (`data_provider.get_all_positions()`, added
+  in §60), open journal trades, and `portfolio_state.held_symbols()` —
+  the union, since a symbol missing from every view by definition
+  isn't a mismatch — and runs the identical `_classify()` logic once
+  per symbol, each with its own independent suppression state (a
+  mismatch on one symbol publishing/suppressing doesn't affect a
+  different symbol's tracking).
+- Internal state (`_buf`, `last_fired_sig`, etc.) refactored into a
+  `dict[key, _SymbolState]`, keyed by symbol for the multi-symbol path
+  and a private sentinel key for `run()`'s own state — `get_recent()`/
+  `status()`/`get_last_views()` (the pre-existing single-view API)
+  read only that sentinel key, unchanged in observable behavior. New
+  `get_recent_for_symbol()`/`status_all_symbols()`/
+  `get_last_views_for_symbol()` expose the full multi-symbol view.
 
-An operator who wants the opposite — scheduler on, but strictly
-confined to a fixed symbol list — already has that path today: set
-`settings.SYMBOLS` explicitly. Dynamic registration only ever *adds*
-symbols beyond the configured list; it doesn't override or bypass it.
+**`system_health/recovery_engine.py`**:
+- `attempt_reconciliation_recovery()` now reads `event.symbol`
+  (falling back to `settings.SYMBOL` for events from the classic
+  `run()` path, which predate this field) and threads it through.
+- `_clear_ghost_journal_row()` / `_clear_runtime_ghost()` use the real
+  symbol instead of a hardcoded `settings.SYMBOL`.
+- `_protect_orphaned_exchange_position()`: `dp.get_position_info(symbol=...)`
+  can now find an orphan in any symbol. SL placement routes through
+  `tm.get_manager(symbol)` when `tm` is symbol-aware (an
+  `ExecutionCoordinator`), falling back to calling `tm` directly when
+  it isn't (a plain `TradeManager`, matching pre-§62 behavior exactly).
+- `self._orphan_hold` → `self._orphan_holds: dict[symbol, dict]`.
+  `get_orphan_hold()` (singular) kept for backward compatibility,
+  returning one of the holds. New `get_orphan_holds()` (plural) exposes
+  all of them. `acknowledge_orphaned_position()` gained an optional
+  `symbol` parameter — omitted, it clears every held orphan (the exact
+  pre-§62 zero-arg behavior); given, it clears just that one. The
+  risk_engine manual hold is only cleared once `_orphan_holds` is
+  empty — acknowledging one symbol's orphan must not silently resume
+  trading while a *different* symbol's orphan is still unprotected.
+
+**`main.py`**:
+- `run_position_reconciliation()` now calls
+  `engine.run_all_symbols(sys)` under `SCHEDULER_ENABLED=true`,
+  `engine.run(sys)` otherwise (unchanged). Scheduled unconditionally
+  again (previously disabled entirely under `SCHEDULER_ENABLED=true`
+  by §60, pending this fix).
+- `run_ghost_reconciliation_check()` (Track C3 Phase 2, off by
+  default) is **still not scheduled** under `SCHEDULER_ENABLED=true` —
+  its `OrderStateManager` dependency was not touched by this phase and
+  remains single-symbol-hardcoded. See Known follow-up.
+
+**`api/app.py`**:
+- `GET /api/system/reconciliation` — added `orphan_holds` (plural,
+  full list) and `status_by_symbol` alongside the existing `orphan_hold`
+  (kept, backward compatible).
+- `POST /api/system/reconciliation/acknowledge` — accepts an optional
+  body `{"symbol": "XRPUSDT"}` to acknowledge just that symbol; omitted
+  body clears everything (pre-§62 behavior).
+
+## Known follow-up (not this phase — flagged, not built)
+
+`run_ghost_reconciliation_check()` / `system_health/ghost_reconciliation.py`'s
+`GhostReconciliationMonitor` goes through `system_health/order_state.py`'s
+`OrderStateManager`, which still only ever checks `settings.SYMBOL` —
+not touched by this phase. Left un-scheduled under
+`SCHEDULER_ENABLED=true`, same reasoning §60 originally applied to
+both jobs, now narrowed to just this one. It's off by default even in
+single-symbol mode (`ORDER_RECONCILIATION_ENABLED`), so this is a
+smaller, lower-priority remaining gap than the always-on job this
+phase fixes.
 
 ## Tests
 
-`tests/test_execution_factory.py` — 2 new tests:
-- `test_scheduler_enabled_implies_dynamic_symbols_even_when_flag_left_off`
-  — the fix, directly.
-- `test_scheduler_disabled_and_flag_off_still_confines_to_configured_symbols`
-  — the reverse case pinned explicitly, so this OR can never silently
-  widen the default posture for a deployment that isn't using the
-  scheduler at all.
+New: `tests/test_multi_symbol_reconciliation.py` — 28 tests: symbol
+discovery (each of the three sources, union/dedup, one source failing
+doesn't block the others), two symbols mismatching simultaneously are
+each tracked/suppressed independently, `DUPLICATE_JOURNAL_TRADES` is
+correctly scoped per symbol (two *different* symbols each having one
+open trade is not a duplicate), multi-symbol accessors stay isolated
+from `run()`'s own state, `ReconciliationEvent.symbol` is populated
+correctly on both paths, ghost-clearing uses the real symbol,
+orphan-protection routes SL placement to the symbol-correct manager
+(and falls back correctly when `tm` isn't symbol-aware), multiple
+simultaneous orphan holds are tracked/acknowledged independently
+(including the "don't resume trading while another orphan remains"
+invariant), `main.py`'s dispatch, and the two API endpoint extensions.
 
-Both pre-existing dynamic-symbol tests (`test_testnet_dynamic_symbol_
-settings_default_off`, `test_testnet_wires_dynamic_symbol_settings_
-through_when_enabled`) pass unchanged — neither touches
-`SCHEDULER_ENABLED`, so the `or` term stays `False` for them, same
-result as before.
+Updated: `tests/test_recovery_engine.py` — 6 `tm = MagicMock()` calls
+in `TestOrphanedExchangePosition` changed to
+`MagicMock(spec=["place_stop_loss"])` — an unspecced `MagicMock` makes
+`hasattr(tm, "get_manager")` true (attribute auto-vivification), which
+made every test in that class silently route through a *different*
+child mock instead of the one being asserted against. Fixed to
+accurately reflect real `TradeManager`'s shape (no `get_manager` —
+only `ExecutionCoordinator` has that). All 19 tests in that file pass
+unchanged in outcome.
 
-Full suite: `pytest tests/` → **3068 passed** (base 3066 from §60 + 2
-new), 4 skipped, 45 deselected. Same 3 pre-existing
+Full suite: `pytest tests/` → **3096 passed** (up from 3068), 4
+skipped, 45 deselected. Same 3 pre-existing
 `tests/test_dashboard_serving.py` failures as every phase this week
 (missing frontend build artifact) — unrelated, unaffected.
 
 `ruff check .` → all checks passed, repo-wide. `vulture
---min-confidence 80` on the changed source file → 3 pre-existing,
-unrelated findings only (`_PaperAdapter.execute_trade`'s
-`balance`/`leverage`/`symbol` params, accepted for interface parity
-and intentionally not forwarded — confirmed identical against
-unmodified `main`, just shifted line numbers from this patch's added
-comment block). `python -c "import main"` → succeeds.
+--min-confidence 80` → clean on every changed source file.
+`python -c "import main"` → succeeds.
 
 ## Files changed
 
-`execution/execution_factory.py`, `tests/test_execution_factory.py`,
-`PATCH_NOTES.md`, `MIGRATION.md`, `CHANGELOG.md`,
-`docs/architecture.md` (§61).
+`system_health/reconciliation.py` (rewritten),
+`system_health/recovery_engine.py`, `main.py`, `api/app.py`,
+`tests/test_recovery_engine.py`,
+`tests/test_multi_symbol_reconciliation.py` (new), `PATCH_NOTES.md`,
+`MIGRATION.md`, `CHANGELOG.md`, `docs/architecture.md` (§62).
