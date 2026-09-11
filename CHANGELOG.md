@@ -1,5 +1,57 @@
 # CHANGELOG
 
+## [Unreleased] — Multi-Symbol Reconciliation & Orphan Protection (V16 §62)
+
+Closes the "Known follow-up" flagged in §60: position reconciliation
+and orphan-position protection were single-symbol-hardcoded, so §60
+left them disabled entirely under `SCHEDULER_ENABLED=true` rather than
+run with known-wrong data. `_classify()` was already symbol-agnostic —
+only the data-gathering layer beneath it, and `RecoveryEngine`'s
+actions on its output, were hardcoded to `settings.SYMBOL`. See
+`docs/architecture.md` §62.
+
+### Fixed
+- `system_health/reconciliation.py` — `_read_exchange`/`_read_bot`/
+  `_read_journal` now accept an optional `symbol`; new
+  `run_all_symbols()` discovers every symbol across open exchange
+  positions/journal trades/portfolio_state and reconciles each
+  independently. `run()` byte-for-byte unchanged.
+- `system_health/recovery_engine.py` — ghost-clearing and orphan
+  protection now act on the real mismatching symbol. Orphan SL
+  placement routes through `tm.get_manager(symbol)` when available
+  instead of silently hitting the wrong symbol's `TradeManager` via
+  `ExecutionCoordinator.__getattr__`'s default fallthrough.
+  `_orphan_hold` (single) → `_orphan_holds` (dict, one per symbol);
+  trading only resumes once every orphan is acknowledged.
+- `main.py::run_position_reconciliation()` — dispatches to
+  `run_all_symbols()` under `SCHEDULER_ENABLED=true`, `run()`
+  otherwise. Scheduled unconditionally again (§60 had disabled it
+  entirely pending this fix).
+
+### Added
+- `api/app.py` — `orphan_holds` (plural) + `status_by_symbol` on
+  `GET /api/system/reconciliation`; optional `{"symbol": ...}` body on
+  the acknowledge endpoint.
+- `tests/test_multi_symbol_reconciliation.py` — 28 tests.
+
+### Fixed (test infrastructure)
+- `tests/test_recovery_engine.py` — 6 unspecced `tm = MagicMock()`
+  calls made `hasattr(tm, "get_manager")` silently true, routing every
+  `TestOrphanedExchangePosition` test through the wrong mock object.
+  Fixed to `MagicMock(spec=["place_stop_loss"])`.
+
+### Unaffected (explicitly out of scope, documented)
+- `run_ghost_reconciliation_check()`'s `OrderStateManager` dependency
+  remains single-symbol-only, not touched this phase — off by default
+  even in single-symbol mode, lower priority than the always-on job
+  fixed here.
+
+Full suite: 3096 passed (up from 3068), 4 skipped, 45 deselected, 3
+pre-existing/unrelated dashboard-build failures. ruff clean, vulture
+clean, import main succeeds.
+
+---
+
 ## [Unreleased] — SCHEDULER_ENABLED Implies Dynamic Symbols (V16 §61)
 
 Found while writing §60's own migration notes: `SCANNER_ENABLED=true`

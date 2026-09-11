@@ -1783,12 +1783,21 @@ async def system_reconciliation(limit: int = Query(default=50, ge=1, le=200)):
             "recovery_log": recovery.get_attempt_log(limit=limit),
             # V16 BUG-LIVE-RISK-02: surfaces whether an orphaned exchange
             # position is currently holding new trade entries, and why.
+            # Kept for backward compatibility — reflects one of possibly
+            # several holds; see orphan_holds (plural) for the full list.
             "orphan_hold":  recovery.get_orphan_hold(),
+            # V16 §62: every currently-active orphan hold (one per
+            # symbol) and per-symbol reconciliation status, now that more
+            # than one symbol can be reconciled at once under
+            # SCHEDULER_ENABLED=true.
+            "orphan_holds":    recovery.get_orphan_holds(),
+            "status_by_symbol": engine.status_all_symbols(),
             "timestamp":    datetime.now(timezone.utc).isoformat(),
         })
     except Exception as exc:
         logger.error(f"/api/system/reconciliation error: {exc}", exc_info=True)
         return _ok({"status": {}, "events": [], "recovery_log": [], "orphan_hold": None,
+                    "orphan_holds": [], "status_by_symbol": {},
                     "timestamp": datetime.now(timezone.utc).isoformat(), "error": str(exc)})
 
 
@@ -1873,20 +1882,29 @@ async def order_state_ghosts(
 
 
 @app.post("/api/system/reconciliation/acknowledge")
-async def system_reconciliation_acknowledge(request: Request):
+async def system_reconciliation_acknowledge(request: Request, body: dict | None = None):
     """
     V16 BUG-LIVE-RISK-02: clear an active orphaned-position hold (see
     system_health/recovery_engine.py) so new trade entries can resume.
     OPERATOR role required (see _AUTH_OPERATOR_ROUTES) — this does not
     re-verify exchange state itself, it records that a human reviewed
     and confirmed the position is protected/handled.
+
+    V16 §62: optional body {"symbol": "XRPUSDT"} clears just that
+    symbol's hold, leaving any other symbol's hold (and the risk_engine
+    manual hold, which stays in place while ANY orphan remains
+    unacknowledged) untouched. Omit the body (or send {}) to clear every
+    currently-held orphan — the pre-§62 behavior, still correct for the
+    common case of at most one hold active.
     """
     try:
         recovery = get_recovery_engine()
         auth_ctx = getattr(request.state, "auth", None)
         operator = auth_ctx.principal if auth_ctx is not None else "unauthenticated"
-        result = recovery.acknowledge_orphaned_position(sys=_state, operator=operator)
+        symbol = (body or {}).get("symbol")
+        result = recovery.acknowledge_orphaned_position(sys=_state, operator=operator, symbol=symbol)
         return _ok({"result": result, "orphan_hold": recovery.get_orphan_hold(),
+                    "orphan_holds": recovery.get_orphan_holds(),
                     "timestamp": datetime.now(timezone.utc).isoformat()})
     except Exception as exc:
         logger.error(f"/api/system/reconciliation/acknowledge error: {exc}", exc_info=True)

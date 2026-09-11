@@ -14,12 +14,17 @@ class RecoveryEngine:
         self._lock = threading.Lock()
         self._last: dict[str, datetime] = {}
         self._log: list[dict] = []
-        # V16 BUG-LIVE-RISK-02: set when an exchange position is found with
-        # no journal record of it (PRESENCE_MISMATCH, exchange side open).
-        # Persists across reconciliation cycles until a human explicitly
-        # calls acknowledge_orphaned_position() — see that method and
+        # V16 BUG-LIVE-RISK-02 / V16 §62: set when an exchange position is
+        # found with no journal record of it (PRESENCE_MISMATCH, exchange
+        # side open). Keyed by symbol (not a single dict) so two
+        # simultaneously orphaned positions in different symbols are each
+        # tracked and protected independently — acknowledging one must
+        # not silently forget the other still needs review. Persists
+        # across reconciliation cycles until a human explicitly calls
+        # acknowledge_orphaned_position() for that symbol (or with no
+        # symbol, for all of them) — see that method and
         # _protect_orphaned_exchange_position() below.
-        self._orphan_hold: dict | None = None
+        self._orphan_holds: dict[str, dict] = {}
 
     def _ok(self, key: str) -> bool:
         with self._lock:
@@ -95,6 +100,12 @@ class RecoveryEngine:
             ex = event.exchange_view
             bot = event.bot_view
             jv = event.journal_view
+            # V16 §62: events from ReconciliationEngine.run_all_symbols()
+            # carry the real symbol they're about; run()'s classic
+            # single-symbol events predate that field (default "") — fall
+            # back to settings.SYMBOL for those, preserving exact prior
+            # behavior.
+            symbol = getattr(event, "symbol", "") or settings.SYMBOL
 
             # V16 Phase ORDER-01: exchange is the root authority. When it's
             # flat, ANY runtime/journal source still claiming an open
@@ -110,10 +121,10 @@ class RecoveryEngine:
                 actions: list[str] = []
 
                 if jv.get("has_position") is True:
-                    actions.append(self._clear_ghost_journal_row(sys, jv))
+                    actions.append(self._clear_ghost_journal_row(sys, jv, symbol))
 
                 if bot.get("has_position") is True and bot.get("source") == "portfolio_state":
-                    actions.append(self._clear_runtime_ghost(sys, bot))
+                    actions.append(self._clear_runtime_ghost(sys, bot, symbol))
 
                 return "+".join(actions) if actions else "no_safe_auto_action"
 
@@ -126,14 +137,14 @@ class RecoveryEngine:
             # configured risk %, AND hold all new entries until a human
             # acknowledges — see _protect_orphaned_exchange_position().
             if ex.get("has_position") is True and jv.get("has_position") is False:
-                return self._protect_orphaned_exchange_position(sys)
+                return self._protect_orphaned_exchange_position(sys, symbol)
 
             return "no_safe_auto_action"
         except Exception as exc:
             logger.error(f"attempt_reconciliation_recovery failed: {exc}", exc_info=True)
             return f"error:{exc}"
 
-    def _clear_ghost_journal_row(self, sys: dict, jv: dict) -> str:
+    def _clear_ghost_journal_row(self, sys: dict, jv: dict, symbol: str) -> str:
         """Exchange flat, journal thinks a trade is still open. Pre-
         existing path (previously the only branch of
         attempt_reconciliation_recovery), extracted unchanged so it can be
@@ -145,18 +156,15 @@ class RecoveryEngine:
             return "missing_journal_or_trade_id"
         # V16 Phase 4B Step 3D: routed through TradeLifecycle
         # (Part C/F: "Recovery must never update journal
-        # directly. Recovery must call lifecycle."). jv (this
-        # reconciliation check's own _read_journal() output) has
-        # no symbol key — reconciliation is inherently scoped to
-        # this bot's one configured symbol (same reasoning
-        # applied to this exact code path in V16 Phase 4B
-        # Step 3A), so settings.SYMBOL is the real value here,
-        # not a fabricated placeholder.
+        # directly. Recovery must call lifecycle."). V16 §62: symbol
+        # is now the caller's (this event's) real symbol — from
+        # run_all_symbols() when in scheduler mode, or settings.SYMBOL
+        # for the classic single-symbol run() path — not a hardcoded
+        # settings.SYMBOL regardless of which symbol actually mismatched.
         lifecycle = sys.get("trade_lifecycle")
         if lifecycle is not None:
-            from config.settings import settings
             handle = lifecycle.request_exit(
-                settings.SYMBOL, CloseSource.RECONCILIATION,
+                symbol, CloseSource.RECONCILIATION,
                 "presence_mismatch_ghost_row", trade_id=tid,
             )
             if handle is not None:
@@ -173,10 +181,10 @@ class RecoveryEngine:
         else:
             jrn.update_trade_result(tid, "CANCELLED", 0.0, 0.0)
         self._record("recon_recovery", f"trade_id={tid}", "closed_ghost_row")
-        logger.warning(f"Recon recovery: closed ghost journal trade #{tid}")
+        logger.warning(f"Recon recovery: closed ghost journal trade #{tid} ({symbol})")
         return "closed_ghost_journal_row"
 
-    def _clear_runtime_ghost(self, sys: dict, bot: dict) -> str:
+    def _clear_runtime_ghost(self, sys: dict, bot: dict, symbol: str) -> str:
         """V16 Phase ORDER-01 (BUG-LIVE-ORDER-01): exchange flat, but
         portfolio/portfolio_state.py's PortfolioState still holds an entry
         for this symbol — the ghost the phase brief describes (Binance
@@ -191,22 +199,21 @@ class RecoveryEngine:
         ps = sys.get("portfolio_state")
         if ps is None:
             return "missing_portfolio_state"
-        from config.settings import settings
-        removed = ps.remove_position(settings.SYMBOL)
+        removed = ps.remove_position(symbol)
         result = "cleared_runtime_ghost" if removed is not None else "runtime_ghost_already_clear"
-        self._record("runtime_ghost_clear", settings.SYMBOL, result)
+        self._record("runtime_ghost_clear", symbol, result)
         logger.warning(
             f"Recon recovery: cleared stale runtime PortfolioState entry for "
-            f"{settings.SYMBOL} (exchange verified flat) — {result}"
+            f"{symbol} (exchange verified flat) — {result}"
         )
         try:
             bus = sys.get("event_bus")
             if bus is not None:
                 bus.publish(
                     "RECOVERY_ENGINE", "GHOST_POSITION_REMOVED",
-                    f"Cleared stale runtime position cache for {settings.SYMBOL}",
+                    f"Cleared stale runtime position cache for {symbol}",
                     severity="warning",
-                    payload={"symbol": settings.SYMBOL, "removed": removed.to_dict() if removed else None,
+                    payload={"symbol": symbol, "removed": removed.to_dict() if removed else None,
                              "bot_view": bot},
                 )
         except Exception as exc:
@@ -215,7 +222,7 @@ class RecoveryEngine:
 
     # ── V16 BUG-LIVE-RISK-02: orphaned exchange position ────────────────────
 
-    def _protect_orphaned_exchange_position(self, sys: dict) -> str:
+    def _protect_orphaned_exchange_position(self, sys: dict, symbol: str | None = None) -> str:
         """
         Real exchange position, nothing in the journal. Auto-places a
         protective SL sized off settings.RISK_PER_TRADE_MAX (same risk-%
@@ -227,6 +234,19 @@ class RecoveryEngine:
         symbol, does not attempt to place a second SL (avoids stacking
         reduceOnly orders every time this fires) but still re-confirms the
         hold is in place.
+
+        V16 §62: `symbol` (from the ReconciliationEvent that triggered
+        this) is passed through to `dp.get_position_info()` so this can
+        protect an orphan in ANY symbol, not only the provider's own
+        default — and, since order-placement itself needs the SAME
+        symbol's exchange filters (lot size / precision), routes through
+        `tm.get_manager(symbol)` when `tm` is symbol-aware
+        (execution/execution_coordinator.py's ExecutionCoordinator) rather
+        than relying on attribute delegation to its own default symbol
+        (ExecutionCoordinator.__getattr__ falls through to
+        get_manager() with no argument — silently the wrong symbol's
+        TradeManager, and therefore the wrong lot-size/precision filters,
+        for anything but the default symbol).
         """
         dp = sys.get("data_provider")
         tm = sys.get("trade_manager")
@@ -235,7 +255,7 @@ class RecoveryEngine:
             return "missing_data_provider_or_trade_manager"
 
         try:
-            pos = dp.get_position_info()
+            pos = dp.get_position_info(symbol=symbol)
         except Exception as exc:
             logger.error(f"Orphan-protect: could not re-query position: {exc}")
             return f"error:{exc}"
@@ -244,14 +264,15 @@ class RecoveryEngine:
             # Closed between the reconciliation read and now — nothing to protect.
             return "position_no_longer_open"
 
-        symbol = pos.get("symbol")
-        already_held = self._orphan_hold is not None and self._orphan_hold.get("symbol") == symbol
+        pos_symbol = pos.get("symbol") or symbol
+        already_held = pos_symbol in self._orphan_holds
         if already_held:
             # Re-confirm the hold is still in place (e.g. risk_engine was
             # replaced/restarted) without re-placing an SL.
             if risk is not None and not risk.has_manual_hold():
-                risk.set_manual_hold(self._orphan_hold.get("reason", "Orphaned exchange position — awaiting acknowledgement"))
-            self._record("orphan_protect", symbol or "?", "already_held")
+                risk.set_manual_hold(self._orphan_holds[pos_symbol].get(
+                    "reason", "Orphaned exchange position — awaiting acknowledgement"))
+            self._record("orphan_protect", pos_symbol or "?", "already_held")
             return "orphan_already_held"
 
         direction   = pos.get("side")
@@ -273,7 +294,14 @@ class RecoveryEngine:
         # keep every safety outcome identical (sl_placed=False, orphan
         # hold set, trading held) to the "exchange rejected the order"
         # path this already handled correctly.
-        can_place_real_sl = hasattr(tm, "place_stop_loss")
+        #
+        # V16 §62: get the SYMBOL-CORRECT manager before checking
+        # hasattr — ExecutionCoordinator itself doesn't define
+        # place_stop_loss, so hasattr(tm, ...) below would fall through
+        # its own __getattr__ (defaulting to the WRONG symbol) before we
+        # ever get a chance to route to the right one.
+        order_tm = tm.get_manager(pos_symbol) if hasattr(tm, "get_manager") else tm
+        can_place_real_sl = hasattr(order_tm, "place_stop_loss")
 
         sl_price: float | None = None
         sl_order = None
@@ -281,7 +309,7 @@ class RecoveryEngine:
             logger.warning(
                 "Orphan-protect: EXECUTION_MODE has no real order-placement "
                 "path (paper mode) — cannot auto-place a protective SL for "
-                f"this real exchange position ({direction} {qty} {symbol} "
+                f"this real exchange position ({direction} {qty} {pos_symbol} "
                 f"@ {entry_price}). Trading held pending manual review."
             )
         else:
@@ -293,7 +321,7 @@ class RecoveryEngine:
                     sl_dist  = risk_amount / qty
                     sl_price = (entry_price - sl_dist) if direction == "LONG" else (entry_price + sl_dist)
                     from execution.trade_manager import new_client_order_id
-                    sl_order = tm.place_stop_loss(
+                    sl_order = order_tm.place_stop_loss(
                         direction, qty, sl_price,
                         client_order_id=new_client_order_id("ORPHANSL"),
                     )
@@ -304,7 +332,7 @@ class RecoveryEngine:
         sl_placed = sl_order is not None
         reason = (
             f"Unprotected exchange position detected: {direction} {qty} "
-            f"{symbol} @ {entry_price} — "
+            f"{pos_symbol} @ {entry_price} — "
             + (
                 "protective SL placed automatically" if sl_placed
                 else "no real order-placement path available (paper mode), position still naked"
@@ -315,8 +343,8 @@ class RecoveryEngine:
               "(or POST /api/system/reconciliation/acknowledge) once resolved"
         )
 
-        self._orphan_hold = {
-            "symbol": symbol, "direction": direction, "qty": qty,
+        self._orphan_holds[pos_symbol] = {
+            "symbol": pos_symbol, "direction": direction, "qty": qty,
             "entry_price": entry_price, "sl_price": sl_price,
             "sl_placed": sl_placed,
             "detected_at": datetime.now(timezone.utc).isoformat(),
@@ -331,40 +359,77 @@ class RecoveryEngine:
             if bus is not None:
                 bus.publish(
                     "RECOVERY_ENGINE", "ORPHAN_POSITION_HOLD", reason,
-                    severity="critical", payload=dict(self._orphan_hold),
+                    severity="critical", payload=dict(self._orphan_holds[pos_symbol]),
                 )
         except Exception as exc:
             logger.debug(f"Orphan-protect: event publish failed: {exc}")
 
-        self._record("orphan_protect", symbol or "?", f"sl_placed={sl_placed}")
+        self._record("orphan_protect", pos_symbol or "?", f"sl_placed={sl_placed}")
         logger.critical(reason)
         return "orphan_sl_placed_and_holding" if sl_placed else "orphan_sl_failed_still_holding"
 
     def get_orphan_hold(self) -> dict | None:
-        return dict(self._orphan_hold) if self._orphan_hold is not None else None
+        """Backward-compatible single-hold view (dashboard/API's existing
+        contract): the first/only orphan hold, or None. See
+        get_orphan_holds() for the full multi-symbol list (V16 §62)."""
+        if not self._orphan_holds:
+            return None
+        return dict(next(iter(self._orphan_holds.values())))
 
-    def acknowledge_orphaned_position(self, sys: dict | None = None, operator: str = "unknown") -> str:
+    def get_orphan_holds(self) -> list[dict]:
+        """V16 §62: every currently-active orphan hold, one per symbol —
+        the multi-symbol-aware equivalent of get_orphan_hold()."""
+        return [dict(h) for h in self._orphan_holds.values()]
+
+    def acknowledge_orphaned_position(
+        self, sys: dict | None = None, operator: str = "unknown", symbol: str | None = None,
+    ) -> str:
         """
-        Clear the orphan hold and resume normal trading. Intended to be
-        called explicitly by a human (dashboard 'acknowledge' action /
-        POST /api/system/reconciliation/acknowledge) after they've
+        Clear an orphan hold and, once none remain, resume normal trading.
+        Intended to be called explicitly by a human (dashboard 'acknowledge'
+        action / POST /api/system/reconciliation/acknowledge) after they've
         confirmed the position is protected/handled — this method itself
         does not re-verify exchange state, by design: acknowledgement is a
         human judgment call, not an automatic one.
+
+        V16 §62: `symbol=None` (the pre-§62 zero-arg call shape) clears
+        EVERY currently-held orphan, matching the original single-hold
+        behavior exactly for the common case (at most one hold active).
+        Pass an explicit `symbol` to acknowledge just that one while
+        leaving any other symbol's hold — and the risk_engine manual
+        hold, which must stay in place while ANY orphan is still
+        unacknowledged — untouched.
         """
-        if self._orphan_hold is None:
+        if not self._orphan_holds:
             return "no_hold_active"
-        cleared = dict(self._orphan_hold)
-        cleared["acknowledged_at"] = datetime.now(timezone.utc).isoformat()
-        cleared["acknowledged_by"] = operator
-        self._orphan_hold = None
 
-        risk = sys.get("risk_engine") if sys is not None else None
-        if risk is not None:
-            risk.clear_manual_hold()
+        if symbol is not None:
+            if symbol not in self._orphan_holds:
+                return "no_hold_active"
+            cleared_symbols = [symbol]
+        else:
+            cleared_symbols = list(self._orphan_holds.keys())
 
-        self._record("orphan_hold_acknowledged", cleared.get("symbol", "?"), f"by={operator}")
-        logger.warning(f"Orphaned-position hold acknowledged and cleared by {operator}")
+        for s in cleared_symbols:
+            cleared = dict(self._orphan_holds.pop(s))
+            cleared["acknowledged_at"] = datetime.now(timezone.utc).isoformat()
+            cleared["acknowledged_by"] = operator
+            self._record("orphan_hold_acknowledged", cleared.get("symbol", "?"), f"by={operator}")
+
+        # Only resume trading once every orphan has been acknowledged —
+        # clearing risk_engine's manual hold while a DIFFERENT symbol's
+        # orphan is still unprotected/unacknowledged would silently let
+        # new trades through despite that other position still needing
+        # human review.
+        if not self._orphan_holds:
+            risk = sys.get("risk_engine") if sys is not None else None
+            if risk is not None:
+                risk.clear_manual_hold()
+
+        logger.warning(
+            f"Orphaned-position hold acknowledged and cleared by {operator} "
+            f"({', '.join(cleared_symbols)})"
+        )
         return "cleared"
 
 _re: RecoveryEngine | None = None
