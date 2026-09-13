@@ -5661,6 +5661,7 @@ clean. `vulture risk/risk_engine.py --min-confidence 80` clean.
   restart). Will produce a textual merge conflict with this phase
   regardless of merge order — needs manual reconciliation, not an
   independent merge of both.
+
 ## 57. Close Out V16 BUG-LIVE-RISK-06: Scheduler-Path Gate 0 + Restart Persistence (2026-09-07)
 
 ### Context
@@ -5775,6 +5776,7 @@ changed file. `python -c "import main"` succeeds.
 opened) is fully superseded by this phase — its intent is incorporated
 here, rebased onto §56's refactor. Recommend closing that branch
 without merging.
+
 ## 58. Nightly Retrain Governance Gate — Phase 2 (2026-09-08)
 
 ### Context
@@ -5895,6 +5897,7 @@ Full suite: 3046 passed, 4 skipped, 45 deselected. Same 3 pre-existing
 frontend build artifact), unrelated and unaffected. `ruff check .`
 clean repo-wide. `vulture --min-confidence 80` clean on every changed
 file. `python -c "import main"` succeeds.
+
 ## 59. CORS: Deny by Default (2026-09-08)
 
 ### Root cause
@@ -5963,6 +5966,7 @@ failures as §55–§58 (missing frontend build artifact), unrelated and
 unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` clean on every changed file. `python -c "import
 main"` succeeds.
+
 ## 60. Multi-Symbol Scheduler Safety (2026-09-08)
 
 ### Context
@@ -6164,7 +6168,9 @@ unrelated and unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` on the changed source file: 3 pre-existing,
 unrelated findings only (`_PaperAdapter.execute_trade`'s
 `balance`/`leverage`/`symbol` params, confirmed identical against
-unmodified `main`). `python -c "import main"` succeeds.## 62. Multi-Symbol Reconciliation & Orphan Protection (2026-09-10)
+unmodified `main`). `python -c "import main"` succeeds.
+
+## 62. Multi-Symbol Reconciliation & Orphan Protection (2026-09-10)
 
 ### Context
 
@@ -6296,3 +6302,97 @@ failures as §55–§61 (missing frontend build artifact), unrelated and
 unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` clean on every changed source file. `python -c
 "import main"` succeeds.
+
+## 63. Fix N+1 Query in Ensemble Learning Dataset (2026-09-12)
+
+### Root cause
+
+`journal/journal_v2.py::get_ensemble_learning_dataset()` called
+`get_trade_attribution(trade_id)` once per matching trade —
+`get_trade_attribution()` itself does 2 queries per call (the trade
+row, its `agent_decisions` via `signal_id`), on top of the 1 query
+`get_ensemble_learning_dataset()` used to list matching trade IDs.
+Roughly `1 + 2N` queries total. Previously measured at ~28.5s for
+10,000 trades; confirmed in this phase at ~0.079s for 2,000 trades
+under the fix below (same order of magnitude improvement, same O(N)
+shape being the difference).
+
+Not an oversight: the pre-existing docstring documented the tradeoff
+explicitly — reusing `get_trade_attribution()` per row, rather than a
+second, independently hand-written bulk query, meant the single-row
+and bulk-dataset methods' output could never silently drift apart from
+each other. That correctness property is exactly what this fix
+preserves; only how the underlying data gets fetched changes.
+
+### Fix
+
+Extracted the row-shaping logic — everything after
+`get_trade_attribution()`'s two queries, building the returned dict
+from a trade row and its agent list — into a new
+`@staticmethod _shape_trade_attribution(trade_d, agents) -> dict`.
+Pure function: no queries, just data in, shaped dict out.
+
+- `get_trade_attribution(trade_id)`: unchanged query pattern (still 2
+  queries per call — confirmed unaffected by how many *other* trades
+  exist), now calls the shared helper at the end instead of building
+  the dict inline.
+- `get_ensemble_learning_dataset(limit, symbol)`: rewritten to fetch in
+  bulk — one query for every matching `trades` row (was: one query
+  just for IDs, then N more for the rows themselves via
+  `get_trade_attribution()`), one query for every matching
+  `agent_decisions` row across all those trades' `signal_id`s at once
+  (`WHERE signal_id IN (...)`), grouped by `signal_id` in Python, then
+  each row shaped via `_shape_trade_attribution()`. **2 queries total,
+  regardless of `limit`.**
+
+The row shape still lives in exactly one place, so the two methods'
+output cannot silently drift apart — the original design's whole
+reason for the per-row reuse this replaces is fully preserved.
+
+### Testing
+
+`tests/test_ensemble_dataset_bulk_fetch.py` — 9 tests. Query-count
+tests compare total SQL statements traced via
+`sqlite3.Connection.set_trace_callback` (`sqlite3.Connection` is a
+C/immutable type — its methods can't be monkeypatched directly, so
+`sqlite3.connect()` itself, an ordinary module function, is wrapped
+instead) between a small and a 10x-larger trade count: identical count
+proves O(1), not O(N) — an exact statement-count assertion would be
+brittle against unrelated connection-setup PRAGMA changes, so this
+compares rather than asserts an absolute number. A separate test
+confirms `get_trade_attribution()`'s own per-call cost doesn't change
+based on how many *other* trades exist in the database.
+
+Output-equivalence tests assert literal dict equality (not just
+"should match" reasoning) between `get_ensemble_learning_dataset()`'s
+row for a trade and `get_trade_attribution(trade_id)`'s output for
+that same trade, across every shape variation the latter handles: no
+`signal_id`, `signal_id` with zero `agent_decisions` rows, several
+agents on one trade, an explicit `agent_attribution` override
+(`save_execution_attribution()`), and the `symbol` filter parameter.
+
+All 143 pre-existing tests across every file touching either method
+(`test_agent_performance_attribution.py`, `test_ceo_agent_vote_
+persistence.py`, `test_ceo_live_recommendation_wiring.py`,
+`test_ceo_multi_symbol_agent_attribution.py`,
+`test_execution_attribution.py` — already had a dedicated
+`get_ensemble_learning_dataset` test class — `test_knowledge_trade.py`,
+`test_learning_dataset_builder.py`, `test_learning_report.py`,
+`test_recommendation_dataset_row_count_wiring.py`) pass unchanged.
+
+Full suite: 3105 passed (up from 3096 in §62), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as §55–§62 (missing frontend build artifact), unrelated and
+unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` clean on the changed file. `python -c "import
+main"` succeeds.
+
+### Incidental fix
+
+Found while adding this section: §57 through §62's boundaries in this
+file were each missing a blank line before their heading (a leftover
+from earlier phases' `cat >>` onto a file not ending in a trailing
+blank line) — §61/§62's instance had no newline at all between the
+prior section's last line and `## 62.`, which would have prevented
+that heading from rendering as a heading in strict Markdown. Fixed all
+instances found; no content changed, formatting only.

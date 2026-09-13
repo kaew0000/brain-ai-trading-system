@@ -1,63 +1,30 @@
-# MIGRATION — Multi-Symbol Reconciliation & Orphan Protection (V16 §62)
+# MIGRATION — Fix N+1 Query in Ensemble Learning Dataset (V16 §63)
 
 ## Do you need to do anything?
 
-**No, if `SCHEDULER_ENABLED=false` (the default).** `run()`'s
-single-symbol behavior, and every existing `get_recent()`/`status()`/
-`get_last_views()`/`get_orphan_hold()` call, are byte-for-byte
-unchanged — confirmed by re-running all 69 pre-existing tests across
-`test_reconciliation.py`, `test_recovery_engine.py`,
-`test_ghost_reconciliation*.py`, and `test_close_orphaned_position.py`
-unmodified.
+**No.** Pure performance fix, no config changes, no schema changes, no
+behavior changes — `get_ensemble_learning_dataset()` and
+`get_trade_attribution()` return exactly the same data as before,
+verified with direct equality assertions, not just "should be
+equivalent" reasoning. Restart isn't even strictly required (nothing
+about running state changes), but normal deploy practice applies as
+usual.
 
-## If you're running multi-symbol trading (`SCHEDULER_ENABLED=true`)
+## What actually changes
 
-Position reconciliation now actually protects you across every symbol
-you're trading, not just the configured default:
-
-- Every 60s, each symbol with an open exchange position, open journal
-  trade, or tracked portfolio-state entry gets its own independent
-  reconciliation check — mismatches are detected, logged, and
-  auto-recovered per symbol.
-- An orphaned exchange position (real position, no journal record —
-  e.g. from before this bot session) in **any** symbol now gets an
-  automatic protective stop-loss and puts trading on hold, exactly like
-  single-symbol mode already did for the one default symbol.
-- If more than one symbol is simultaneously orphaned, each is tracked
-  and protected independently. Trading only resumes once **every**
-  orphan has been acknowledged.
-
-### Acknowledging an orphan hold
-
-```bash
-# See what's currently held
-curl -H "Authorization: Bearer $YOUR_API_KEY" \
-  "http://<host>:<port>/api/system/reconciliation"
-# -> look at "orphan_holds" (a list now, not just "orphan_hold")
-
-# Acknowledge one specific symbol
-curl -X POST -H "Authorization: Bearer $YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"symbol": "XRPUSDT"}' \
-  "http://<host>:<port>/api/system/reconciliation/acknowledge"
-
-# Or acknowledge everything at once (omit the body) -- same as before this patch
-curl -X POST -H "Authorization: Bearer $YOUR_API_KEY" \
-  "http://<host>:<port>/api/system/reconciliation/acknowledge"
-```
-
-### Still not covered
-
-`run_ghost_reconciliation_check()` (`ORDER_RECONCILIATION_ENABLED`,
-off by default even in single-symbol mode) remains single-symbol only
-— not scheduled at all while `SCHEDULER_ENABLED=true`. If you rely on
-this specific job, it needs its own follow-up fix first.
+Anything that calls `get_ensemble_learning_dataset()` — the training
+dataset export used by `research/dataset_builder.py` and (per
+`docs/architecture.md` §29) intended for a future Phase 4C learning
+consumer — gets a response in roughly constant time regardless of how
+many closed trades exist, instead of scaling linearly with trade
+count. At 2,000 trades: ~0.08s (measured). The old per-row pattern was
+previously measured at ~28.5s at 10,000 trades; this account's trade
+volume is nowhere near that yet, but multi-symbol trading (§60–§62)
+means it'll get there faster than the single-symbol loop would have.
 
 ## Rollback
 
-Revert this branch and restart. `run_position_reconciliation()` goes
-back to calling `engine.run()` unconditionally regardless of
-`SCHEDULER_ENABLED` — under scheduler mode this reverts to §60's
-"not scheduled at all" state (safer than running with known-wrong
-data), not the multi-symbol-aware behavior. No data migration either
+Revert this branch and restart. `get_ensemble_learning_dataset()`
+reverts to calling `get_trade_attribution()` once per row (O(N)
+queries) — same output, slower at scale. No data involved either
 direction.

@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## [Unreleased] — Fix N+1 Query in Ensemble Learning Dataset (V16 §63)
+
+`journal/journal_v2.py::get_ensemble_learning_dataset()` called
+`get_trade_attribution(trade_id)` once per matching trade — ~1+2N
+queries total, previously measured at ~28.5s for 10,000 trades. This
+was a deliberate, documented tradeoff (reusing the single-row method
+per row meant the two methods' output could never silently drift
+apart) — this entry preserves that correctness goal while fixing the
+query count. See `docs/architecture.md` §63.
+
+### Fixed
+- `journal/journal_v2.py` — row-shaping logic extracted into
+  `_shape_trade_attribution()` (pure data-in, dict-out, no queries),
+  shared by both methods. `get_ensemble_learning_dataset()` now fetches
+  every matching trade and every matching `agent_decisions` row in
+  bulk (2 queries total, regardless of row count) instead of
+  round-tripping per row. `get_trade_attribution()`'s own query
+  pattern is unchanged.
+
+### Added
+- `tests/test_ensemble_dataset_bulk_fetch.py` — 9 tests: query count
+  doesn't scale with trade count (comparative, via
+  `sqlite3.Connection.set_trace_callback`), and byte-for-byte output
+  equivalence between the bulk and single-row methods across every
+  shape variation (no signal_id, signal_id with no agent_decisions,
+  several agents, explicit attribution override, symbol filter).
+
+All 143 pre-existing tests across every file touching either method
+pass unchanged. Full suite: 3105 passed (up from 3096), 4 skipped, 45
+deselected, 3 pre-existing/unrelated dashboard-build failures. ruff
+clean, vulture clean, import main succeeds.
+
+### Incidental
+- `docs/architecture.md` — fixed missing blank lines at several
+  section boundaries (§57–§62), including one (§61/§62) with no
+  newline at all, found while adding this entry's own §63 section.
+
+---
+
 ## [Unreleased] — Multi-Symbol Reconciliation & Orphan Protection (V16 §62)
 
 Closes the "Known follow-up" flagged in §60: position reconciliation
