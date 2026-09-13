@@ -451,42 +451,18 @@ class TradeJournalV2:
             logger.error(f"save_execution_attribution error (trade #{trade_id}): {exc}")
             return False
 
-    def get_trade_attribution(self, trade_id: int) -> dict | None:
-        """
-        Task 1 + Task 4's combined read: one trade's full attribution —
-        execution facts (trades.extra_data's "attribution" key, Task 1)
-        plus which agents participated and how (Task 4), joined from
-        agent_decisions via the trade's signal_id exactly like
-        get_agent_performance() already joins.
-
-        Per-agent entries use this project's real CEOAgent.WEIGHTS keys
-        (smc/futures/regime/risk/journal/confidence_engine) — see
-        journal/trade_attribution.py's module docstring for why. If the
-        trade carries an explicit agent_attribution (a caller passed one
-        to save_execution_attribution() / record_trade_outcome()
-        directly), that is returned as-is instead of the join — the
-        explicit value is assumed more complete. Returns an EMPTY
-        agent_participation list (never fabricated entries) for any
-        trade whose signal_id has no agent_decisions rows — today that
-        is every trade taken through the V16 multi-symbol path, since
-        execution/portfolio_signal_provider.py's pipeline doesn't run
-        the agent layer (see docs/architecture.md §29 "Scope boundary" —
-        an honest, pre-existing gap, not a bug in this method).
-        """
-        with self._conn() as c:
-            trade = c.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
-            if trade is None:
-                return None
-            trade_d = _row_to_dict(trade, json_cols=("confidence_breakdown", "block_reasons", "extra_data"))
-
-            agents: list[dict] = []
-            if trade["signal_id"] is not None:
-                rows = c.execute(
-                    "SELECT * FROM agent_decisions WHERE signal_id=? ORDER BY id",
-                    (trade["signal_id"],),
-                ).fetchall()
-                agents = [_row_to_dict(r, json_cols=("details",)) for r in rows]
-
+    @staticmethod
+    def _shape_trade_attribution(trade_d: dict, agents: list[dict]) -> dict:
+        """The actual row-shaping logic behind get_trade_attribution() and
+        get_ensemble_learning_dataset(), extracted so both can share it
+        without either duplicating it (V16 §63) or querying twice for the
+        same data. Takes already-fetched data — no queries in here — so
+        callers control how the trade/agents rows get fetched (one at a
+        time via get_trade_attribution(), or in bulk via
+        get_ensemble_learning_dataset()) while the row *shape* stays
+        defined in exactly one place, preserving this method's original
+        design intent (see get_ensemble_learning_dataset()'s own
+        docstring) of never letting the two shapes silently drift apart."""
         attribution = trade_d.get("extra_data") or {}
         attribution = attribution.get("attribution", {}) if isinstance(attribution, dict) else {}
 
@@ -542,6 +518,44 @@ class TradeJournalV2:
             "close_confidence":    attribution.get("confidence"),    # confidence recorded at CLOSE time (distinct from signal_confidence above)
         }
 
+    def get_trade_attribution(self, trade_id: int) -> dict | None:
+        """
+        Task 1 + Task 4's combined read: one trade's full attribution —
+        execution facts (trades.extra_data's "attribution" key, Task 1)
+        plus which agents participated and how (Task 4), joined from
+        agent_decisions via the trade's signal_id exactly like
+        get_agent_performance() already joins.
+
+        Per-agent entries use this project's real CEOAgent.WEIGHTS keys
+        (smc/futures/regime/risk/journal/confidence_engine) — see
+        journal/trade_attribution.py's module docstring for why. If the
+        trade carries an explicit agent_attribution (a caller passed one
+        to save_execution_attribution() / record_trade_outcome()
+        directly), that is returned as-is instead of the join — the
+        explicit value is assumed more complete. Returns an EMPTY
+        agent_participation list (never fabricated entries) for any
+        trade whose signal_id has no agent_decisions rows — today that
+        is every trade taken through the V16 multi-symbol path, since
+        execution/portfolio_signal_provider.py's pipeline doesn't run
+        the agent layer (see docs/architecture.md §29 "Scope boundary" —
+        an honest, pre-existing gap, not a bug in this method).
+        """
+        with self._conn() as c:
+            trade = c.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+            if trade is None:
+                return None
+            trade_d = _row_to_dict(trade, json_cols=("confidence_breakdown", "block_reasons", "extra_data"))
+
+            agents: list[dict] = []
+            if trade["signal_id"] is not None:
+                rows = c.execute(
+                    "SELECT * FROM agent_decisions WHERE signal_id=? ORDER BY id",
+                    (trade["signal_id"],),
+                ).fetchall()
+                agents = [_row_to_dict(r, json_cols=("details",)) for r in rows]
+
+        return self._shape_trade_attribution(trade_d, agents)
+
     def get_ensemble_learning_dataset(self, limit: int = 1000, symbol: str | None = None) -> list[dict]:
         """
         Task 6/7 (architecture.md §29): one clean, flat row per CLOSED
@@ -552,27 +566,55 @@ class TradeJournalV2:
         no learning decisions — see journal/trade_attribution.py's
         module docstring for why that's deliberately out of scope here.
 
-        Deliberately reuses get_trade_attribution() per row (N+1 reads)
-        rather than a second, hand-written mega-join — this is a bulk/
-        offline export method (mirrors research/feature_store.py's
-        get_training_rows(), also not a hot decision-cycle path), and
-        reuse means the single-row and bulk-dataset shapes can never
-        silently drift apart from each other.
+        V16 §63: originally called get_trade_attribution(trade_id) once
+        per row — N+1 queries (2 per trade: one for the trade row, one
+        for its agent_decisions), ~28.5s at 10,000 trades. Fetches the
+        same data in bulk instead (one query for every matching trade
+        row, one for every matching agent_decisions row via signal_id
+        IN (...)), then shapes each row through the exact same
+        _shape_trade_attribution() helper get_trade_attribution() itself
+        now uses — the row shape still lives in exactly one place, so
+        this and the single-row method can never silently drift apart,
+        which was the original design's whole reason for the N+1 reuse
+        in the first place (see git history / docs/architecture.md §63).
+        Total queries: 2, regardless of `limit`.
 
         Rows with empty agent_participation are included, not filtered
         out — a future Phase 4C consumer needs to see that gap in the
         data (today: every V16 multi-symbol trade), not have it hidden.
         """
-        sql = "SELECT id FROM trades WHERE result IN ('WIN','LOSS')"
+        sql = "SELECT * FROM trades WHERE result IN ('WIN','LOSS')"
         args: tuple = ()
         if symbol:
             sql += " AND symbol=?"
             args = (symbol,)
         sql += " ORDER BY timestamp DESC LIMIT ?"
         args = args + (limit,)
+
         with self._conn() as c:
-            ids = [r["id"] for r in c.execute(sql, args).fetchall()]
-        return [row for row in (self.get_trade_attribution(tid) for tid in ids) if row is not None]
+            trade_rows = c.execute(sql, args).fetchall()
+            trades_d = [
+                _row_to_dict(r, json_cols=("confidence_breakdown", "block_reasons", "extra_data"))
+                for r in trade_rows
+            ]
+            signal_ids = sorted({t["signal_id"] for t in trades_d if t.get("signal_id") is not None})
+
+            agents_by_signal: dict[int, list[dict]] = {}
+            if signal_ids:
+                placeholders = ",".join("?" * len(signal_ids))
+                agent_rows = c.execute(
+                    f"SELECT * FROM agent_decisions WHERE signal_id IN ({placeholders}) ORDER BY signal_id, id",
+                    tuple(signal_ids),
+                ).fetchall()
+                for r in agent_rows:
+                    agents_by_signal.setdefault(r["signal_id"], []).append(
+                        _row_to_dict(r, json_cols=("details",))
+                    )
+
+        return [
+            self._shape_trade_attribution(t, agents_by_signal.get(t.get("signal_id"), []))
+            for t in trades_d
+        ]
 
     # ════════════════════════════════════════════════════════════════════
     # SIGNALS — backs /api/signals and /api/decision
