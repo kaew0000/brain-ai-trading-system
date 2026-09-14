@@ -86,9 +86,18 @@ class TestTradeManager:
         assert qty == pytest.approx(0.01, abs=1e-6)
 
     def test_position_size_zero_sl_distance(self):
+        """V16 §64: was `assert qty == 0.001` — the old behavior clamped
+        up to a hardcoded, BTCUSDT-shaped minimum quantity for this
+        degenerate case (stop_loss == entry_price), which both (a)
+        wasn't symbol-correct for any other symbol and (b) directly
+        violated this same function's own BUG-LIVE-RISK-04 policy for
+        every other unsizeable-quantity case: skip the trade (0.0),
+        never clamp up. See tests/test_live_money_safety.py's
+        TestQuantitySkipInsteadOfClamp for the general policy this now
+        matches."""
         m, _ = self._make_manager()
         qty = m.calculate_position_size(1_000.0, 50_000.0, 50_000.0)
-        assert qty == 0.001  # minimum
+        assert qty == 0.0
 
     def test_place_market_order_buy(self):
         m, client = self._make_manager()

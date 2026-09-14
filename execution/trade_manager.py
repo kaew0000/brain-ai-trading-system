@@ -301,8 +301,26 @@ class TradeManager:
         risk_amount = balance * risk_pct
         sl_dist     = abs(entry_price - stop_loss)
         if sl_dist == 0:
-            logger.warning("SL distance = 0; using minimum qty")
-            return self._round_qty(0.001)
+            # V16 §64: was `return self._round_qty(0.001)` — a hardcoded,
+            # BTCUSDT-shaped quantity (~$60-100 notional at typical BTC
+            # prices) returned regardless of which symbol this manager is
+            # for, AND a direct violation of this same function's own
+            # BUG-LIVE-RISK-04 policy below: _round_qty()'s docstring says
+            # outright "this method must NEVER be used as the position-
+            # sizing decision itself... calculate_position_size() below
+            # uses _floor_to_step() directly and returns 0.0 (skip trade)
+            # instead of clamping." A degenerate signal where stop_loss
+            # equals entry_price can't produce a meaningful risk-based
+            # size at all — the correct outcome is the same one every
+            # other unsizeable case in this function already reaches:
+            # skip the trade, not guess at a minimum.
+            logger.warning(
+                f"PositionSize SKIPPED — stop_loss equals entry_price "
+                f"(entry={entry_price}, sl={stop_loss}), cannot compute a "
+                f"risk-based size. Trade skipped for safety, per this "
+                f"function's own BUG-LIVE-RISK-04 convention below."
+            )
+            return 0.0
         raw = risk_amount / sl_dist
 
         # ── Margin cap: never use more than MAX_MARGIN_USAGE of balance ───────
