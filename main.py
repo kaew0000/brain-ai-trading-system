@@ -514,11 +514,36 @@ def build_system() -> dict:
     # of failing confusingly.
     execution_scheduler = None
     if settings.SCHEDULER_ENABLED:
+        from execution.strategy_registry import is_scheduler_safe as is_strategy_scheduler_safe
+
         if market_scanner is None:
             logger.error(
                 "SCHEDULER_ENABLED=true but SCANNER_ENABLED=false — "
                 "ExecutionScheduler needs the Market Scanner for candidates. "
                 "Not starting."
+            )
+        elif not is_strategy_scheduler_safe(settings.STRATEGY_NAME):
+            # V16 §65: execution/strategy_registry.py's "smc_oi_regime"
+            # strategy reads one global data_provider with no symbol
+            # parameter — every regime classification it produces
+            # reflects whichever symbol data_provider happened to be
+            # configured with, regardless of which symbol the scheduler
+            # is actually asking about this cycle. That was previously
+            # only documented (this module's own strategy_registry.py
+            # docstring, the strategy's description string) — nothing
+            # enforced it, so STRATEGY_NAME=smc_oi_regime +
+            # SCHEDULER_ENABLED=true could silently run with
+            # cross-symbol-contaminated regime data. Same guarded,
+            # non-fatal pattern as the market_scanner check just above.
+            logger.error(
+                f"SCHEDULER_ENABLED=true but STRATEGY_NAME="
+                f"{settings.STRATEGY_NAME!r} is not scheduler-safe (see "
+                f"execution/strategy_registry.py) — it is single-symbol-"
+                f"shaped and would silently reflect the wrong symbol's "
+                f"regime for any candidate other than the one it happens "
+                f"to be globally configured with. Not starting. Use "
+                f"'portfolio_signal_provider' (default) or "
+                f"'smc_oi_regime_multi' instead."
             )
         else:
             try:

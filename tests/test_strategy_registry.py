@@ -109,6 +109,47 @@ class TestBuiltInStrategiesRegistered:
             get_strategy("does_not_exist")
 
 
+class TestSchedulerSafeFlag:
+    """V16 §65: scheduler_safe was documentation-only before this —
+    nothing actually stopped STRATEGY_NAME=smc_oi_regime +
+    SCHEDULER_ENABLED=true from being configured together, silently
+    running the multi-symbol scheduler with a strategy that reflects
+    only one globally-configured symbol's regime regardless of which
+    candidate it's asked about."""
+
+    def test_defaults_to_true_for_a_freshly_registered_strategy(self):
+        reg = StrategyRegistry()
+        reg.register("x", lambda **kw: object())
+        assert reg.is_scheduler_safe("x") is True
+
+    def test_can_be_registered_as_unsafe(self):
+        reg = StrategyRegistry()
+        reg.register("x", lambda **kw: object(), scheduler_safe=False)
+        assert reg.is_scheduler_safe("x") is False
+
+    def test_unregistered_name_is_not_scheduler_safe(self):
+        """Fail closed: is_scheduler_safe() on a name that doesn't even
+        exist must not return True (build_strategy() would raise
+        KeyError for it anyway, but a caller checking safety FIRST
+        shouldn't get a false green light)."""
+        reg = StrategyRegistry()
+        assert reg.is_scheduler_safe("does_not_exist") is False
+
+    def test_module_level_helper_matches_registry_method(self):
+        from execution.strategy_registry import is_scheduler_safe
+        assert is_scheduler_safe("portfolio_signal_provider") is True
+        assert is_scheduler_safe("smc_oi_regime") is False
+
+    def test_list_strategies_exposes_scheduler_safe(self):
+        by_name = {s["name"]: s for s in list_strategies()}
+        assert by_name["portfolio_signal_provider"]["scheduler_safe"] is True
+        assert by_name["smc_oi_regime"]["scheduler_safe"] is False
+
+    def test_smc_oi_regime_multi_is_scheduler_safe(self):
+        from execution.strategy_registry import is_scheduler_safe
+        assert is_scheduler_safe("smc_oi_regime_multi") is True
+
+
 class TestPortfolioSignalProviderFactory:
 
     def test_builds_real_portfolio_signal_provider(self):
