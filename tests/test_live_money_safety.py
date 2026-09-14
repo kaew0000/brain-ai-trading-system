@@ -180,6 +180,18 @@ class TestQuantitySkipInsteadOfClamp:
             # NEVER inflated up to minQty past that ceiling.
             assert qty == 0.0 or qty <= allowed_ceiling + 1e-9
 
+    def test_case_g_sl_distance_zero_is_rejected_not_defaulted(self):
+        """V16 §64: stop_loss == entry_price (a degenerate signal) → SKIP
+        (0.0), same as every other unsizeable case in this class — not
+        the old hardcoded `_round_qty(0.001)` default, which was both
+        BTCUSDT-shaped (wrong for any other symbol) and a direct
+        violation of this exact class's own name/policy."""
+        m, _ = _make_manager()
+        qty = m.calculate_position_size(
+            balance=1_000.0, entry_price=50_000.0, stop_loss=50_000.0, risk_pct=0.01,
+        )
+        assert qty == 0.0
+
     def test_round_qty_still_clamps_for_already_approved_quantities(self):
         """_round_qty() itself keeps its old clamp-up behavior — it's used
         to format an ALREADY-approved quantity for SL/TP orders, not to

@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## [Unreleased] — SL-Distance-Zero: Skip, Not Clamp (V16 §64)
+
+`execution/trade_manager.py::calculate_position_size()`, when
+`stop_loss == entry_price` (a degenerate signal), returned a hardcoded
+`0.001`-unit quantity — wrong for any symbol but BTCUSDT (now that
+§60–§62 made multi-symbol trading possible), and a direct violation of
+this exact function's own documented `BUG-LIVE-RISK-04` policy: every
+other unsizeable-quantity path in the same function already returns
+`0.0` (skip) rather than clamping up, per `_round_qty()`'s own
+docstring ("must NEVER be used as the position-sizing decision
+itself"). See `docs/architecture.md` §64.
+
+### Fixed
+- `execution/trade_manager.py` — `sl_dist == 0` now returns `0.0`
+  (skip the trade), matching every other unsizeable-quantity case in
+  this function. `execute_trade()`'s existing `qty <= 0` check already
+  handles it.
+
+### Added
+- `tests/test_live_money_safety.py` — `test_case_g_sl_distance_zero_
+  is_rejected_not_defaulted`, completing `TestQuantitySkipInsteadOfClamp`'s
+  lettered case coverage.
+
+### Fixed (test)
+- `tests/test_execution.py::test_position_size_zero_sl_distance` —
+  previously asserted the old `0.001` behavior as correct; corrected
+  to assert `0.0`.
+
+Full suite: 3106 passed (up from 3105), 4 skipped, 45 deselected, 3
+pre-existing/unrelated dashboard-build failures. ruff clean, vulture
+clean, import main succeeds.
+
+---
+
 ## [Unreleased] — Fix N+1 Query in Ensemble Learning Dataset (V16 §63)
 
 `journal/journal_v2.py::get_ensemble_learning_dataset()` called

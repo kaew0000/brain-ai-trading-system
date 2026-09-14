@@ -6396,3 +6396,55 @@ blank line) — §61/§62's instance had no newline at all between the
 prior section's last line and `## 62.`, which would have prevented
 that heading from rendering as a heading in strict Markdown. Fixed all
 instances found; no content changed, formatting only.
+
+## 64. SL-Distance-Zero: Skip, Not Clamp (2026-09-12)
+
+### Root cause
+
+`execution/trade_manager.py::calculate_position_size()`, on
+`sl_dist == 0` (`stop_loss` exactly equal to `entry_price` — a
+degenerate signal that can't produce a meaningful risk-based size),
+returned `self._round_qty(0.001)`. Found during this week's broader
+audit, two problems:
+
+1. `0.001` is a hardcoded, BTCUSDT-shaped quantity (~$60-100 notional
+   at typical BTC prices) — wrong for any other symbol, now that
+   §60–§62 made multi-symbol trading actually possible.
+2. It directly violated this exact function's own documented policy.
+   `_round_qty()`'s docstring says outright: "this method must NEVER
+   be used as the position-sizing decision itself... calculate_
+   position_size() below uses `_floor_to_step()` directly and returns
+   0.0 (skip trade) instead of clamping." Every other unsizeable-
+   quantity path in the same function (margin-capped below minQty, raw
+   qty below minQty, raw qty that floors below minQty after the margin
+   cap) already returns `0.0` for exactly this stated reason — see the
+   `BUG-LIVE-RISK-04` comment a few lines below the fixed branch,
+   which explicitly says risk policy has priority over the exchange's
+   minimum tradable size, and the correct outcome for an unsizeable
+   trade is no trade. The `sl_dist == 0` branch was the one path in
+   this function that didn't follow its own function's rule.
+
+### Fix
+
+`sl_dist == 0` now returns `0.0`, matching every other unsizeable case
+in this function. `execute_trade()`'s pre-existing `if qty <= 0: raise
+ValueError` already treats `0.0` as "cannot size" — no new handling
+needed anywhere downstream.
+
+### Testing
+
+`tests/test_live_money_safety.py::TestQuantitySkipInsteadOfClamp` —
+new `test_case_g_sl_distance_zero_is_rejected_not_defaulted`,
+completing that class's lettered coverage (cases a–f already covered
+every other unsizeable-quantity path; this was the missing one).
+`tests/test_execution.py::test_position_size_zero_sl_distance` —
+the one pre-existing test that encoded the bug as expected behavior
+(`assert qty == 0.001`); corrected to `assert qty == 0.0`, not
+removed.
+
+Full suite: 3106 passed (up from 3105 in §63), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as §55–§63 (missing frontend build artifact), unrelated and
+unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` clean on the changed file. `python -c "import
+main"` succeeds.
