@@ -1,63 +1,96 @@
-# PATCH NOTES — SL-Distance-Zero: Skip, Not Clamp (V16 §64)
+# PATCH NOTES — Enforce scheduler_safe Strategy Selection (V16 §65)
 
-Branch: `fix/sl-distance-zero-skip-not-clamp`
-Base: `main` @ `fae1038` (merge of PR #99, N+1 query fix)
+Branch: `fix/enforce-scheduler-safe-strategy`
+Base: `main` @ `0b4dc88` (merge of PR #100, sl-distance-zero fix)
+
+## Context
+
+Closes the "HMM cross-symbol contamination" item from this week's
+broader audit — re-investigated and found to be less severe than
+originally flagged: `execution/portfolio_signal_provider.py` (the
+default `STRATEGY_NAME`) already correctly passes `symbol=` into
+`RegimeEngine.classify()` (added in Phase 4B Step 3A), so the default
+configuration was never actually contaminated. The real, narrower gap:
+`execution/strategy_registry.py`'s legacy `"smc_oi_regime"` strategy
+— explicitly documented in its own module docstring, class docstring,
+and registration description as "NOT symbol-aware... Do not select
+for ExecutionScheduler" — had **no code enforcing that**. Only
+documentation stood between a `STRATEGY_NAME=smc_oi_regime` +
+`SCHEDULER_ENABLED=true` configuration and silent cross-symbol
+contamination.
 
 ## Root cause
 
-`execution/trade_manager.py::calculate_position_size()`, when
-`stop_loss == entry_price` (`sl_dist == 0`, a degenerate signal that
-can't produce a meaningful risk-based size), returned
-`self._round_qty(0.001)` — a hardcoded quantity.
-
-Two problems, found during this week's broader audit:
-1. **Wrong for any symbol but BTCUSDT.** `0.001` is roughly $60-100
-   notional at typical BTC prices; for a cheaper-priced symbol (now
-   tradeable via §60–§62's multi-symbol work) it could be a wildly
-   different, unintended notional.
-2. **Directly violates this exact function's own documented policy.**
-   `_round_qty()`'s own docstring says outright: *"this method must
-   NEVER be used as the position-sizing decision itself... calculate_
-   position_size() below uses _floor_to_step() directly and returns
-   0.0 (skip trade) instead of clamping."* Every other unsizeable-
-   quantity path in this same function (margin-capped below minQty,
-   raw qty below minQty, raw qty that floors below minQty) already
-   returns `0.0` for exactly this reason (see the `BUG-LIVE-RISK-04`
-   comment a few lines below the fixed branch) — the `sl_dist == 0`
-   branch was the one path in this function that didn't follow its own
-   rule.
+`execution/strategy.py::SMC_OI_Regime_Strategy.generate_signal()` has
+no `symbol` parameter anywhere in its interface — it reads one global
+`data_provider.get_all_market_data()`. Its registry adapter
+(`SMCOIRegimeStrategyAdapter`) accepts a `symbol` argument only to
+satisfy the `SignalProvider` callable shape, and ignores it entirely
+(confirmed, and already documented, by
+`execution/strategy_registry.py`'s own docstrings). `main.py`'s
+`ExecutionScheduler` startup block called `build_strategy(settings.
+STRATEGY_NAME, ...)` with no check of whether the selected strategy
+was actually safe for that path — the "not safe to select" warning
+existed only in prose.
 
 ## Fix
 
-`sl_dist == 0` now returns `0.0` (skip the trade), matching every
-other unsizeable-quantity case in this function. `execute_trade()`'s
-existing `if qty <= 0: raise ValueError` already treats `0.0` as
-"cannot size" — no new handling needed anywhere downstream, same
-convention `TestQuantitySkipInsteadOfClamp` already exercises for
-every other case.
+`execution/strategy_registry.py`:
+- `StrategySpec` gained `scheduler_safe: bool = True`.
+- `register()` / `register_strategy()` gained a matching
+  `scheduler_safe` parameter (default `True` — no behavior change for
+  any strategy that doesn't explicitly opt out).
+- `"smc_oi_regime"` is now registered with `scheduler_safe=False`.
+- New `StrategyRegistry.is_scheduler_safe(name)` / module-level
+  `is_scheduler_safe(name)` — fails closed (an unregistered name
+  returns `False`, not `True`).
+- `list_strategies()` now includes `scheduler_safe` per entry.
+
+`main.py`: the `ExecutionScheduler` startup block now checks
+`is_scheduler_safe(settings.STRATEGY_NAME)` alongside its existing
+`market_scanner is None` precondition check, using the exact same
+guarded, non-fatal pattern (`logger.error(...)`, scheduler simply
+doesn't start) — not a hard crash, consistent with every other
+scheduler-startup precondition in this block.
 
 ## Tests
 
-- `tests/test_live_money_safety.py::TestQuantitySkipInsteadOfClamp` —
-  new `test_case_g_sl_distance_zero_is_rejected_not_defaulted`,
-  matching that class's existing lettered convention (a–f already
-  covered every other unsizeable path; this was the missing case).
-- `tests/test_execution.py::TestTradeManager::test_position_size_
-  zero_sl_distance` — updated: asserted the old `0.001` behavior,
-  now asserts `0.0`. This is the one pre-existing test that encoded
-  the bug as expected behavior; corrected, not removed.
+`tests/test_strategy_registry.py` — new `TestSchedulerSafeFlag` (6
+tests): defaults to `True` for a freshly registered strategy, can be
+registered as unsafe, an unregistered name is not scheduler-safe
+(fail-closed), the module-level helper matches the registry method,
+`list_strategies()` exposes the field, and the two built-in
+multi-symbol-safe strategies (`portfolio_signal_provider`,
+`smc_oi_regime_multi`) are correctly `True` while `smc_oi_regime` is
+correctly `False`.
 
-Full suite: `pytest tests/` → **3106 passed** (up from 3105), 4
+`main.py`'s own enforcement (the `elif` branch itself) is not
+separately unit-tested — same reasoning as §60's precedent:
+`main()` is a large, side-effecting entry point not designed for unit
+testing, and the branch is a thin, self-evidently-correct call into
+the now-tested `is_scheduler_safe()`. Verified by direct code review.
+
+All 117 pre-existing tests across every file touching the strategy
+registry (`test_strategy_registry.py`, `test_smc_oi_regime_multi.py`,
+`test_ceo_multi_symbol_agent_attribution.py`,
+`test_training_lane_runner.py`) pass unchanged after adding the
+`scheduler_safe` kwarg (defaults preserve every existing call site's
+behavior).
+
+Full suite: `pytest tests/` → **3112 passed** (up from 3106), 4
 skipped, 45 deselected. Same 3 pre-existing
 `tests/test_dashboard_serving.py` failures as every phase this week
 (missing frontend build artifact) — unrelated, unaffected.
 
 `ruff check .` → all checks passed, repo-wide. `vulture
---min-confidence 80` → clean on the changed file.
+--min-confidence 80` → clean on both changed source files (one
+pre-existing, unrelated finding — `main.py`'s signal-handler `frame`
+parameter, confirmed identical on unmodified `main` in every prior
+phase this week that touched this file).
 `python -c "import main"` → succeeds.
 
 ## Files changed
 
-`execution/trade_manager.py`, `tests/test_execution.py`,
-`tests/test_live_money_safety.py`, `PATCH_NOTES.md`, `MIGRATION.md`,
-`CHANGELOG.md`, `docs/architecture.md` (§64).
+`execution/strategy_registry.py`, `main.py`,
+`tests/test_strategy_registry.py`, `PATCH_NOTES.md`, `MIGRATION.md`,
+`CHANGELOG.md`, `docs/architecture.md` (§65).

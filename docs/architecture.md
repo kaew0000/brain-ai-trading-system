@@ -6448,3 +6448,82 @@ failures as §55–§63 (missing frontend build artifact), unrelated and
 unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` clean on the changed file. `python -c "import
 main"` succeeds.
+
+## 65. Enforce scheduler_safe Strategy Selection (2026-09-14)
+
+### Context
+
+Closes the "HMM cross-symbol contamination" item flagged during this
+week's broader audit — re-investigated before writing any code, since
+"how it was found" turned out to matter. The original concern:
+`RegimeEngine.classify()` not receiving a `symbol=` argument would let
+one symbol's HMM state leak into another's classification. Tracing
+every real call site found this was **already fixed** for the default
+configuration: `execution/portfolio_signal_provider.py` (the default
+`STRATEGY_NAME`) has correctly passed `symbol=` since Phase 4B Step
+3A. The actual, narrower gap: `execution/strategy_registry.py`'s
+legacy `"smc_oi_regime"` strategy — whose own module docstring, class
+docstring, and registration description string all already say "NOT
+symbol-aware... Do not select for ExecutionScheduler" — had nothing
+in code enforcing that. Only prose stood between a
+`STRATEGY_NAME=smc_oi_regime` + `SCHEDULER_ENABLED=true`
+configuration and silent contamination.
+
+### Root cause
+
+`execution/strategy.py::SMC_OI_Regime_Strategy.generate_signal()` has
+no `symbol` parameter anywhere in its interface — it calls one global
+`data_provider.get_all_market_data()`. Its registry adapter
+(`SMCOIRegimeStrategyAdapter.get_signal(self, symbol)`) accepts a
+`symbol` argument purely to satisfy the `SignalProvider` callable
+shape and ignores it — already documented, not a new finding.
+`main.py`'s `ExecutionScheduler` startup block called
+`build_strategy(settings.STRATEGY_NAME, ...)` with no check of
+whether the selected strategy was actually safe for that path.
+
+### Fix
+
+`execution/strategy_registry.py`: `StrategySpec` gained `scheduler_
+safe: bool = True`; `register()`/`register_strategy()` gained a
+matching parameter (default `True` — no behavior change for any
+strategy not explicitly opted out). `"smc_oi_regime"` now registered
+with `scheduler_safe=False`. New `is_scheduler_safe(name)` (registry
+method + module function) — fails closed: an unregistered name
+returns `False`, not `True` (`build_strategy()` would raise `KeyError`
+for it anyway, but a caller checking safety *first* shouldn't get a
+false green light). `list_strategies()` now includes `scheduler_safe`
+per entry.
+
+`main.py`: the `ExecutionScheduler` startup block's precondition
+checks gained `elif not is_scheduler_safe(settings.STRATEGY_NAME):` —
+same guarded, non-fatal pattern as the sibling `market_scanner is
+None` check right above it (`logger.error(...)`, scheduler simply
+doesn't start, no crash).
+
+### Testing
+
+`tests/test_strategy_registry.py::TestSchedulerSafeFlag` — 6 tests:
+defaults to `True` for a freshly registered strategy; can be
+registered as unsafe; an unregistered name is not scheduler-safe
+(fail-closed); the module-level helper matches the registry method;
+`list_strategies()` exposes the field; and the two built-in
+multi-symbol-safe strategies are correctly `True` while
+`"smc_oi_regime"` is correctly `False`.
+
+`main.py`'s own `elif` branch is not separately unit-tested — same
+precedent as §60: `main()` is a large, side-effecting entry point not
+designed for unit testing, and the branch is a thin, self-evidently-
+correct call into the now-tested `is_scheduler_safe()`. Verified by
+direct code review.
+
+All 117 pre-existing tests across every file touching the strategy
+registry pass unchanged (the new `scheduler_safe` kwarg defaults
+preserve every existing call site's behavior).
+
+Full suite: 3112 passed (up from 3106 in §64), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as §55–§64 (missing frontend build artifact), unrelated and
+unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` clean on both changed source files (one
+pre-existing, unrelated finding — `main.py`'s signal-handler `frame`
+parameter). `python -c "import main"` succeeds.

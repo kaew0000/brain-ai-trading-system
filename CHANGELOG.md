@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## [Unreleased] — Enforce scheduler_safe Strategy Selection (V16 §65)
+
+Closes the "HMM cross-symbol contamination" item from this week's
+audit — re-investigated and found narrower than first flagged: the
+default `STRATEGY_NAME` (`portfolio_signal_provider`) already
+correctly passes `symbol=` into `RegimeEngine.classify()`. The real
+gap: `execution/strategy_registry.py`'s legacy `"smc_oi_regime"`
+strategy is explicitly documented as unsafe for
+`ExecutionScheduler`'s multi-symbol path, but nothing enforced that —
+only prose. See `docs/architecture.md` §65.
+
+### Fixed
+- `main.py` — `ExecutionScheduler` startup now checks
+  `is_scheduler_safe(settings.STRATEGY_NAME)` alongside its existing
+  preconditions; refuses to start (logged, non-fatal) rather than
+  silently running a known single-symbol-shaped strategy under the
+  multi-symbol scheduler.
+
+### Added
+- `execution/strategy_registry.py` — `StrategySpec.scheduler_safe`
+  (default `True`), `is_scheduler_safe()` (registry method + module
+  function, fails closed for unregistered names). `"smc_oi_regime"`
+  now registered with `scheduler_safe=False`.
+- `tests/test_strategy_registry.py` — `TestSchedulerSafeFlag`, 6 tests.
+
+All 117 pre-existing strategy-registry tests pass unchanged. Full
+suite: 3112 passed (up from 3106), 4 skipped, 45 deselected, 3
+pre-existing/unrelated dashboard-build failures. ruff clean, vulture
+clean, import main succeeds.
+
+---
+
 ## [Unreleased] — SL-Distance-Zero: Skip, Not Clamp (V16 §64)
 
 `execution/trade_manager.py::calculate_position_size()`, when

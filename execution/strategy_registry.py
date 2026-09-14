@@ -36,6 +36,13 @@ main.py constructed directly before this phase):
     passed to it. Documented honestly rather than silently papered
     over — matches this project's existing convention (see
     commander/control_state.py's "Honesty about paper_mode_forced").
+    V16 §65: registered with scheduler_safe=False — main.py's
+    ExecutionScheduler startup now checks is_scheduler_safe(STRATEGY_
+    NAME) and refuses to start (logged, non-fatal, same as any other
+    scheduler-startup precondition failure) rather than silently
+    running with a known-contaminating strategy. Documentation alone
+    never actually stopped this combination from being configured;
+    this is the enforcement.
 
 "smc_oi_regime_multi" (V16 Phase 4C):
     Wraps execution/smc_oi_regime_multi.py's SMCOIRegimeMultiAdapter.
@@ -82,6 +89,15 @@ class StrategySpec:
     name: str
     factory: StrategyFactory
     description: str = ""
+    # V16 §65: whether this strategy is safe to select for
+    # ExecutionScheduler's multi-symbol path. Documentation alone (this
+    # module's own docstring, "smc_oi_regime"'s description string
+    # below) never actually stopped STRATEGY_NAME=smc_oi_regime +
+    # SCHEDULER_ENABLED=true from being set together — nothing enforced
+    # it. Defaults True so every existing/future strategy stays
+    # unaffected unless explicitly marked otherwise; "smc_oi_regime" is
+    # the one exception, registered with scheduler_safe=False below.
+    scheduler_safe: bool = True
 
 
 class StrategyRegistry:
@@ -103,6 +119,7 @@ class StrategyRegistry:
         factory: StrategyFactory,
         description: str = "",
         override: bool = False,
+        scheduler_safe: bool = True,
     ) -> None:
         if not name or not isinstance(name, str):
             raise ValueError("Strategy name must be a non-empty string")
@@ -111,8 +128,11 @@ class StrategyRegistry:
                 f"Strategy '{name}' is already registered — pass "
                 f"override=True if replacing it is deliberate."
             )
-        self._strategies[name] = StrategySpec(name=name, factory=factory, description=description)
-        logger.info(f"StrategyRegistry: registered '{name}'")
+        self._strategies[name] = StrategySpec(
+            name=name, factory=factory, description=description,
+            scheduler_safe=scheduler_safe,
+        )
+        logger.info(f"StrategyRegistry: registered '{name}' (scheduler_safe={scheduler_safe})")
 
     def get(self, name: str) -> StrategySpec:
         if name not in self._strategies:
@@ -129,12 +149,20 @@ class StrategyRegistry:
 
     def list_strategies(self) -> list[dict]:
         return [
-            {"name": s.name, "description": s.description}
+            {"name": s.name, "description": s.description, "scheduler_safe": s.scheduler_safe}
             for s in sorted(self._strategies.values(), key=lambda s: s.name)
         ]
 
     def is_registered(self, name: str) -> bool:
         return name in self._strategies
+
+    def is_scheduler_safe(self, name: str) -> bool:
+        """V16 §65: True if `name` is registered AND marked safe for
+        ExecutionScheduler's multi-symbol path. An unregistered name
+        returns False (fail closed — build_strategy(name, ...) would
+        raise anyway, but a caller checking safety first shouldn't get
+        a KeyError for that)."""
+        return self.is_registered(name) and self._strategies[name].scheduler_safe
 
 
 # ── Module-level singleton (the registry main.py / config actually use) ────
@@ -142,9 +170,11 @@ _REGISTRY = StrategyRegistry()
 
 
 def register_strategy(
-    name: str, factory: StrategyFactory, description: str = "", override: bool = False
+    name: str, factory: StrategyFactory, description: str = "", override: bool = False,
+    scheduler_safe: bool = True,
 ) -> None:
-    _REGISTRY.register(name, factory, description=description, override=override)
+    _REGISTRY.register(name, factory, description=description, override=override,
+                        scheduler_safe=scheduler_safe)
 
 
 def get_strategy(name: str) -> StrategyFactory:
@@ -159,6 +189,10 @@ def build_strategy(name: str, **kwargs):
 
 def list_strategies() -> list[dict]:
     return _REGISTRY.list_strategies()
+
+
+def is_scheduler_safe(name: str) -> bool:
+    return _REGISTRY.is_scheduler_safe(name)
 
 
 # ── Built-in strategy: portfolio_signal_provider (default) ─────────────────
@@ -260,6 +294,7 @@ register_strategy(
         "argument. Do not select for ExecutionScheduler; kept for "
         "plugin-system completeness / future single-symbol standalone use."
     ),
+    scheduler_safe=False,  # V16 §65 — see main.py's enforcement of this flag
 )
 
 
