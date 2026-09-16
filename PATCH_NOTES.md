@@ -1,89 +1,93 @@
-# PATCH NOTES — Enforce scheduler_safe Strategy Selection (V16 §65)
+# PATCH NOTES — Multi-Symbol Order State & Ghost Reconciliation (V16 §66)
 
-Branch: `fix/enforce-scheduler-safe-strategy`
-Base: `main` @ `0b4dc88` (merge of PR #100, sl-distance-zero fix)
+Branch: `feat/multi-symbol-ghost-reconciliation`
+Base: `main` @ `0e05f1a` (merge of PR #101, scheduler_safe enforcement)
 
-## Context
-
-Closes the "HMM cross-symbol contamination" item from this week's
-broader audit — re-investigated and found to be less severe than
-originally flagged: `execution/portfolio_signal_provider.py` (the
-default `STRATEGY_NAME`) already correctly passes `symbol=` into
-`RegimeEngine.classify()` (added in Phase 4B Step 3A), so the default
-configuration was never actually contaminated. The real, narrower gap:
-`execution/strategy_registry.py`'s legacy `"smc_oi_regime"` strategy
-— explicitly documented in its own module docstring, class docstring,
-and registration description as "NOT symbol-aware... Do not select
-for ExecutionScheduler" — had **no code enforcing that**. Only
-documentation stood between a `STRATEGY_NAME=smc_oi_regime` +
-`SCHEDULER_ENABLED=true` configuration and silent cross-symbol
-contamination.
+Closes the last item flagged in §62's "Known follow-up":
+`run_ghost_reconciliation_check()` / `OrderStateManager` remained
+single-symbol-only after §62 fixed `ReconciliationEngine` itself. This
+phase closes it — this was the last remaining item from this week's
+broader gap-analysis audit that qualifies as a genuine bug (not a
+brand-new feature build).
 
 ## Root cause
 
-`execution/strategy.py::SMC_OI_Regime_Strategy.generate_signal()` has
-no `symbol` parameter anywhere in its interface — it reads one global
-`data_provider.get_all_market_data()`. Its registry adapter
-(`SMCOIRegimeStrategyAdapter`) accepts a `symbol` argument only to
-satisfy the `SignalProvider` callable shape, and ignores it entirely
-(confirmed, and already documented, by
-`execution/strategy_registry.py`'s own docstrings). `main.py`'s
-`ExecutionScheduler` startup block called `build_strategy(settings.
-STRATEGY_NAME, ...)` with no check of whether the selected strategy
-was actually safe for that path — the "not safe to select" warning
-existed only in prose.
+`system_health/order_state.py::OrderStateManager.get_order_state(sys,
+symbol=...)` — and `system_health/ghost_reconciliation.py::
+GhostReconciliationMonitor.check(sys, symbol=...)`, which calls it —
+already accepted an optional `symbol` parameter throughout the whole
+call chain. The plumbing existed. What was broken: internally,
+`get_order_state()` always called `ReconciliationEngine.run(sys)` and
+`get_last_views()` — which (per `reconciliation.py`'s own docstring,
+and §62's design) only ever read/write `run()`'s own
+`settings.SYMBOL`-keyed state, regardless of what `symbol` argument
+was passed in.
+
+Concretely: `get_order_state(sys, symbol="XRPUSDT")` would silently
+return **BTCUSDT's** `exchange_position`/`journal_position`/
+`runtime_position`, mislabeled with `symbol="XRPUSDT"` in the returned
+snapshot. Worse than simply unimplemented — it looks correct without
+being correct.
+
+`main.py::run_ghost_reconciliation_check()` compounded this: it called
+`monitor.check(sys)` with no symbol at all (implicitly
+`settings.SYMBOL` only), so even with `OrderStateManager` fixed, the
+scheduled job itself would never have asked about any other symbol.
 
 ## Fix
 
-`execution/strategy_registry.py`:
-- `StrategySpec` gained `scheduler_safe: bool = True`.
-- `register()` / `register_strategy()` gained a matching
-  `scheduler_safe` parameter (default `True` — no behavior change for
-  any strategy that doesn't explicitly opt out).
-- `"smc_oi_regime"` is now registered with `scheduler_safe=False`.
-- New `StrategyRegistry.is_scheduler_safe(name)` / module-level
-  `is_scheduler_safe(name)` — fails closed (an unregistered name
-  returns `False`, not `True`).
-- `list_strategies()` now includes `scheduler_safe` per entry.
+`system_health/reconciliation.py` — new
+`run_for_symbol(sys, symbol) -> ReconciliationEvent | None`: reconciles
+exactly one caller-specified symbol using the same per-symbol keyed
+state `run_all_symbols()` (§62) already uses, so a symbol queried both
+ways shares one suppression track rather than two independent ones.
 
-`main.py`: the `ExecutionScheduler` startup block now checks
-`is_scheduler_safe(settings.STRATEGY_NAME)` alongside its existing
-`market_scanner is None` precondition check, using the exact same
-guarded, non-fatal pattern (`logger.error(...)`, scheduler simply
-doesn't start) — not a hard crash, consistent with every other
-scheduler-startup precondition in this block.
+`system_health/order_state.py::get_order_state()` — now branches on
+`settings.SCHEDULER_ENABLED`: under scheduler mode, calls
+`reconciliation.run_for_symbol(sys, symbol)` /
+`get_last_views_for_symbol(symbol)` instead of `run(sys)` /
+`get_last_views()`. `SCHEDULER_ENABLED=false` path is byte-for-byte
+unchanged.
+
+`main.py::run_ghost_reconciliation_check()` — under
+`SCHEDULER_ENABLED=true`, discovers every symbol
+`ReconciliationEngine._discover_symbols()` finds (the same discovery
+`run_position_reconciliation()`'s own `run_all_symbols()` call already
+uses) and calls `monitor.check(sys, symbol=s)` once per symbol, instead
+of a single implicit-default call. `SCHEDULER_ENABLED=false` path
+unchanged. The scheduling block itself no longer excludes this job
+under scheduler mode (previously left un-scheduled entirely, per §62's
+"known-wrong data is worse than no data" reasoning — no longer
+needed, since the data is now correct).
 
 ## Tests
 
-`tests/test_strategy_registry.py` — new `TestSchedulerSafeFlag` (6
-tests): defaults to `True` for a freshly registered strategy, can be
-registered as unsafe, an unregistered name is not scheduler-safe
-(fail-closed), the module-level helper matches the registry method,
-`list_strategies()` exposes the field, and the two built-in
-multi-symbol-safe strategies (`portfolio_signal_provider`,
-`smc_oi_regime_multi`) are correctly `True` while `smc_oi_regime` is
-correctly `False`.
+New: `tests/test_ghost_reconciliation_multi_symbol.py` — 9 tests:
+`run_for_symbol()` reconciles only the given symbol and shares
+suppression state with `run_all_symbols()`; the core bug fix itself
+(`get_order_state()` under scheduler mode reflects the *requested*
+symbol's real exchange/journal state, not `settings.SYMBOL`'s,
+confirmed with `settings.SYMBOL != "XRPUSDT"` as an explicit sanity
+check against a coincidental pass); two symbols queried independently
+return independently correct snapshots; `SCHEDULER_ENABLED=false` is
+an unchanged regression guard (never calls `get_all_positions()`);
+`main.py`'s dispatch checks every discovered symbol under scheduler
+mode, checks once with no symbol otherwise, and checks nothing when no
+symbols are discovered.
 
-`main.py`'s own enforcement (the `elif` branch itself) is not
-separately unit-tested — same reasoning as §60's precedent:
-`main()` is a large, side-effecting entry point not designed for unit
-testing, and the branch is a thin, self-evidently-correct call into
-the now-tested `is_scheduler_safe()`. Verified by direct code review.
+All 120 pre-existing tests across every file touching the changed
+modules (`test_ghost_reconciliation.py`, `test_ghost_reconciliation_
+api.py`, `test_order_state.py`, `test_order_state_api.py`,
+`test_multi_symbol_reconciliation.py`, `test_reconciliation.py`,
+`test_recovery_engine.py`) pass unchanged.
 
-All 117 pre-existing tests across every file touching the strategy
-registry (`test_strategy_registry.py`, `test_smc_oi_regime_multi.py`,
-`test_ceo_multi_symbol_agent_attribution.py`,
-`test_training_lane_runner.py`) pass unchanged after adding the
-`scheduler_safe` kwarg (defaults preserve every existing call site's
-behavior).
-
-Full suite: `pytest tests/` → **3112 passed** (up from 3106), 4
+Full suite: `pytest tests/` → **3121 passed** (up from 3112), 4
 skipped, 45 deselected. Same 3 pre-existing
 `tests/test_dashboard_serving.py` failures as every phase this week
 (missing frontend build artifact) — unrelated, unaffected.
 
 `ruff check .` → all checks passed, repo-wide. `vulture
---min-confidence 80` → clean on both changed source files (one
+--min-confidence 80` → clean on every changed source file (one
 pre-existing, unrelated finding — `main.py`'s signal-handler `frame`
 parameter, confirmed identical on unmodified `main` in every prior
 phase this week that touched this file).
@@ -91,6 +95,7 @@ phase this week that touched this file).
 
 ## Files changed
 
-`execution/strategy_registry.py`, `main.py`,
-`tests/test_strategy_registry.py`, `PATCH_NOTES.md`, `MIGRATION.md`,
-`CHANGELOG.md`, `docs/architecture.md` (§65).
+`system_health/reconciliation.py`, `system_health/order_state.py`,
+`main.py`, `tests/test_ghost_reconciliation_multi_symbol.py` (new),
+`PATCH_NOTES.md`, `MIGRATION.md`, `CHANGELOG.md`,
+`docs/architecture.md` (§66).

@@ -6527,3 +6527,92 @@ unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` clean on both changed source files (one
 pre-existing, unrelated finding — `main.py`'s signal-handler `frame`
 parameter). `python -c "import main"` succeeds.
+
+## 66. Multi-Symbol Order State & Ghost Reconciliation (2026-09-16)
+
+### Context
+
+Closes the last item flagged in §62's "Known follow-up":
+`run_ghost_reconciliation_check()` / `system_health/order_state.py`'s
+`OrderStateManager` remained single-symbol-only after §62 fixed
+`ReconciliationEngine` itself. This was the last remaining genuine bug
+from this week's broader gap-analysis audit — everything after this is
+either already fixed, out of scope by design (a full
+`ReconciliationEngine`-shaped redesign of `OrderStateManager` isn't
+needed; see Fix below for why this was narrower than that), or a
+brand-new feature build rather than a bug fix.
+
+### Root cause
+
+`OrderStateManager.get_order_state(sys, symbol=...)` — and
+`GhostReconciliationMonitor.check(sys, symbol=...)`, which calls it —
+already accepted an optional `symbol` parameter throughout the whole
+call chain; the plumbing existed. What was broken: internally,
+`get_order_state()` always called `ReconciliationEngine.run(sys)` and
+`get_last_views()`, which (per §62's own design) only ever read/write
+`run()`'s own `settings.SYMBOL`-keyed state, regardless of what
+`symbol` argument was passed in. Concretely: `get_order_state(sys,
+symbol="XRPUSDT")` would silently return BTCUSDT's `exchange_position`/
+`journal_position`/`runtime_position`, mislabeled with
+`symbol="XRPUSDT"` in the returned snapshot — worse than simply
+unimplemented, since it looks correct without being correct.
+`main.py::run_ghost_reconciliation_check()` compounded this: it called
+`monitor.check(sys)` with no symbol at all, so even with
+`OrderStateManager` fixed, the scheduled job itself would never have
+asked about any other symbol.
+
+### Fix
+
+`system_health/reconciliation.py`: new `run_for_symbol(sys, symbol) ->
+ReconciliationEvent | None` — reconciles exactly one caller-specified
+symbol, using the same per-symbol keyed state `run_all_symbols()`
+(§62) already uses, so a symbol queried both ways (the regular
+60s-scheduled `run_position_reconciliation()` job, and an on-demand
+`get_order_state()` call) shares one suppression track rather than
+two independent ones.
+
+`system_health/order_state.py::get_order_state()`: branches on
+`settings.SCHEDULER_ENABLED` — under scheduler mode, calls
+`reconciliation.run_for_symbol(sys, symbol)` /
+`get_last_views_for_symbol(symbol)` instead of `run(sys)` /
+`get_last_views()`. `SCHEDULER_ENABLED=false` path is byte-for-byte
+unchanged (confirmed by regression test asserting
+`get_all_positions()` is never called in that mode).
+
+`main.py::run_ghost_reconciliation_check()`: under
+`SCHEDULER_ENABLED=true`, discovers every symbol via
+`ReconciliationEngine._discover_symbols()` (the same discovery
+`run_all_symbols()` itself uses) and calls `monitor.check(sys,
+symbol=s)` once per discovered symbol. The scheduling block no longer
+excludes this job under scheduler mode — §62 had left it un-scheduled
+entirely (safer than running with known-wrong data); no longer
+necessary now that the data is correct.
+
+### Testing
+
+`tests/test_ghost_reconciliation_multi_symbol.py` — 9 tests:
+`run_for_symbol()` reconciles only the given symbol and shares
+suppression state with `run_all_symbols()`; the core bug fix itself —
+`get_order_state()` under scheduler mode reflects the *requested*
+symbol's real exchange/journal state, not `settings.SYMBOL`'s
+(asserted against `settings.SYMBOL != "XRPUSDT"` explicitly, so the
+test can't coincidentally pass); two symbols queried independently
+each return independently correct snapshots (`DESYNC` for the one with
+a real orphaned exchange position, `NO_POSITION` for the flat one);
+`SCHEDULER_ENABLED=false` regression guard; `main.py`'s dispatch
+(checks every discovered symbol under scheduler mode, checks once with
+no symbol otherwise, checks nothing when no symbols are discovered).
+
+All 120 pre-existing tests across every affected file
+(`test_ghost_reconciliation.py`, `test_ghost_reconciliation_api.py`,
+`test_order_state.py`, `test_order_state_api.py`,
+`test_multi_symbol_reconciliation.py`, `test_reconciliation.py`,
+`test_recovery_engine.py`) pass unchanged.
+
+Full suite: 3121 passed (up from 3112 in §65), 4 skipped, 45
+deselected. Same 3 pre-existing `tests/test_dashboard_serving.py`
+failures as §55–§65 (missing frontend build artifact), unrelated and
+unaffected. `ruff check .` clean repo-wide. `vulture
+--min-confidence 80` clean on every changed source file (one
+pre-existing, unrelated finding — `main.py`'s signal-handler `frame`
+parameter). `python -c "import main"` succeeds.

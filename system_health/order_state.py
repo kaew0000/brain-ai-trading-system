@@ -148,18 +148,41 @@ class OrderStateManager:
             from system_health.reconciliation import get_reconciliation_engine
             reconciliation = get_reconciliation_engine()
 
+        # V16 §66: under SCHEDULER_ENABLED=true, `symbol` can legitimately
+        # be any actively-traded symbol, not just settings.SYMBOL — before
+        # this fix, the call below was always reconciliation.run(sys) /
+        # get_last_views(), which only ever reads/writes run()'s own
+        # settings.SYMBOL-keyed state (see this module's own docstring)
+        # regardless of what `symbol` was passed in here. A caller asking
+        # about XRPUSDT would silently get BTCUSDT's exchange/journal/bot
+        # views back, mislabeled with symbol="XRPUSDT" in the returned
+        # snapshot — worse than simply unimplemented, since it looks
+        # correct without being correct. run_for_symbol() /
+        # get_last_views_for_symbol() (added in §66) use the same
+        # per-symbol keyed state run_all_symbols() already relies on for
+        # the regularly-scheduled reconciliation job, so a symbol queried
+        # both ways shares one suppression track. settings.SYMBOL-only
+        # mode (SCHEDULER_ENABLED=false) is completely unchanged below —
+        # run()/get_last_views() still mean exactly what they always have.
         try:
-            # Same pipeline the 60s-scheduled run_position_reconciliation()
-            # job already runs: comparison + auto-recovery + publish +
-            # suppression (ReconciliationEngine._last_fired_sig). Calling
-            # it again here is not a second reconciliation algorithm —
-            # run() is idempotent per that suppression logic, and this is
-            # the one and only comparison entrypoint in the codebase.
-            reconciliation.run(sys)
+            if settings.SCHEDULER_ENABLED:
+                reconciliation.run_for_symbol(sys, symbol)
+            else:
+                # Same pipeline the 60s-scheduled run_position_reconciliation()
+                # job already runs: comparison + auto-recovery + publish +
+                # suppression (ReconciliationEngine._last_fired_sig). Calling
+                # it again here is not a second reconciliation algorithm —
+                # run() is idempotent per that suppression logic, and this is
+                # the one and only comparison entrypoint in the codebase.
+                reconciliation.run(sys)
         except Exception as exc:
-            logger.error(f"OrderStateManager: reconciliation.run() failed: {exc}", exc_info=True)
+            logger.error(f"OrderStateManager: reconciliation run failed: {exc}", exc_info=True)
 
-        views = reconciliation.get_last_views()
+        views = (
+            reconciliation.get_last_views_for_symbol(symbol)
+            if settings.SCHEDULER_ENABLED
+            else reconciliation.get_last_views()
+        )
         if views is None:
             snapshot = self._unknown_snapshot(symbol, "no reconciliation views available yet")
         else:

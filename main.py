@@ -1700,6 +1700,15 @@ def run_ghost_reconciliation_check(sys: dict) -> None:
     second, independently-polling loop with its own cadence or its own
     exchange client.
 
+    V16 §66: under SCHEDULER_ENABLED=true, checks every symbol
+    ReconciliationEngine._discover_symbols() finds (same discovery
+    run_position_reconciliation()'s own run_all_symbols() call already
+    uses — see system_health/reconciliation.py) instead of the single
+    implicit settings.SYMBOL check() defaults to. OrderStateManager.
+    get_order_state() (also §66) now actually uses the symbol it's
+    given rather than always reading settings.SYMBOL's state regardless
+    of what was asked for.
+
     Known, pre-existing characteristic this job does NOT change:
     ReconciliationEngine.run() has no caching of its own — the existing
     60s run_position_reconciliation() job above, EVERY GET /api/
@@ -1710,10 +1719,18 @@ def run_ghost_reconciliation_check(sys: dict) -> None:
     it never calls refresh(force=True) or queries Binance through any
     path other than the one every existing consumer already uses. See
     docs/architecture/GHOST_RECONCILIATION.md's Known Limitations
-    section for the full accounting."""
+    section for the full accounting.
+    """
     try:
         from system_health.ghost_reconciliation import get_ghost_reconciliation_monitor
-        get_ghost_reconciliation_monitor().check(sys)
+        monitor = get_ghost_reconciliation_monitor()
+        if settings.SCHEDULER_ENABLED:
+            from system_health.reconciliation import get_reconciliation_engine
+            symbols = get_reconciliation_engine()._discover_symbols(sys)
+            for symbol in symbols:
+                monitor.check(sys, symbol=symbol)
+        else:
+            monitor.check(sys)
     except Exception as exc:
         logger.error(f"run_ghost_reconciliation_check error: {exc}", exc_info=True)
 
@@ -2121,38 +2138,22 @@ def main() -> None:
     # branch inside it — it correctly handles either mode).
     schedule.every(30).seconds.do(monitor_open_trades, components)
 
-    # V16 §60/§62: run_position_reconciliation() now has a genuine
-    # multi-symbol-aware path (system_health/reconciliation.py's
-    # ReconciliationEngine.run_all_symbols(), added in §62) — it's
-    # scheduled either way, run_position_reconciliation() itself picks
-    # run() vs run_all_symbols() based on this same flag (see that
-    # function's own docstring). run_ghost_reconciliation_check()
-    # (Track C3 Phase 2, off by default) is NOT yet multi-symbol-aware
-    # — system_health/ghost_reconciliation.py's GhostReconciliationMonitor
-    # goes through system_health/order_state.py's OrderStateManager,
-    # which was not touched by §62 and still only ever checks
-    # settings.SYMBOL. Left un-scheduled under SCHEDULER_ENABLED=true
-    # for the same "known-wrong data is worse than no data" reason §60
-    # originally applied to both jobs — narrower now, flagged as its own
-    # follow-up in docs/architecture.md §62 rather than re-blocking the
-    # always-on reconciliation job above it that §62 actually fixes.
+    # V16 §60/§62/§66: run_position_reconciliation() and
+    # run_ghost_reconciliation_check() both have genuine multi-symbol-
+    # aware paths now (system_health/reconciliation.py's run_all_symbols()
+    # from §62; system_health/order_state.py's OrderStateManager and
+    # ghost_reconciliation.py's GhostReconciliationMonitor, both fixed in
+    # §66 to actually use the symbol they're given instead of always
+    # reading settings.SYMBOL's state). Both functions pick their
+    # SCHEDULER_ENABLED-aware path internally — see their own docstrings.
     schedule.every(60).seconds.do(run_position_reconciliation, components)
-    if settings.SCHEDULER_ENABLED:
-        logger.info(
-            "SCHEDULER_ENABLED=true — run_position_reconciliation() uses "
-            "ReconciliationEngine.run_all_symbols() (V16 §62). "
-            "run_ghost_reconciliation_check() NOT scheduled — its "
-            "OrderStateManager dependency is not yet multi-symbol-aware, "
-            "see docs/architecture.md §62's Known follow-up."
+    # Track C3 Phase 2 — off by default regardless of SCHEDULER_ENABLED;
+    # see config/settings.py ORDER_RECONCILIATION_ENABLED and
+    # run_ghost_reconciliation_check()'s own docstring above.
+    if settings.ORDER_RECONCILIATION_ENABLED:
+        schedule.every(settings.ORDER_RECONCILIATION_INTERVAL_SECONDS).seconds.do(
+            run_ghost_reconciliation_check, components
         )
-    else:
-        # Track C3 Phase 2 — off by default; see config/settings.py
-        # ORDER_RECONCILIATION_ENABLED and run_ghost_reconciliation_check()'s
-        # own docstring above.
-        if settings.ORDER_RECONCILIATION_ENABLED:
-            schedule.every(settings.ORDER_RECONCILIATION_INTERVAL_SECONDS).seconds.do(
-                run_ghost_reconciliation_check, components
-            )
     schedule.every(1).hours.do(daily_report,            components)
     schedule.every().day.at("02:00").do(run_nightly_retrain_job)
     # V16 Phase 4C Step 4 — refresh _state["learning_recommendations"]
