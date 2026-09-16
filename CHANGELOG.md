@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## [Unreleased] — Multi-Symbol Order State & Ghost Reconciliation (V16 §66)
+
+Closes the last item flagged in §62's "Known follow-up":
+`run_ghost_reconciliation_check()` / `OrderStateManager` remained
+single-symbol-only after §62 fixed `ReconciliationEngine` itself —
+the last remaining genuine bug from this week's broader gap-analysis
+audit. See `docs/architecture.md` §66.
+
+### Fixed
+- `system_health/order_state.py::get_order_state()` — under
+  `SCHEDULER_ENABLED=true`, previously always read `settings.SYMBOL`'s
+  reconciliation state regardless of the `symbol` argument passed in —
+  a query for any other symbol silently returned the wrong symbol's
+  data, mislabeled. Now branches on `SCHEDULER_ENABLED` to use the
+  correctly-scoped per-symbol state.
+- `main.py::run_ghost_reconciliation_check()` — now checks every
+  actively-traded symbol under scheduler mode instead of an implicit
+  `settings.SYMBOL`-only default. No longer excluded from scheduling
+  under `SCHEDULER_ENABLED=true` (§62 had left it un-scheduled
+  entirely pending this fix).
+
+### Added
+- `system_health/reconciliation.py` — new `run_for_symbol(sys, symbol)`,
+  reconciling one caller-specified symbol via the same per-symbol
+  keyed state `run_all_symbols()` (§62) uses.
+- `tests/test_ghost_reconciliation_multi_symbol.py` — 9 tests.
+
+All 120 pre-existing tests across every affected file pass unchanged.
+Full suite: 3121 passed (up from 3112), 4 skipped, 45 deselected, 3
+pre-existing/unrelated dashboard-build failures. ruff clean, vulture
+clean, import main succeeds.
+
+---
+
 ## [Unreleased] — Enforce scheduler_safe Strategy Selection (V16 §65)
 
 Closes the "HMM cross-symbol contamination" item from this week's

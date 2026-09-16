@@ -101,6 +101,19 @@ class ReconciliationEngine:
                 events.append(evt)
         return events
 
+    def run_for_symbol(self, sys: dict, symbol: str) -> ReconciliationEvent | None:
+        """V16 §66: reconcile exactly one caller-specified symbol,
+        without discovering or touching any other symbol's state.
+        Exists for on-demand, single-symbol callers —
+        system_health/order_state.py's OrderStateManager.get_order_state()
+        under SCHEDULER_ENABLED=true is the first one — that need a
+        fresh read for a specific symbol without paying for (or
+        affecting the suppression state of) every other symbol
+        run_all_symbols() would also reconcile. Uses the same per-symbol
+        keyed state run_all_symbols() itself uses (so a symbol queried
+        both ways shares one suppression track, not two)."""
+        return self._run_for_key(sys, symbol=symbol, key=symbol)
+
     def _discover_symbols(self, sys: dict) -> set[str]:
         symbols: set[str] = set()
         dp = sys.get("data_provider")
