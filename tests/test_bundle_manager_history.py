@@ -66,6 +66,45 @@ class TestApplyAndDuplicateDetection:
         h = BundleHistory(tmp_path / "bundle_history.json")
         assert h.get("nope") is None
 
+    def test_corrected_sha_defaults_to_none(self, tmp_path):
+        """V16 §67 housekeeping: BundleRecord's new optional
+        corrected_sha/correction_note fields default to None for a
+        normally-recorded (uncorrected) entry."""
+        h = BundleHistory(tmp_path / "bundle_history.json")
+        h.record_applied("sha1", "feature/x", "x.bundle", pushed=True)
+        record = h.get("sha1")
+        assert record.corrected_sha is None
+        assert record.correction_note is None
+
+    def test_corrected_sha_round_trips_through_save_and_reload(self, tmp_path):
+        """The original motivation for adding these fields: a manually-
+        annotated correction (bundle_history.json's Phase 2E record)
+        must survive this tool calling save() again later, not be
+        silently dropped by asdict()-based serialization."""
+        import json as _json
+        from dataclasses import replace
+
+        p = tmp_path / "bundle_history.json"
+        h = BundleHistory(p)
+        h.record_applied("d8c7aaf...", "feature/phase2e-execution-wiring", "x.bundle", pushed=True)
+        corrected = replace(
+            h.get("d8c7aaf..."),
+            corrected_sha="2426966...",
+            correction_note="sha does not exist in repo; real commit identified",
+        )
+        h._records = [corrected]
+        h._by_sha["d8c7aaf..."] = corrected
+        h.save()
+
+        # Simulate a later, independent load (e.g. the next tool run)
+        h2 = BundleHistory(p)
+        reloaded = h2.get("d8c7aaf...")
+        assert reloaded.corrected_sha == "2426966..."
+        assert reloaded.correction_note == "sha does not exist in repo; real commit identified"
+
+        raw = _json.loads(p.read_text(encoding="utf-8"))
+        assert raw["records"][0]["corrected_sha"] == "2426966..."
+
 
 class TestPersistence:
 

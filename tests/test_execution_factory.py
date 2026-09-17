@@ -24,6 +24,30 @@ pytestmark = pytest.mark.unit
 
 class TestExecutionFactory:
 
+    @pytest.fixture(autouse=True)
+    def _restore_execution_mode(self):
+        """fix(tests): test_execution_factory.py os.environ leak — every
+        test in this class calls self._factory(mode), which sets both
+        os.environ["EXECUTION_MODE"] and config.settings.settings.
+        EXECUTION_MODE directly with no teardown. Previously latent-only
+        (documented in docs/architecture.md's Hotfix 2026-08-05 section,
+        "Follow-up found but not fixed here") because this file's last
+        test happens to call _factory("paper"), coincidentally leaving
+        both back at "paper" — order-dependent luck, not a guarantee.
+        Restores both to their pre-test value (or removes the env var
+        entirely if it wasn't set beforehand) after every test in this
+        class, regardless of outcome or run order.
+        """
+        original_env = os.environ.get("EXECUTION_MODE")
+        import config.settings as s
+        original_setting = getattr(s, "EXECUTION_MODE", None)
+        yield
+        if original_env is None:
+            os.environ.pop("EXECUTION_MODE", None)
+        else:
+            os.environ["EXECUTION_MODE"] = original_env
+        s.EXECUTION_MODE = original_setting
+
     def _factory(self, mode: str):
         os.environ["EXECUTION_MODE"] = mode
         # Reload module to pick up env change

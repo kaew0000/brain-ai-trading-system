@@ -42,6 +42,16 @@ class BundleRecord:
     imported_at:      str            # ISO 8601 UTC
     pushed:           bool = False
     reason:           str | None = None   # populated when status == "failed"
+    # V16 §67 housekeeping (2026-09-17): added so a documented correction
+    # to a wrong `sha` (see bundle_history.json's Phase 2E record) round-
+    # trips through save()/load() instead of being silently dropped the
+    # next time this tool calls save() — previously these would only have
+    # existed as raw untyped JSON keys, stripped on the next asdict()-based
+    # rewrite. Both optional/None for every pre-existing record.
+    corrected_sha:    str | None = None  # set when `sha` is confirmed not to
+                                          # exist in the repo but the real
+                                          # commit has been identified
+    correction_note:  str | None = None  # why/how corrected_sha was determined
 
 
 class BundleHistory:
@@ -78,6 +88,8 @@ class BundleHistory:
                 bundle_filename=entry["bundle_filename"], status=entry["status"],
                 imported_at=entry["imported_at"], pushed=entry.get("pushed", False),
                 reason=entry.get("reason"),
+                corrected_sha=entry.get("corrected_sha"),
+                correction_note=entry.get("correction_note"),
             )
             self._records.append(record)
             self._by_sha[record.sha] = record

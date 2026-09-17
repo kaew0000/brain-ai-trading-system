@@ -48,6 +48,38 @@ clean, vulture clean, `import main` succeeds.
 
 ---
 
+## [Unreleased] — Test/Tooling Housekeeping Batch (V16 §70, renumbered from §68)
+
+Merged after §69 above, not before — the numbering-collision note in
+§69's own entry assumed the opposite order. Renumbered §68→§70 rather
+than disturbing §69, which was already public by merge time. See
+`docs/architecture.md` §70.
+
+Closes the two remaining Low-severity items from the 2026-08-05
+project tracker's Bug Tracker / Risk Register.
+
+### Fixed
+- `tests/test_execution_factory.py` — `TestExecutionFactory` now has
+  an autouse fixture restoring `os.environ["EXECUTION_MODE"]` and
+  `settings.EXECUTION_MODE` after every test, closing a
+  previously-latent (order-dependent) env leak.
+- `bundle_history.json` — Phase 2E record's phantom `sha` documented
+  with a `corrected_sha`/`correction_note` pair pointing to the real
+  commit (`2426966...`); original wrong `sha` preserved, not replaced.
+
+### Added
+- `tools/history.py::BundleRecord` — new optional `corrected_sha`,
+  `correction_note` fields (default `None`), so a documented
+  correction survives the next `BundleHistory.save()` instead of being
+  silently dropped by `asdict()`-based serialization.
+- `tests/test_bundle_manager_history.py` — 2 new tests.
+
+Full suite: 3190 passed (up from 3188 in §69), 4 skipped, 45
+deselected, 0 failed. ruff clean, vulture clean, `import main`
+succeeds, `bundle_history.json` re-validated as parseable JSON.
+
+---
+
 ## [Unreleased] — Commission/Fee Backfill (V16 §67)
 
 Closes the "fee capture" item from the 2026-08-05 project tracker's
