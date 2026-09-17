@@ -6616,3 +6616,137 @@ unaffected. `ruff check .` clean repo-wide. `vulture
 --min-confidence 80` clean on every changed source file (one
 pre-existing, unrelated finding — `main.py`'s signal-handler `frame`
 parameter). `python -c "import main"` succeeds.
+
+## 67. Commission/Fee Backfill (2026-09-17)
+
+### Context
+
+Closes the "fee capture" item from the 2026-08-05 project tracker's
+Risk Register (still open as of that snapshot): Binance Futures
+market-order responses have never included commission, so `fees` has
+been a recognised-but-never-populated field on
+`execution/execution_orchestrator.py`'s `open_confirmed()`/
+`exit_confirmed()` calls since Phase 4B Step 2 (§29) — every trade's
+`fees` has always been `None`, understating realized P&L in every
+downstream consumer of `journal.get_trade_attribution()`/
+`get_ensemble_learning_dataset()`.
+
+### Design
+
+Background-only, read-only against the exchange, single write path
+(`journal.save_execution_attribution()`, the same merge-only method
+every other execution-attribution field already uses). Deliberately
+does not touch `execution/execution_orchestrator.py`, `execution/
+trade_manager.py`, or `main.py`'s live open/close code paths — this
+runs entirely after the fact on a schedule, the same shape as
+`system_health/reconciliation.py`'s position reconciliation. Chosen
+over a synchronous fetch right after each fill because (a) it adds
+zero latency/failure-risk to the live order path, and (b) one call
+site (`main.py`'s classic-loop TP/SL exit detection, ~line 1609) never
+has a close `orderId` to fetch against — see the entry/exit split
+below.
+
+**Entry vs. exit fees — a real, permanent limitation, not a bug.**
+Entry fee is recoverable for every trade: `trades.order_id` (the entry
+order's Binance `orderId`) is always captured at open time by
+`analytics/trade_journal.py`'s `TradeRecord.from_decision()`. Exit fee
+is only recoverable where a close `orderId` was captured, which is
+only true for `execution/execution_orchestrator.py`'s
+replacement-close path (`extra_data.attribution.order_id`).
+`main.py`'s classic single-symbol loop close is a mark-price heuristic
+detecting a position Binance already closed server-side (via its own
+resting TP/SL order) — no closing `orderId` is ever captured for it
+anywhere in this codebase. `journal/fee_backfill.py` does not guess:
+it fetches exit fees only where a close `orderId` exists, and never
+fuzzy-matches by symbol+time window — same "documented gap over
+fabricated inference" principle `system_health/recovery_engine.py` and
+the `bundle_history.json` Phase 2E record already follow elsewhere in
+this codebase.
+
+**Scheduler-thread safety.** Runs in the same single scheduler thread
+as every other `schedule.every()` job in `main.py` (`while _RUNNING:
+schedule.run_pending()`) — so a slow call here would delay the next
+due job, same as any other scheduled job. `journal/fee_backfill.py`
+therefore makes at most one attempt per Binance API call (no
+`retry_api_call()` exponential backoff, which can sleep up to 60s per
+attempt) and bounds candidates per run via
+`settings.FEE_BACKFILL_MAX_TRADES_PER_RUN` (default 50) — a single bad
+call costs at most one HTTP timeout, never a multi-minute stall.
+
+### Implementation
+
+`config/settings.py`: new `FEE_BACKFILL_ENABLED` (default `False`,
+same off-by-default posture as `ORDER_RECONCILIATION_ENABLED`),
+`FEE_BACKFILL_INTERVAL_MINUTES` (default 15),
+`FEE_BACKFILL_LOOKBACK_HOURS` (default 24 — bounded so a cold start or
+a long gap with the flag off doesn't attempt to backfill the entire
+trade history in one run; `GET /fapi/v1/userTrades` only guarantees 3
+months of history regardless), `FEE_BACKFILL_MAX_TRADES_PER_RUN`
+(default 50).
+
+`journal/journal_v2.py`: new `get_trades_missing_fees(since_iso,
+limit)` — candidate trades with a non-empty `order_id`, within the
+lookback window, that don't already have `attribution.fees_entry`.
+Filtered in Python after a bounded SQL fetch (same read-then-filter
+approach the rest of this file uses for `extra_data`-backed fields —
+no JSON1 extension dependency), since `fees_entry` lives inside
+`trades.extra_data`'s JSON blob, not a queryable column. Read-only,
+never raises.
+
+`journal/fee_backfill.py` (new module): `backfill_commission_fees(journal,
+client)` — for each candidate, calls `GET /fapi/v1/userTrades`
+(`client.get_account_trades(symbol, orderId=...)`, confirmed against
+Binance's own REST API reference: `orderId` is a documented optional
+filter on this endpoint, "must be used together with parameter
+symbol") for the entry `order_id`, and for the close `order_id` when
+one is present. `_sum_commission()` sums `commission` across fills for
+one order **only when every fill shares one `commissionAsset`** —
+mixed-asset orders (rare; BNB-fee-discount accounts) are left unset
+rather than silently summed across currencies, to be retried (and
+correctly resolved, or explicitly left as a documented gap) on a later
+run rather than ever reporting a wrong number. A combined `fees` total
+is written only when every known leg (`fees_entry`, `fees_exit`) is in
+the same asset; `fees_entry`/`fees_entry_asset` and
+`fees_exit`/`fees_exit_asset` are always written individually
+regardless.
+
+`main.py`: new `run_fee_backfill_job(sys)`, mirroring
+`run_nightly_retrain_job()`'s guarded, log-and-continue shape;
+registered unconditionally via `schedule.every(settings.
+FEE_BACKFILL_INTERVAL_MINUTES).minutes.do(...)` (same "always register,
+no-op internally" convention as `run_learning_recommendation_refresh()`
+above it) so this file's job list stays a complete, truthful picture
+of what CAN run. No-ops immediately when `FEE_BACKFILL_ENABLED` is
+`False` — byte-identical to before this phase in that state.
+
+### Testing
+
+`tests/test_fee_backfill.py` — 17 tests: `get_trades_missing_fees()`
+returns/excludes candidates correctly (has-order-id, in-window,
+not-already-filled, respects `limit`, surfaces a close `order_id` when
+present); `_sum_commission()` sums a single-asset list, returns `None`
+on mixed-asset or malformed input; `backfill_commission_fees()`
+no-ops when disabled or when `journal`/`client` is `None`, fills entry
+fee for a candidate, fills both entry and exit fee when a close
+`order_id` is known, never fetches an exit fee without one, catches an
+API error without raising (and without counting it as a save error —
+a failed fetch just means nothing to save this run, not a failure),
+and leaves a mixed-asset order unfilled without crashing. Uses a fake
+`UMFutures`-shaped client (records calls, returns canned trades/raises
+on demand) — no real Binance API calls in tests.
+
+Full suite: 3141 passed (up from 3121 in §66; 17 new + 3 more than
+§66's 3121 total accounts for the dashboard-build tests now passing
+too — see Correction below), 4 skipped, 45 deselected.
+`ruff check .` clean repo-wide. `vulture --min-confidence 80` clean on
+every changed/new source file. `python -c "import main"` succeeds.
+
+**Correction to every prior phase's test-count note (§55–§66):** the
+"3 pre-existing dashboard-build failures" repeatedly cited since §55
+are not a real bug — `tests/test_dashboard_serving.py` needs
+`dashboard_src/dist/` to exist, which is gitignored and absent on a
+fresh clone until `npm run build` is run (CI already builds the
+dashboard before `pytest` for exactly this reason). Building the
+dashboard first, as CI does, yields 0 failures. This phase's own
+verification built the dashboard first, hence 0 failures instead of 3
+— no dashboard-serving code changed.

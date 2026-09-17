@@ -1747,6 +1747,38 @@ def run_nightly_retrain_job() -> None:
         logger.error(f"run_nightly_retrain_job error: {exc}", exc_info=True)
 
 
+def run_fee_backfill_job(sys: dict) -> None:
+    """V16: background commission/fee backfill (journal/fee_backfill.py).
+
+    Mirrors run_nightly_retrain_job()'s shape: guarded top-to-bottom,
+    log-and-continue on any failure — never able to take down the
+    scheduler thread. See journal/fee_backfill.py's module docstring for
+    the full design (why background-only, why entry/exit fees have
+    different recoverability, why no retry backoff here).
+
+    No-ops when settings.FEE_BACKFILL_ENABLED is False — registering the
+    job unconditionally (same convention as
+    run_learning_recommendation_refresh() below) keeps main.py's list of
+    scheduled jobs a complete, truthful picture of what CAN run.
+    """
+    if not settings.FEE_BACKFILL_ENABLED:
+        return
+    try:
+        from journal.fee_backfill import backfill_commission_fees
+        journal = sys.get("journal")
+        data_provider = sys.get("data_provider")
+        client = getattr(data_provider, "client", None)
+        result = backfill_commission_fees(journal, client)
+        if result.get("candidates"):
+            logger.info(
+                f"Fee backfill: candidates={result['candidates']} "
+                f"entry_filled={result['entry_filled']} "
+                f"exit_filled={result['exit_filled']} errors={result['errors']}"
+            )
+    except Exception as exc:
+        logger.error(f"run_fee_backfill_job error: {exc}", exc_info=True)
+
+
 def run_learning_recommendation_refresh(sys: dict) -> None:
     """V16 Phase 4C Step 4 (live scheduler wiring): the previously-missing
     producer for `_state["learning_recommendations"]` — api/app.py's
@@ -2166,6 +2198,13 @@ def main() -> None:
     # a complete, truthful picture of what CAN run, same as every other
     # entry in this list.
     schedule.every().day.at("02:30").do(run_learning_recommendation_refresh, components)
+    # V16: commission/fee backfill — off by default (settings.
+    # FEE_BACKFILL_ENABLED); registered unconditionally like every other
+    # conditional job above so this list stays a complete, truthful
+    # picture of what CAN run. See journal/fee_backfill.py.
+    schedule.every(settings.FEE_BACKFILL_INTERVAL_MINUTES).minutes.do(
+        run_fee_backfill_job, components
+    )
     # Phase W10 — advance the World Simulation once per trading cycle,
     # same cadence as run_trading_cycle above (LOOP_INTERVAL). Additive;
     # see _tick_world_simulation()'s own docstring for why this can never

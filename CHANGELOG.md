@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## [Unreleased] — Commission/Fee Backfill (V16 §67)
+
+Closes the "fee capture" item from the 2026-08-05 project tracker's
+Risk Register: Binance Futures market-order responses have never
+included commission, so `fees` has been a recognised-but-never-
+populated field since Phase 4B Step 2 (§29). See `docs/architecture.md`
+§67.
+
+### Added
+- `journal/fee_backfill.py` — new background reconciliation job,
+  `backfill_commission_fees(journal, client)`. Off by default
+  (`settings.FEE_BACKFILL_ENABLED`). Fetches entry fees for every
+  trade via `GET /fapi/v1/userTrades`; fetches exit fees only where a
+  close `orderId` was captured (execution_orchestrator.py's
+  replacement-close path) — never fuzzy-matched for the classic-loop
+  heuristic-close path, which has no close `orderId` to match against.
+- `journal/journal_v2.py::get_trades_missing_fees(since_iso, limit)` —
+  candidate-trade query backing the job above.
+- `config/settings.py` — new `FEE_BACKFILL_ENABLED` (default `False`),
+  `FEE_BACKFILL_INTERVAL_MINUTES` (default 15),
+  `FEE_BACKFILL_LOOKBACK_HOURS` (default 24),
+  `FEE_BACKFILL_MAX_TRADES_PER_RUN` (default 50).
+- `main.py::run_fee_backfill_job(sys)` — scheduled job wrapper, same
+  guarded shape as `run_nightly_retrain_job()`.
+- `tests/test_fee_backfill.py` — 17 tests.
+
+All 3124 pre-existing tests pass unchanged. Full suite: 3141 passed
+(up from 3124 in §66 when the dashboard is built first — see
+Corrected below), 4 skipped, 45 deselected. ruff clean, vulture clean,
+`import main` succeeds.
+
+### Corrected
+- The "3 pre-existing dashboard-build failures" cited in every phase
+  since §55 are not a real bug: `tests/test_dashboard_serving.py`
+  needs `dashboard_src/dist/` built first (gitignored, absent on a
+  fresh clone), exactly as CI already does before running `pytest`.
+  0 failures when built first, as this phase's own verification did.
+
+---
+
 ## [Unreleased] — Multi-Symbol Order State & Ghost Reconciliation (V16 §66)
 
 Closes the last item flagged in §62's "Known follow-up":

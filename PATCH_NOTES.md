@@ -1,101 +1,109 @@
-# PATCH NOTES — Multi-Symbol Order State & Ghost Reconciliation (V16 §66)
+# PATCH NOTES — Commission/Fee Backfill (V16 §67)
 
-Branch: `feat/multi-symbol-ghost-reconciliation`
-Base: `main` @ `0e05f1a` (merge of PR #101, scheduler_safe enforcement)
+Branch: `feat/fee-capture-backfill`
+Base: `main` @ `0b5dc82` (merge of PR #102, multi-symbol ghost reconciliation)
 
-Closes the last item flagged in §62's "Known follow-up":
-`run_ghost_reconciliation_check()` / `OrderStateManager` remained
-single-symbol-only after §62 fixed `ReconciliationEngine` itself. This
-phase closes it — this was the last remaining item from this week's
-broader gap-analysis audit that qualifies as a genuine bug (not a
-brand-new feature build).
+Closes the "fee capture" item from the 2026-08-05 project tracker's
+Risk Register (still open as of that snapshot, re-verified still open
+against current `main` before starting this phase).
 
 ## Root cause
 
-`system_health/order_state.py::OrderStateManager.get_order_state(sys,
-symbol=...)` — and `system_health/ghost_reconciliation.py::
-GhostReconciliationMonitor.check(sys, symbol=...)`, which calls it —
-already accepted an optional `symbol` parameter throughout the whole
-call chain. The plumbing existed. What was broken: internally,
-`get_order_state()` always called `ReconciliationEngine.run(sys)` and
-`get_last_views()` — which (per `reconciliation.py`'s own docstring,
-and §62's design) only ever read/write `run()`'s own
-`settings.SYMBOL`-keyed state, regardless of what `symbol` argument
-was passed in.
+Binance Futures market-order responses never include commission
+(confirmed against Binance's own REST API reference for `POST
+/fapi/v1/order`). `execution/execution_orchestrator.py`'s
+`open_confirmed()`/`exit_confirmed()` calls have accepted a `fees`
+parameter since Phase 4B Step 2 (§29), but no caller has ever fetched
+a real value to pass — `fees` has always been `None` in every trade's
+`extra_data.attribution`, understating realized P&L in
+`journal.get_trade_attribution()`/`get_ensemble_learning_dataset()`.
 
-Concretely: `get_order_state(sys, symbol="XRPUSDT")` would silently
-return **BTCUSDT's** `exchange_position`/`journal_position`/
-`runtime_position`, mislabeled with `symbol="XRPUSDT"` in the returned
-snapshot. Worse than simply unimplemented — it looks correct without
-being correct.
+## Design
 
-`main.py::run_ghost_reconciliation_check()` compounded this: it called
-`monitor.check(sys)` with no symbol at all (implicitly
-`settings.SYMBOL` only), so even with `OrderStateManager` fixed, the
-scheduled job itself would never have asked about any other symbol.
+Background-only, read-only against the exchange, single write path
+(`journal.save_execution_attribution()`, the same merge-only method
+every other execution-attribution field already uses). Deliberately
+does not touch the live open/close code paths at all — runs entirely
+after the fact on a schedule, same shape as
+`system_health/reconciliation.py`'s position reconciliation.
 
-## Fix
+Two design options were surfaced and confirmed with the repo owner
+before implementation: (A) synchronous fetch right after each fill, or
+(B) background backfill job. **(B) was chosen** — it adds zero
+latency/failure-risk to the live order path, and one call site
+(`main.py`'s classic-loop TP/SL exit detection) never has a close
+`orderId` to fetch against in the first place, so (A) couldn't have
+covered it either way.
 
-`system_health/reconciliation.py` — new
-`run_for_symbol(sys, symbol) -> ReconciliationEvent | None`: reconciles
-exactly one caller-specified symbol using the same per-symbol keyed
-state `run_all_symbols()` (§62) already uses, so a symbol queried both
-ways shares one suppression track rather than two independent ones.
+**Entry vs. exit fees — a real, permanent limitation, not a bug.**
+Entry fee is recoverable for every trade (`trades.order_id` is always
+captured at open). Exit fee is only recoverable where a close
+`orderId` was captured — only true for the multi-symbol scheduler's
+replacement-close path, not the classic single-symbol loop's
+mark-price-heuristic close. This module never fuzzy-matches by
+symbol+time window to fill that gap — same "documented gap over
+fabricated inference" principle `system_health/recovery_engine.py` and
+the `bundle_history.json` Phase 2E record already follow elsewhere.
 
-`system_health/order_state.py::get_order_state()` — now branches on
-`settings.SCHEDULER_ENABLED`: under scheduler mode, calls
-`reconciliation.run_for_symbol(sys, symbol)` /
-`get_last_views_for_symbol(symbol)` instead of `run(sys)` /
-`get_last_views()`. `SCHEDULER_ENABLED=false` path is byte-for-byte
-unchanged.
+**Scheduler-thread safety.** Runs in `main.py`'s single scheduler
+thread alongside every other `schedule.every()` job, so it makes at
+most one attempt per Binance API call (no exponential-backoff retry)
+and bounds candidates per run (`FEE_BACKFILL_MAX_TRADES_PER_RUN`,
+default 50).
 
-`main.py::run_ghost_reconciliation_check()` — under
-`SCHEDULER_ENABLED=true`, discovers every symbol
-`ReconciliationEngine._discover_symbols()` finds (the same discovery
-`run_position_reconciliation()`'s own `run_all_symbols()` call already
-uses) and calls `monitor.check(sys, symbol=s)` once per symbol, instead
-of a single implicit-default call. `SCHEDULER_ENABLED=false` path
-unchanged. The scheduling block itself no longer excludes this job
-under scheduler mode (previously left un-scheduled entirely, per §62's
-"known-wrong data is worse than no data" reasoning — no longer
-needed, since the data is now correct).
+## Implementation
+
+- `config/settings.py` — `FEE_BACKFILL_ENABLED` (default `False`),
+  `FEE_BACKFILL_INTERVAL_MINUTES` (default 15),
+  `FEE_BACKFILL_LOOKBACK_HOURS` (default 24),
+  `FEE_BACKFILL_MAX_TRADES_PER_RUN` (default 50).
+- `journal/journal_v2.py` — new `get_trades_missing_fees(since_iso,
+  limit)`.
+- `journal/fee_backfill.py` (new) — `backfill_commission_fees(journal,
+  client)`, `_sum_commission()`, `_fetch_order_commission()`.
+- `main.py` — new `run_fee_backfill_job(sys)`, scheduled
+  unconditionally via `schedule.every(settings.
+  FEE_BACKFILL_INTERVAL_MINUTES).minutes.do(...)`, no-ops when the
+  flag is off.
+- `docs/architecture.md` §67, `CHANGELOG.md`, `MIGRATION.md`, this
+  file.
 
 ## Tests
 
-New: `tests/test_ghost_reconciliation_multi_symbol.py` — 9 tests:
-`run_for_symbol()` reconciles only the given symbol and shares
-suppression state with `run_all_symbols()`; the core bug fix itself
-(`get_order_state()` under scheduler mode reflects the *requested*
-symbol's real exchange/journal state, not `settings.SYMBOL`'s,
-confirmed with `settings.SYMBOL != "XRPUSDT"` as an explicit sanity
-check against a coincidental pass); two symbols queried independently
-return independently correct snapshots; `SCHEDULER_ENABLED=false` is
-an unchanged regression guard (never calls `get_all_positions()`);
-`main.py`'s dispatch checks every discovered symbol under scheduler
-mode, checks once with no symbol otherwise, and checks nothing when no
-symbols are discovered.
+New: `tests/test_fee_backfill.py` — 17 tests covering
+`get_trades_missing_fees()`'s candidate filtering, `_sum_commission()`'s
+single-asset/mixed-asset/malformed-input handling, and
+`backfill_commission_fees()`'s disabled/missing-dependency no-ops,
+entry-only fill, entry+exit fill, never-fetch-exit-without-close-
+order-id, API-error handling, and mixed-asset-order handling. Uses a
+fake `UMFutures`-shaped client — no real Binance API calls in tests.
 
-All 120 pre-existing tests across every file touching the changed
-modules (`test_ghost_reconciliation.py`, `test_ghost_reconciliation_
-api.py`, `test_order_state.py`, `test_order_state_api.py`,
-`test_multi_symbol_reconciliation.py`, `test_reconciliation.py`,
-`test_recovery_engine.py`) pass unchanged.
+All 3124 pre-existing tests pass unchanged.
 
-Full suite: `pytest tests/` → **3121 passed** (up from 3112), 4
-skipped, 45 deselected. Same 3 pre-existing
-`tests/test_dashboard_serving.py` failures as every phase this week
-(missing frontend build artifact) — unrelated, unaffected.
+Full suite: `pytest` → **3141 passed** (up from 3124), 4 skipped, 45
+deselected, **0 failures** — the "3 pre-existing dashboard-build
+failures" cited in every phase since §55 are not a real bug (see
+Correction below); this run built `dashboard_src/dist/` first, as CI
+already does, and got 0 failures.
 
-`ruff check .` → all checks passed, repo-wide. `vulture
---min-confidence 80` → clean on every changed source file (one
-pre-existing, unrelated finding — `main.py`'s signal-handler `frame`
-parameter, confirmed identical on unmodified `main` in every prior
-phase this week that touched this file).
-`python -c "import main"` → succeeds.
+`ruff check . --exclude dashboard_src --exclude dashboard` → all
+checks passed, repo-wide. `vulture . --exclude
+dashboard_src,dashboard,tests --min-confidence 80` → clean, no new
+findings. `python -c "import main"` → succeeds.
+
+## Correction to every prior phase's test-count note (§55–§66)
+
+The "3 pre-existing dashboard-build failures" repeatedly cited since
+§55 turned out not to be a real bug:
+`tests/test_dashboard_serving.py` needs `dashboard_src/dist/` to
+exist, which is gitignored and absent on a fresh clone until `npm run
+build` runs — CI already builds the dashboard before `pytest` for
+exactly this reason. This phase's verification built the dashboard
+first and got 0 failures. No dashboard-serving code changed in this
+phase; this is a correction to the historical record, not a fix.
 
 ## Files changed
 
-`system_health/reconciliation.py`, `system_health/order_state.py`,
-`main.py`, `tests/test_ghost_reconciliation_multi_symbol.py` (new),
-`PATCH_NOTES.md`, `MIGRATION.md`, `CHANGELOG.md`,
-`docs/architecture.md` (§66).
+`config/settings.py`, `journal/journal_v2.py`, `journal/fee_backfill.py`
+(new), `main.py`, `tests/test_fee_backfill.py` (new), `PATCH_NOTES.md`,
+`MIGRATION.md`, `CHANGELOG.md`, `docs/architecture.md` (§67).

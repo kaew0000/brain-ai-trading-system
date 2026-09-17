@@ -451,6 +451,50 @@ class TradeJournalV2:
             logger.error(f"save_execution_attribution error (trade #{trade_id}): {exc}")
             return False
 
+    def get_trades_missing_fees(self, since_iso: str, limit: int = 50) -> list[dict]:
+        """Candidate trades for journal/fee_backfill.py's background job:
+        has an entry order_id (needed to query GET /fapi/v1/userTrades),
+        is within the lookback window, and doesn't already have
+        attribution.fees_entry recorded. Filtered in Python (not SQL)
+        because fees_entry lives inside trades.extra_data's JSON blob
+        (see the "EXECUTION ATTRIBUTION" section above) — same
+        read-then-filter approach the rest of this file uses for
+        extra_data-backed fields, no JSON1 extension dependency.
+
+        Read-only; never raises (caller is a background job that must
+        never be able to affect the trading loop) — returns [] on any
+        query failure, logged.
+        """
+        try:
+            with self._conn() as c:
+                rows = c.execute(
+                    """SELECT id, symbol, order_id, timestamp, extra_data FROM trades
+                       WHERE order_id IS NOT NULL AND order_id != ''
+                         AND timestamp >= ?
+                       ORDER BY timestamp DESC
+                       LIMIT ?""",
+                    (since_iso, max(limit, 1) * 4),  # over-fetch before the Python filter below
+                ).fetchall()
+        except Exception as exc:
+            logger.error(f"get_trades_missing_fees query error: {exc}")
+            return []
+
+        out: list[dict] = []
+        for r in rows:
+            extra = _json_loads(r["extra_data"], default={}) or {}
+            attribution = extra.get("attribution", {}) if isinstance(extra, dict) else {}
+            if attribution.get("fees_entry") is not None:
+                continue
+            out.append({
+                "id": r["id"], "symbol": r["symbol"],
+                "order_id": r["order_id"], "timestamp": r["timestamp"],
+                "close_order_id": attribution.get("order_id"),
+                "fees_exit": attribution.get("fees_exit"),
+            })
+            if len(out) >= limit:
+                break
+        return out
+
     @staticmethod
     def _shape_trade_attribution(trade_d: dict, agents: list[dict]) -> dict:
         """The actual row-shaping logic behind get_trade_attribution() and

@@ -1,37 +1,49 @@
-# MIGRATION — Multi-Symbol Order State & Ghost Reconciliation (V16 §66)
+# MIGRATION — Commission/Fee Backfill (V16 §67)
 
 ## Do you need to do anything?
 
-**No, if `SCHEDULER_ENABLED=false` (the default).** Every code path
-this patch touches under that flag is byte-for-byte unchanged —
-confirmed by re-running all 120 pre-existing tests across every
-affected file unmodified.
+**No, if `FEE_BACKFILL_ENABLED=false` (the default).** No new
+behavior runs, no Binance API calls are made, and
+`journal.save_execution_attribution()` is never invoked by this
+feature in that state — byte-identical to before this phase.
 
-## If you're running multi-symbol trading (`SCHEDULER_ENABLED=true`)
+## If you want fee data backfilled
 
-Two things that previously silently returned wrong data (or nothing at
-all) now work correctly:
+Set `FEE_BACKFILL_ENABLED=true` in your `.env`. On the configured
+interval (`FEE_BACKFILL_INTERVAL_MINUTES`, default 15 minutes), a
+background job will:
 
-- Any dashboard/API call to `GET /api/system/order-state?symbol=...`
-  (or equivalent internal calls to `OrderStateManager.get_order_state()`)
-  for a symbol other than `settings.SYMBOL` now returns **that
-  symbol's** real state, not `settings.SYMBOL`'s state mislabeled with
-  the symbol you asked for.
-- If you have `ORDER_RECONCILIATION_ENABLED=true` (Track C3 Phase 2,
-  still off by default even now), `run_ghost_reconciliation_check()`
-  checks every actively-traded symbol each cycle, not just the default
-  one. It was previously **not scheduled at all** while
-  `SCHEDULER_ENABLED=true`, regardless of `ORDER_RECONCILIATION_ENABLED`
-  — if you had both flags set, this job silently did nothing before
-  this patch. It runs now.
+- Look back `FEE_BACKFILL_LOOKBACK_HOURS` (default 24h) for trades
+  missing fee data.
+- Fetch each trade's entry commission from Binance
+  (`GET /fapi/v1/userTrades`) and write it to
+  `trades.extra_data.attribution.fees_entry` (and `.fees` when the
+  full picture is known).
+- Fetch exit commission too, but **only** for trades whose close order
+  was placed by the multi-symbol scheduler's replacement-close path.
+  Trades closed via the classic single-symbol loop's TP/SL detection
+  will only ever get an entry fee backfilled — there is no close
+  `orderId` recorded anywhere for that path to fetch against, and this
+  job does not guess. This is a permanent limitation of this design,
+  not a rollout-phase gap.
+- Cap itself at `FEE_BACKFILL_MAX_TRADES_PER_RUN` (default 50)
+  Binance API calls per run.
 
-No new `.env` settings — nothing to add, this closes an existing gap
-rather than introducing a new opt-in.
+No database migration — `fees_entry`/`fees_exit`/`fees` are written
+into the existing `trades.extra_data` JSON column via the existing
+`save_execution_attribution()` merge method, the same mechanism every
+other execution-attribution field already uses. Nothing to run before
+enabling; old trades within the lookback window are picked up
+automatically the first time the job runs.
+
+**Requires** your Binance API key to have permission for
+`GET /fapi/v1/userTrades` (standard USER_DATA scope — the same
+permission level the bot already needs for existing account/position
+calls).
 
 ## Rollback
 
-Revert this branch and restart. `OrderStateManager.get_order_state()`
-goes back to always reading `settings.SYMBOL`'s state regardless of
-the `symbol` argument, and `run_ghost_reconciliation_check()` goes
-back to not being scheduled at all under `SCHEDULER_ENABLED=true`. No
-data migration either direction.
+Set `FEE_BACKFILL_ENABLED=false` (or unset it) and restart. No
+database migration either direction — any `fees_entry`/`fees_exit`/
+`fees` values already backfilled remain in `trades.extra_data`
+unchanged; they simply stop being updated.
