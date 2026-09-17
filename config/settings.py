@@ -625,6 +625,27 @@ class Settings(BaseSettings):
         default=30.0, alias="ORDER_RECONCILIATION_DEDUP_SECONDS"
     )
 
+    # ── V16: Fee/Commission Backfill (journal/fee_backfill.py) ─────────────
+    # Off by default — same posture as ORDER_RECONCILIATION_ENABLED above.
+    # False = byte-identical to before this phase: no schedule.every(...)
+    # job is registered, no extra Binance API calls are made, nothing in
+    # the live execution path is touched (this is a read-only background
+    # reconciliation job, not a change to execute_trade()/close_position()
+    # or any write path other than journal.save_execution_attribution(),
+    # which every trade already goes through for diagnostic attribution).
+    FEE_BACKFILL_ENABLED: bool = Field(default=False, alias="FEE_BACKFILL_ENABLED")
+    FEE_BACKFILL_INTERVAL_MINUTES: int = Field(default=15, alias="FEE_BACKFILL_INTERVAL_MINUTES")
+    # How far back to look for trades still missing fee data. Bounded so a
+    # cold start (or a long gap while FEE_BACKFILL_ENABLED was off) doesn't
+    # try to backfill the entire trade history in one run — old trades
+    # outside this window are simply never backfilled (GET /fapi/v1/
+    # userTrades only guarantees 3 months of history anyway; see Binance
+    # Change Log 2026-08-26).
+    FEE_BACKFILL_LOOKBACK_HOURS: int = Field(default=24, alias="FEE_BACKFILL_LOOKBACK_HOURS")
+    # Caps Binance API calls per run — each candidate trade costs one
+    # GET /fapi/v1/userTrades call (IP weight 5 each, per Binance docs).
+    FEE_BACKFILL_MAX_TRADES_PER_RUN: int = Field(default=50, alias="FEE_BACKFILL_MAX_TRADES_PER_RUN")
+
     # ── V16 Phase 4C Track B: HFT Flow — HFT-1 WS Ingestion ────────────────
     # Off by default — same posture as ORDER_RECONCILIATION_ENABLED above.
     # False = byte-identical to before this phase: no WebSocket connection
