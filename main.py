@@ -1747,6 +1747,33 @@ def run_nightly_retrain_job() -> None:
         logger.error(f"run_nightly_retrain_job error: {exc}", exc_info=True)
 
 
+def run_news_sentiment_job(sys: dict) -> None:
+    """V16 Phase 55: background RSS ingestion + VADER scoring
+    (intelligence/news_sentiment_feed.py). Same guarded, log-and-continue
+    shape as run_fee_backfill_job() directly above — never able to take
+    down the scheduler thread. `sys` is accepted for signature
+    consistency with every other scheduled job here, though this job
+    doesn't need anything from it (the module manages its own cache).
+
+    No-ops when settings.NEWS_SENTIMENT_ENABLED is False. Registering
+    the job unconditionally (same convention as every other conditional
+    job here) keeps main.py's list of scheduled jobs a complete,
+    truthful picture of what CAN run.
+    """
+    if not settings.NEWS_SENTIMENT_ENABLED:
+        return
+    try:
+        from intelligence.news_sentiment_feed import refresh_news_sentiment
+        result = refresh_news_sentiment()
+        logger.info(
+            f"News sentiment: sources_ok={result['sources_ok']} "
+            f"sources_failed={result['sources_failed']} "
+            f"articles_scored={result['articles_scored']}"
+        )
+    except Exception as exc:
+        logger.error(f"run_news_sentiment_job error: {exc}", exc_info=True)
+
+
 def run_fee_backfill_job(sys: dict) -> None:
     """V16: background commission/fee backfill (journal/fee_backfill.py).
 
@@ -2204,6 +2231,12 @@ def main() -> None:
     # picture of what CAN run. See journal/fee_backfill.py.
     schedule.every(settings.FEE_BACKFILL_INTERVAL_MINUTES).minutes.do(
         run_fee_backfill_job, components
+    )
+    # V16 Phase 55: news sentiment ingestion — off by default (settings.
+    # NEWS_SENTIMENT_ENABLED); registered unconditionally like every other
+    # conditional job above. See intelligence/news_sentiment_feed.py.
+    schedule.every(settings.NEWS_SENTIMENT_INTERVAL_MINUTES).minutes.do(
+        run_news_sentiment_job, components
     )
     # Phase W10 — advance the World Simulation once per trading cycle,
     # same cadence as run_trading_cycle above (LOOP_INTERVAL). Additive;

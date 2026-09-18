@@ -57,6 +57,21 @@ Output schema
   "macro_risk":    bool,
   "risk_on":       bool,
   "correlation":   dict | None,
+  "news_sentiment": dict,            # V16 Phase 55 — always a dict (never
+                                     # None): {"score": float -1..1,
+                                     # "article_count": int, "as_of": str|None,
+                                     # "sources_ok": int, "sources_failed": int}.
+                                     # Populated from intelligence/
+                                     # news_sentiment_feed.py's background-job
+                                     # cache unless an `intelligence` caller
+                                     # explicitly supplies its own
+                                     # "news_sentiment" value (none do today).
+                                     # article_count==0 means no data yet /
+                                     # nothing in the lookback window — NOT
+                                     # neutral sentiment. See that module's
+                                     # docstring; not consumed by
+                                     # ConfidenceEngine unless
+                                     # NEWS_SENTIMENT_LIVE_ENABLED is True.
 
   // Convenience flags for Decision Engine
   "blocks_long":   bool,
@@ -80,11 +95,26 @@ from futures.futures_intel_engine import FuturesIntelEngine, FuturesIntelResult
 from features.smc_engine import SMCSignals
 from features.volume_engine import VolumeSignals
 from regime.regime_engine import RegimeResult
+from intelligence.news_sentiment_feed import get_news_sentiment_snapshot
 
 if TYPE_CHECKING:
     from data.binance_ws_client import SymbolWSSnapshot  # noqa
 
 logger = get_logger(__name__)
+
+
+def _news_sentiment_dict() -> dict:
+    """V16 Phase 55: converts the background job's NewsSentimentSnapshot
+    into the plain dict market_context carries (dataclasses don't survive
+    JSON serialization for /api/signals the way a plain dict does)."""
+    snap = get_news_sentiment_snapshot()
+    return {
+        "score":          snap.score,
+        "article_count":  snap.article_count,
+        "as_of":          snap.as_of,
+        "sources_ok":     snap.sources_ok,
+        "sources_failed": snap.sources_failed,
+    }
 
 
 class MarketContextBuilder:
@@ -223,7 +253,13 @@ class MarketContextBuilder:
             "macro_risk":  bool(intel.get("macro_risk", False)),
             "risk_on":     bool(intel.get("risk_on", True)),
             "correlation": intel.get("correlation"),
-            "news_sentiment": intel.get("news_sentiment"),
+            # V16 Phase 55: an explicit intelligence["news_sentiment"]
+            # (none of today's callers pass one) still wins; otherwise
+            # fall back to the background job's cache. `or` is safe here
+            # because a real snapshot dict is always truthy (it always has
+            # at least a "score" key at 0.0), so this can't accidentally
+            # skip a legitimately-empty-but-present caller-supplied dict.
+            "news_sentiment": intel.get("news_sentiment") or _news_sentiment_dict(),
 
             # Convenience flags
             "blocks_long":    futures.blocks_long(),

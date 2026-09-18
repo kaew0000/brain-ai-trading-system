@@ -1,49 +1,51 @@
-# MIGRATION — Commission/Fee Backfill (V16 §67)
+# MIGRATION — News Sentiment: RSS Ingestion + VADER Scoring (V16 §69)
 
 ## Do you need to do anything?
 
-**No, if `FEE_BACKFILL_ENABLED=false` (the default).** No new
-behavior runs, no Binance API calls are made, and
-`journal.save_execution_attribution()` is never invoked by this
-feature in that state — byte-identical to before this phase.
+**No, if `NEWS_SENTIMENT_ENABLED=false` (the default).** No background
+job runs, no RSS feeds are fetched, and market_context's
+`news_sentiment.article_count` stays `0` — byte-identical to before
+this phase in every trading decision.
 
-## If you want fee data backfilled
+## If you want news sentiment ingested (dashboard/journal visibility only)
 
-Set `FEE_BACKFILL_ENABLED=true` in your `.env`. On the configured
-interval (`FEE_BACKFILL_INTERVAL_MINUTES`, default 15 minutes), a
+Set `NEWS_SENTIMENT_ENABLED=true` in your `.env`. On the configured
+interval (`NEWS_SENTIMENT_INTERVAL_MINUTES`, default 15 minutes), a
 background job will:
 
-- Look back `FEE_BACKFILL_LOOKBACK_HOURS` (default 24h) for trades
-  missing fee data.
-- Fetch each trade's entry commission from Binance
-  (`GET /fapi/v1/userTrades`) and write it to
-  `trades.extra_data.attribution.fees_entry` (and `.fees` when the
-  full picture is known).
-- Fetch exit commission too, but **only** for trades whose close order
-  was placed by the multi-symbol scheduler's replacement-close path.
-  Trades closed via the classic single-symbol loop's TP/SL detection
-  will only ever get an entry fee backfilled — there is no close
-  `orderId` recorded anywhere for that path to fetch against, and this
-  job does not guess. This is a permanent limitation of this design,
-  not a rollout-phase gap.
-- Cap itself at `FEE_BACKFILL_MAX_TRADES_PER_RUN` (default 50)
-  Binance API calls per run.
+- Fetch all 8 configured RSS feeds (CoinDesk, Cointelegraph, Decrypt,
+  The Block, CryptoSlate, The Defiant, NewsBTC, CryptoPotato).
+- Score each headline published within `NEWS_SENTIMENT_LOOKBACK_HOURS`
+  (default 6h) using VADER (offline, no API key needed).
+- Cache the average score, visible in `market_context["news_
+  sentiment"]` (surfaced via `/api/signals`'s `raw_features`, same as
+  every other market_context field).
 
-No database migration — `fees_entry`/`fees_exit`/`fees` are written
-into the existing `trades.extra_data` JSON column via the existing
-`save_execution_attribution()` merge method, the same mechanism every
-other execution-attribution field already uses. Nothing to run before
-enabling; old trades within the lookback window are picked up
-automatically the first time the job runs.
+**This alone does not affect any trading decision** —
+`ConfidenceEngine`'s `news_sentiment` weight stays `0.0` regardless.
 
-**Requires** your Binance API key to have permission for
-`GET /fapi/v1/userTrades` (standard USER_DATA scope — the same
-permission level the bot already needs for existing account/position
-calls).
+## If you also want it to carry real decision weight
+
+Additionally set `NEWS_SENTIMENT_LIVE_ENABLED=true`. The weight
+applied is `NEWS_SENTIMENT_LIVE_WEIGHT` (default `5.0`, about 5% of
+total confidence — deliberately small). No contradiction-penalty
+mechanism exists for this category: an opposing sentiment reading can
+never subtract confidence or block a trade, only fail to add to one.
+
+**Recommended sequencing**: enable `NEWS_SENTIMENT_ENABLED` alone
+first, observe the ingested sentiment in the dashboard/journal for a
+while, and only enable `NEWS_SENTIMENT_LIVE_ENABLED` once you're
+comfortable with what it's actually reporting for real market events.
+
+No database migration — nothing new is written to the journal or any
+persistent store by this phase; the sentiment cache is in-memory only
+and rebuilds itself on the next scheduled run after any restart.
+
+**Requires** outbound HTTPS access to the 8 configured feed domains
+(no new inbound ports, no new credentials — RSS feeds are all public,
+unauthenticated).
 
 ## Rollback
 
-Set `FEE_BACKFILL_ENABLED=false` (or unset it) and restart. No
-database migration either direction — any `fees_entry`/`fees_exit`/
-`fees` values already backfilled remain in `trades.extra_data`
-unchanged; they simply stop being updated.
+Set `NEWS_SENTIMENT_ENABLED=false` (and/or `NEWS_SENTIMENT_LIVE_
+ENABLED=false`) and restart. No database migration either direction.

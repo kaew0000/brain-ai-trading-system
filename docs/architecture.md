@@ -6750,3 +6750,189 @@ dashboard before `pytest` for exactly this reason). Building the
 dashboard first, as CI does, yields 0 failures. This phase's own
 verification built the dashboard first, hence 0 failures instead of 3
 — no dashboard-serving code changed.
+
+## 68/69. Section-numbering note
+
+This phase (News Sentiment) branched from `main` @ `544493b` (§67
+merged), the same base as an earlier, still-unmerged
+`fix/test-housekeeping-batch` branch whose own docs call itself "§68".
+Both branches independently claimed "the section after §67" — a real
+collision, not a typo. This phase is numbered **§69** on the
+assumption `fix/test-housekeeping-batch` merges first (it's smaller
+and was delivered first); if it's merged after this phase instead,
+renumber one of the two §68 headers to keep them sequential — no
+content changes needed either way, purely a header/cross-reference
+fix. Kaew: merge the housekeeping batch before this one to avoid that
+step entirely.
+
+## 69. News Sentiment (RSS Ingestion + VADER Scoring) (2026-09-17)
+
+### Context
+
+Closes the "News Sentiment Agent (Phase 55, observe-only, RSS feeds)"
+item from the 2026-08-05 project tracker — flagged there as partially
+implemented mid-session and never completed; the 2026-09-17 repo audit
+confirmed zero trace of it anywhere in the repository at that time.
+
+### Design decisions (confirmed with the repo owner before implementation)
+
+1. **Sentiment method: VADER** (lexicon-based, offline, no API key) —
+   chosen over an LLM-based approach for lower cost/latency, no added
+   external dependency in the fetch path, and full reproducibility
+   (same headline always scores identically), easier to validate
+   against a real trading track record before trusting it with real
+   decision weight.
+2. **Feed sources: 8**, all URL-verified against each publisher's own
+   site / the FeedSpot RSS database before use (never guessed, per
+   this repo's own "never invent APIs" rule, extended here to RSS
+   URLs): CoinDesk, Cointelegraph, Decrypt, The Block (the original 4
+   from the tracker), plus CryptoSlate, The Defiant, NewsBTC,
+   CryptoPotato (added on the repo owner's "if it makes the system
+   better, add it" instruction — chosen for being independent,
+   reputable, market-news-focused outlets; NFT/podcast/VC-essay/
+   exchange-marketing feeds were deliberately excluded as off-topic
+   noise for this purpose).
+3. **Real decision weight, using the HFT Flow (§45) precedent exactly**
+   — the repo owner asked for decision weight "if it can't break
+   trading, or recommend." Recommendation given and accepted: add
+   `news_sentiment` to `ConfidenceEngine.DEFAULT_WEIGHTS` at `0.0`
+   (present in the real fusion formula, but multiplying by zero is
+   mathematically incapable of changing any decision) with a separate,
+   explicit `NEWS_SENTIMENT_LIVE_ENABLED`/`NEWS_SENTIMENT_LIVE_WEIGHT`
+   opt-in pair to raise it later once the repo owner is satisfied with
+   its track record — identical shape to `HFT_FLOW_LIVE_ENABLED`/
+   `HFT_FLOW_LIVE_WEIGHT` (§45), which is the only other category in
+   this codebase that has gone through this exact "prove it inert by
+   construction, then earn real weight" rollout.
+
+### A real architecture finding, surfaced rather than worked around
+
+This codebase has **two independent signal-fusion systems**:
+`decision/confidence_engine.py`'s category weights (where `hft_flow`
+already lives, and where `news_sentiment` was added) and
+`agents/ceo_agent.py`'s separate "AI employee" weighted-vote system
+(`self._agents`, registered via `agents/__init__.py`'s
+`build_agent_layer()`, folded into `long_score`/`short_score` via its
+own `self.WEIGHTS`/`_effective_weights()` — audited just enough during
+this phase to discover it is a genuinely different mechanism, not
+audited further). `hft_flow` was never registered as a CEO agent
+either — no `agents/hft_flow_agent.py` exists. This phase deliberately
+follows that same precedent: `news_sentiment` is wired **only** through
+`ConfidenceEngine`, the mechanism already proven to have a hard,
+mathematical "0.0 = provably inert" guarantee. Registering it as a
+CEO agent as well was considered and explicitly deferred — that
+system's own cold-start/weighting behavior for a new, unvalidated
+voter has not been audited, and mixing an unaudited path into a
+safety-motivated rollout would defeat the purpose of the rollout.
+Possible future work, not done here.
+
+### Implementation
+
+**`intelligence/news_sentiment_feed.py`** (new) — background-only,
+same shape as `journal/fee_backfill.py` (§67) for the same reasons:
+never called from the live trading cycle, a scheduled job populates a
+cache, request-path code only ever reads it.
+- `SOURCES: dict[str, str]` — the 8 feed URLs.
+- `NewsSentimentSnapshot` (dataclass) — `score` (VADER compound,
+  -1.0..+1.0, averaged across in-window headlines), `article_count`
+  (0 means "no data yet or nothing in the lookback window", never
+  fabricated as neutral sentiment — `ConfidenceEngine`'s
+  `news_sentiment_active` gate checks this field, not `score`),
+  `as_of`, `sources_ok`/`sources_failed`. `is_stale(max_age_minutes)`.
+- `_NewsSentimentCache` — lock-protected singleton, same
+  "background-writes/request-reads" shape as `telemetry/
+  account_state.py`.
+- `_fetch_one_source()` — one feed, one best-effort `feedparser.parse()`
+  call; never raises; checks feedparser's own `bozo` flag for
+  malformed/unreachable feeds; scores each in-window headline's
+  `title` (not full article body — not reliably available across all
+  8 feeds' RSS formats, and VADER was validated against short-text
+  input) with VADER; a missing/unparseable `published_parsed` scores
+  the headline anyway rather than dropping it silently.
+- `refresh_news_sentiment()` — the scheduled job's entry point;
+  iterates all 8 sources independently (one failing source never
+  blocks the others), averages every scored headline across all
+  sources, updates the cache. No-ops when
+  `settings.NEWS_SENTIMENT_ENABLED` is `False`.
+
+**`intelligence/market_context_builder.py`** — `build()` already had an
+always-`None` `"news_sentiment"` key (a Layer-2-intelligence
+placeholder every caller has always passed `intelligence=None` for,
+confirmed via repo-wide grep — never populated by anything). Reused
+that existing key rather than adding a new one:
+`"news_sentiment": intel.get("news_sentiment") or _news_sentiment_dict()`
+— an explicit caller-supplied value (none exist today) still wins;
+otherwise falls back to the background job's cache, converted to a
+plain dict via the new `_news_sentiment_dict()` helper.
+
+**`decision/confidence_engine.py`**:
+- `DEFAULT_WEIGHTS["news_sentiment"] = 0.0`.
+- `resolve_confidence_weights()` extended with the
+  `NEWS_SENTIMENT_LIVE_ENABLED`/`_WEIGHT` pair, independent of the
+  existing `HFT_FLOW_LIVE_*` pair (confirmed by test: enabling one has
+  zero effect on the other's slot).
+- `_score_news_sentiment(ctx, direction)` — same 0.0-1.0 convention as
+  every other category scorer. VADER's compound score is already
+  -1.0..+1.0 with true 0 as neutral, so no extra normalization is
+  needed: positive score supports LONG, negative supports SHORT, by
+  construction of VADER's own scale. Unlike `hft_flow`, there is
+  **no contradiction-penalty mechanism** — opposing sentiment floors
+  at `0.0`, never subtracts or blocks. Headline sentiment is
+  considered a much noisier, lower-conviction signal than order-flow
+  microstructure; an opposing reading here should never be able to
+  reduce or block an otherwise-good decision, only fail to add to it.
+- Additive term in `score()`, gated on `news_sentiment_active`
+  (`market_context["news_sentiment"]["article_count"] > 0`) — with
+  `NEWS_SENTIMENT_ENABLED` off (the default), `article_count` is
+  always `0`, so `breakdown`'s key set stays byte-identical to before
+  this phase.
+
+**`main.py`** — new `run_news_sentiment_job(sys)`, identical guarded
+shape to `run_fee_backfill_job()` (§67); registered unconditionally via
+`schedule.every(settings.NEWS_SENTIMENT_INTERVAL_MINUTES).minutes.do(...)`.
+No-ops immediately when `NEWS_SENTIMENT_ENABLED` is `False`.
+
+**`requirements.txt`** — `feedparser>=6.0.10`, `vaderSentiment>=3.3.2`.
+Both pure-Python, no native build step, no additional runtime
+dependency beyond the RSS fetch itself.
+
+**`.env.example`** — documented all 6 new settings; also retroactively
+added the `FEE_BACKFILL_*` block from §67, which shipped without an
+`.env.example` entry (an oversight caught while adding this phase's
+own block, fixed here as a small, safe, additive correction).
+
+### Testing
+
+47 new tests across 4 files:
+- `tests/test_news_sentiment_feed.py` (21) — snapshot/cache shape,
+  staleness, per-source fetch resilience (malformed feed, exception,
+  no-title entry, lookback cutoff, article cap), end-to-end
+  `refresh_news_sentiment()` behavior (disabled no-op, averaging
+  across sources, one failing source doesn't block others, all-empty
+  case). No real network calls — `feedparser.parse` and VADER's
+  analyzer are both stubbed.
+- `tests/test_news_sentiment_confidence_integration.py` (12) — mirrors
+  `tests/test_hft_flow_confidence_integration.py`'s structure exactly:
+  default weight is 0.0, `breakdown` key only appears when
+  `article_count > 0`, additive term increases confidence when
+  aligned, floors at 0 when opposing/neutral, `SHORT` direction uses
+  the opposite sign.
+- `tests/test_news_sentiment_live_enable_switch.py` (11) — mirrors
+  `tests/test_hft_flow_live_enable_switch.py`'s structure exactly,
+  plus 3 tests specifically confirming the two opt-ins
+  (`hft_flow`/`news_sentiment`) are fully independent of each other.
+- `tests/test_market_context_news_sentiment.py` (3) — the new
+  `_news_sentiment_dict()` helper's conversion logic. (Does not add
+  full `build()` pipeline coverage — no existing test file for
+  `market_context_builder.py` exists anywhere in this repo to mirror
+  safely; that gap pre-dates this phase.)
+
+All 3141 pre-existing tests pass unchanged, including the full
+existing `hft_flow` suite (38 tests, zero regressions — confirms the
+two opt-in mechanisms really are independent, not just by code
+inspection).
+
+Full suite: 3188 passed (3141 + 47 new), 4 skipped, 45 deselected, 0
+failed. `ruff check .` clean repo-wide. `vulture --min-confidence 80`
+clean on every changed/new source file. `python -c "import main"`
+succeeds.

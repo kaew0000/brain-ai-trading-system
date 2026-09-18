@@ -1,109 +1,124 @@
-# PATCH NOTES — Commission/Fee Backfill (V16 §67)
+# PATCH NOTES — News Sentiment: RSS Ingestion + VADER Scoring (V16 §69)
 
-Branch: `feat/fee-capture-backfill`
-Base: `main` @ `0b5dc82` (merge of PR #102, multi-symbol ghost reconciliation)
+Branch: `feat/news-sentiment-agent`
+Base: `main` @ `544493b` (merge of PR #103, commission/fee backfill)
 
-Closes the "fee capture" item from the 2026-08-05 project tracker's
-Risk Register (still open as of that snapshot, re-verified still open
-against current `main` before starting this phase).
+Closes the "News Sentiment Agent (Phase 55, observe-only, RSS feeds)"
+item from the 2026-08-05 project tracker (flagged there as started
+mid-session and never completed; a 2026-09-17 audit confirmed zero
+trace of it anywhere in the repository).
 
-## Root cause
+## Section-numbering note
 
-Binance Futures market-order responses never include commission
-(confirmed against Binance's own REST API reference for `POST
-/fapi/v1/order`). `execution/execution_orchestrator.py`'s
-`open_confirmed()`/`exit_confirmed()` calls have accepted a `fees`
-parameter since Phase 4B Step 2 (§29), but no caller has ever fetched
-a real value to pass — `fees` has always been `None` in every trade's
-`extra_data.attribution`, understating realized P&L in
-`journal.get_trade_attribution()`/`get_ensemble_learning_dataset()`.
+This branched from the same base (`544493b`) as the still-unmerged
+`fix/test-housekeeping-batch` branch, whose own docs call itself
+"§68". Both independently claim "the section after §67" — a real
+collision. This phase is numbered §69, assuming
+`fix/test-housekeeping-batch` merges first. **Merge that one before
+this one** to avoid a header renumber; if merged in the other order,
+swap one "§68"/"§69" header — no content changes needed either way.
 
-## Design
+## Design decisions (confirmed with the repo owner before implementation)
 
-Background-only, read-only against the exchange, single write path
-(`journal.save_execution_attribution()`, the same merge-only method
-every other execution-attribution field already uses). Deliberately
-does not touch the live open/close code paths at all — runs entirely
-after the fact on a schedule, same shape as
-`system_health/reconciliation.py`'s position reconciliation.
+1. **Sentiment method: VADER** — lexicon-based, offline, no API key,
+   deterministic, fully reproducible. Chosen over an LLM-based
+   approach for lower cost/latency and easier validation against a
+   real trading track record before trusting it with decision weight.
+2. **8 RSS feeds**, all URL-verified against each publisher's own site
+   / the FeedSpot RSS database before use — never guessed: CoinDesk,
+   Cointelegraph, Decrypt, The Block (the tracker's original 4) +
+   CryptoSlate, The Defiant, NewsBTC, CryptoPotato (added per "if it
+   makes the system better, add it" — independent, reputable,
+   market-news-focused outlets; NFT/podcast/VC-essay/exchange-
+   marketing feeds deliberately excluded).
+3. **Real decision weight, using the HFT Flow (§45) precedent exactly**
+   — repo owner asked for weight "if it can't break trading, or
+   recommend." Recommended and accepted: `DEFAULT_WEIGHTS["news_
+   sentiment"] = 0.0` (present in the real formula, mathematically
+   inert), with a separate `NEWS_SENTIMENT_LIVE_ENABLED`/`_WEIGHT`
+   opt-in to raise it later — identical shape to `HFT_FLOW_LIVE_*`.
 
-Two design options were surfaced and confirmed with the repo owner
-before implementation: (A) synchronous fetch right after each fill, or
-(B) background backfill job. **(B) was chosen** — it adds zero
-latency/failure-risk to the live order path, and one call site
-(`main.py`'s classic-loop TP/SL exit detection) never has a close
-`orderId` to fetch against in the first place, so (A) couldn't have
-covered it either way.
+## A real architecture finding, surfaced rather than worked around
 
-**Entry vs. exit fees — a real, permanent limitation, not a bug.**
-Entry fee is recoverable for every trade (`trades.order_id` is always
-captured at open). Exit fee is only recoverable where a close
-`orderId` was captured — only true for the multi-symbol scheduler's
-replacement-close path, not the classic single-symbol loop's
-mark-price-heuristic close. This module never fuzzy-matches by
-symbol+time window to fill that gap — same "documented gap over
-fabricated inference" principle `system_health/recovery_engine.py` and
-the `bundle_history.json` Phase 2E record already follow elsewhere.
-
-**Scheduler-thread safety.** Runs in `main.py`'s single scheduler
-thread alongside every other `schedule.every()` job, so it makes at
-most one attempt per Binance API call (no exponential-backoff retry)
-and bounds candidates per run (`FEE_BACKFILL_MAX_TRADES_PER_RUN`,
-default 50).
+This codebase has two independent signal-fusion systems:
+`ConfidenceEngine`'s category weights (where `hft_flow` lives, and
+where `news_sentiment` was added) and `agents/ceo_agent.py`'s separate
+"AI employee" weighted-vote system (its own `self.WEIGHTS`/
+`_effective_weights()`, fully independent mechanism). `hft_flow` was
+never registered as a CEO agent either. This phase follows that same
+precedent — `news_sentiment` is wired **only** through
+`ConfidenceEngine`, the mechanism already proven to have a hard,
+mathematical "0.0 = provably inert" guarantee. Registering it as a CEO
+agent too was considered and explicitly deferred: that system's own
+cold-start/weighting behavior for a new, unvalidated voter has not
+been audited, and mixing an unaudited path into a safety-motivated
+rollout would defeat the purpose of the rollout.
 
 ## Implementation
 
-- `config/settings.py` — `FEE_BACKFILL_ENABLED` (default `False`),
-  `FEE_BACKFILL_INTERVAL_MINUTES` (default 15),
-  `FEE_BACKFILL_LOOKBACK_HOURS` (default 24),
-  `FEE_BACKFILL_MAX_TRADES_PER_RUN` (default 50).
-- `journal/journal_v2.py` — new `get_trades_missing_fees(since_iso,
-  limit)`.
-- `journal/fee_backfill.py` (new) — `backfill_commission_fees(journal,
-  client)`, `_sum_commission()`, `_fetch_order_commission()`.
-- `main.py` — new `run_fee_backfill_job(sys)`, scheduled
-  unconditionally via `schedule.every(settings.
-  FEE_BACKFILL_INTERVAL_MINUTES).minutes.do(...)`, no-ops when the
-  flag is off.
-- `docs/architecture.md` §67, `CHANGELOG.md`, `MIGRATION.md`, this
-  file.
+- `intelligence/news_sentiment_feed.py` (new) — background-only, same
+  shape as §67's `journal/fee_backfill.py`. `SOURCES` dict (8 URLs),
+  `NewsSentimentSnapshot` dataclass, lock-protected singleton cache,
+  `_fetch_one_source()` (one feed, one best-effort attempt, never
+  raises, checks feedparser's `bozo` flag), `refresh_news_sentiment()`
+  (the scheduled job's entry point — no-ops when disabled).
+- `intelligence/market_context_builder.py` — reused the existing,
+  previously-always-`None` `"news_sentiment"` key (`intelligence`
+  Layer-2 placeholder every caller has always passed `None` for)
+  rather than adding a new one.
+- `decision/confidence_engine.py` — `DEFAULT_WEIGHTS["news_
+  sentiment"] = 0.0`; `resolve_confidence_weights()` extended with an
+  independent `NEWS_SENTIMENT_LIVE_ENABLED`/`_WEIGHT` pair;
+  `_score_news_sentiment()` (0.0-1.0, VADER's compound maps directly
+  since it's already -1..+1 with true 0 as neutral); additive term
+  gated on `article_count > 0`. No contradiction-penalty mechanism —
+  unlike `hft_flow`, opposing sentiment floors at 0, never subtracts
+  or blocks (headline sentiment is a noisier, lower-conviction signal
+  than order-flow microstructure).
+- `main.py::run_news_sentiment_job(sys)` — mirrors
+  `run_fee_backfill_job()`'s guarded shape exactly.
+- `config/settings.py` — 6 new settings (`NEWS_SENTIMENT_ENABLED`,
+  `_INTERVAL_MINUTES`, `_LOOKBACK_HOURS`,
+  `_MAX_ARTICLES_PER_SOURCE`, `_LIVE_ENABLED`, `_LIVE_WEIGHT`), all
+  off/inert by default.
+- `.env.example` — documents all 6 new settings; also retroactively
+  adds §67's `FEE_BACKFILL_*` block (an oversight from that phase,
+  fixed here).
+- `requirements.txt` — `feedparser>=6.0.10`, `vaderSentiment>=3.3.2`
+  (both pure-Python, no native build step).
 
 ## Tests
 
-New: `tests/test_fee_backfill.py` — 17 tests covering
-`get_trades_missing_fees()`'s candidate filtering, `_sum_commission()`'s
-single-asset/mixed-asset/malformed-input handling, and
-`backfill_commission_fees()`'s disabled/missing-dependency no-ops,
-entry-only fill, entry+exit fill, never-fetch-exit-without-close-
-order-id, API-error handling, and mixed-asset-order handling. Uses a
-fake `UMFutures`-shaped client — no real Binance API calls in tests.
+47 new tests across 4 files — see `docs/architecture.md` §69's Testing
+section for the full breakdown. All 3141 pre-existing tests pass
+unchanged, including the full existing `hft_flow` suite (38 tests,
+zero regressions — confirms the two opt-in mechanisms really are
+independent).
 
-All 3124 pre-existing tests pass unchanged.
-
-Full suite: `pytest` → **3141 passed** (up from 3124), 4 skipped, 45
-deselected, **0 failures** — the "3 pre-existing dashboard-build
-failures" cited in every phase since §55 are not a real bug (see
-Correction below); this run built `dashboard_src/dist/` first, as CI
-already does, and got 0 failures.
+Full suite: `pytest` → **3188 passed** (up from 3141), 4 skipped, 45
+deselected, **0 failures**.
 
 `ruff check . --exclude dashboard_src --exclude dashboard` → all
-checks passed, repo-wide. `vulture . --exclude
-dashboard_src,dashboard,tests --min-confidence 80` → clean, no new
-findings. `python -c "import main"` → succeeds.
+checks passed. `vulture . --exclude dashboard_src,dashboard,tests
+--min-confidence 80` → clean on every changed/new source file.
+`python -c "import main"` → succeeds.
 
-## Correction to every prior phase's test-count note (§55–§66)
+## With this, the 2026-08-05 project tracker's entire backlog is closed
 
-The "3 pre-existing dashboard-build failures" repeatedly cited since
-§55 turned out not to be a real bug:
-`tests/test_dashboard_serving.py` needs `dashboard_src/dist/` to
-exist, which is gitignored and absent on a fresh clone until `npm run
-build` runs — CI already builds the dashboard before `pytest` for
-exactly this reason. This phase's verification built the dashboard
-first and got 0 failures. No dashboard-serving code changed in this
-phase; this is a correction to the historical record, not a fix.
+Fee capture (§67, merged), test/tooling housekeeping (§68, delivered,
+awaiting merge), and now News Sentiment (§69) — the last item that
+required actual implementation work. Remaining out-of-scope items
+(Binance API 401/IP whitelist — external account config;
+`fix/office-scene-real-assets` — paused World work) stay as they were.
 
 ## Files changed
 
-`config/settings.py`, `journal/journal_v2.py`, `journal/fee_backfill.py`
-(new), `main.py`, `tests/test_fee_backfill.py` (new), `PATCH_NOTES.md`,
-`MIGRATION.md`, `CHANGELOG.md`, `docs/architecture.md` (§67).
+`.env.example`, `config/settings.py`, `decision/confidence_engine.py`,
+`intelligence/market_context_builder.py`,
+`intelligence/news_sentiment_feed.py` (new), `main.py`,
+`requirements.txt`, `tests/test_market_context_news_sentiment.py`
+(new), `tests/test_news_sentiment_confidence_integration.py` (new),
+`tests/test_news_sentiment_feed.py` (new),
+`tests/test_news_sentiment_live_enable_switch.py` (new),
+`PATCH_NOTES.md`, `MIGRATION.md`, `CHANGELOG.md`,
+`docs/architecture.md` (§69).

@@ -15,6 +15,10 @@ hft_flow :  0%   (V16 Phase 4C Track B, HFT-5 — microstructure order-flow
                   confirmation; 0% by default, fully inert unless
                   explicitly raised via update_weights(). See "HFT Flow
                   integration" section below.)
+news_sentiment: 0% (V16 Phase 55 — RSS/VADER headline sentiment; 0% by
+                  default, fully inert unless explicitly raised. Same
+                  two-flag opt-in shape as hft_flow — see "News
+                  Sentiment integration" section below.)
 
 Total    : 100%
 
@@ -57,6 +61,29 @@ Two independent, separately-gated mechanisms, both off by default:
    an unconditional veto — see the design review's own rationale for why
    a single high-noise signal shouldn't be able to block an otherwise
    well-established multi-timeframe setup outright.
+
+News Sentiment integration (V16 Phase 55)
+------------------------------------------
+Same two-flag opt-in shape as HFT Flow above, minus the contradiction-
+penalty mechanism (headline sentiment is a much noisier, lower-
+conviction signal than order-flow microstructure — an additive nudge
+only, never a veto):
+
+1. Additive term — news_sentiment is one more weighted category,
+   scored by _score_news_sentiment() (0.0-1.0, same convention as every
+   other category). At the default weight of 0.0 this contributes
+   nothing regardless of the underlying score. The "news_sentiment" key
+   only appears in `breakdown` when real article data is present
+   (market_context["news_sentiment"]["article_count"] > 0) — with
+   NEWS_SENTIMENT_ENABLED off (the default), that's never true, so
+   `breakdown`'s key set is byte-identical to before this phase.
+
+   resolve_confidence_weights() (below) is the supported way to raise
+   this weight. It returns DEFAULT_WEIGHTS untouched unless settings.
+   NEWS_SENTIMENT_LIVE_ENABLED is explicitly True, in which case it
+   returns a copy with "news_sentiment" set to settings.
+   NEWS_SENTIMENT_LIVE_WEIGHT. Both settings default to False / 5.0, so
+   this remains fully inert until an operator opts in via .env.
 
 Hard blocks (override regardless of score)
 ------------------------------------------
@@ -110,32 +137,39 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "regime":   20.0,
     "hft_flow":  0.0,   # V16 Phase 4C Track B, HFT-5 — off by default, see
                         # module docstring's "HFT Flow integration" section
+    "news_sentiment": 0.0,  # V16 Phase 55 — off by default, see module
+                        # docstring's "News Sentiment integration" section
 }
 
 
 def resolve_confidence_weights() -> dict[str, float]:
-    """HFT-6b: the documented, supported way to enable HFT flow's live
-    weight (docs/architecture.md section 45, "Enabling for live").
+    """HFT-6b / V16 Phase 55: the documented, supported way to raise
+    either hft_flow's or news_sentiment's live weight (docs/
+    architecture.md sections 45 and 69 respectively).
 
-    Returns DEFAULT_WEIGHTS unchanged unless settings.HFT_FLOW_LIVE_ENABLED
-    is explicitly True — matching every other HFT flag in this codebase
-    (HFT_WS_ENABLED, HFT_FLOW_CONTRADICTION_ENABLED): off by default,
-    explicit opt-in only, no automatic inference from related settings.
+    Returns DEFAULT_WEIGHTS unchanged unless the corresponding
+    *_LIVE_ENABLED setting is explicitly True — matching every other
+    opt-in flag in this codebase: off by default, explicit opt-in only,
+    no automatic inference from related settings.
 
-    Returns a new dict; DEFAULT_WEIGHTS itself is never mutated (relied on
-    by tests/test_hft_flow_live_weight_config.py and
-    tests/test_hft_shadow_mode.py, which assert it stays {"hft_flow": 0.0}
-    regardless of what any caller does with the returned copy).
+    Returns a new dict; DEFAULT_WEIGHTS itself is never mutated (relied
+    on by tests/test_hft_flow_live_weight_config.py and
+    tests/test_hft_shadow_mode.py, which assert it stays
+    {"hft_flow": 0.0, ...} regardless of what any caller does with the
+    returned copy — same reasoning now applies to "news_sentiment").
 
-    Callers still need settings.HFT_WS_ENABLED=True for this to have any
-    real effect — without it, market_context never carries live hft_flow
-    data, so ConfidenceEngine's hft_flow_active gate stays False and the
-    raised weight has nothing to multiply against (see score()'s own
-    hft_flow_active check).
+    Callers still need the matching *_ENABLED flag for this to have any
+    real effect — for hft_flow that's HFT_WS_ENABLED, for news_sentiment
+    that's NEWS_SENTIMENT_ENABLED. Without it, market_context never
+    carries real data for that category, so the raised weight has
+    nothing to multiply against (see score()'s own *_active checks).
     """
-    if not settings.HFT_FLOW_LIVE_ENABLED:
-        return DEFAULT_WEIGHTS
-    return {**DEFAULT_WEIGHTS, "hft_flow": settings.HFT_FLOW_LIVE_WEIGHT}
+    weights = DEFAULT_WEIGHTS
+    if settings.HFT_FLOW_LIVE_ENABLED:
+        weights = {**weights, "hft_flow": settings.HFT_FLOW_LIVE_WEIGHT}
+    if settings.NEWS_SENTIMENT_LIVE_ENABLED:
+        weights = {**weights, "news_sentiment": settings.NEWS_SENTIMENT_LIVE_WEIGHT}
+    return weights
 
 
 # ── Action thresholds ─────────────────────────────────────────────────────────
@@ -278,6 +312,19 @@ class ConfidenceEngine:
         if hft_flow_active:
             hft_flow_raw = self._score_hft_flow(market_context, direction)
             breakdown["hft_flow"] = _pct(hft_flow_raw * w.get("hft_flow", 0.0))
+
+        # V16 Phase 55: additive news_sentiment term. The "news_sentiment"
+        # key is only added to `breakdown` when real article data is
+        # present (article_count > 0) — with NEWS_SENTIMENT_ENABLED off
+        # (the default), market_context's news_sentiment.article_count is
+        # always 0, so `breakdown`'s key set stays byte-identical to
+        # before this phase. See module docstring's "News Sentiment
+        # integration" section.
+        news_sentiment_ctx = market_context.get("news_sentiment", {}) or {}
+        news_sentiment_active = int(news_sentiment_ctx.get("article_count", 0)) > 0
+        if news_sentiment_active:
+            news_sentiment_raw = self._score_news_sentiment(market_context, direction)
+            breakdown["news_sentiment"] = _pct(news_sentiment_raw * w.get("news_sentiment", 0.0))
 
         total_confidence = sum(breakdown.values())
 
@@ -527,6 +574,40 @@ class ConfidenceEngine:
         if aligned <= 0:
             return 0.0
         return min(aligned / 100.0, 1.0)
+
+    @staticmethod
+    def _score_news_sentiment(ctx: dict, direction: str) -> float:
+        """V16 Phase 55. Same convention as every other category scorer
+        here: 0.0 = no confirmation, 1.0 = maximum confirmation in the
+        traded direction. Purely additive — sentiment that OPPOSES
+        `direction` returns 0.0 here (not a negative value); unlike
+        hft_flow, there is no separate contradiction-penalty mechanism
+        for news sentiment (headline sentiment is a much noisier, lower-
+        conviction signal than order-flow microstructure — an opposing
+        reading here should never be able to reduce or block a decision,
+        only fail to add to it). Callers must check article_count > 0
+        themselves before relying on this (see score()'s
+        news_sentiment_active gate) — this method still degrades safely
+        to 0.0 on its own if called with stale/empty data.
+
+        VADER's compound score is already -1.0..+1.0 with 0 as true
+        neutral, so no extra normalization is needed before mapping it
+        onto direction — positive score supports LONG, negative supports
+        SHORT, by construction of VADER's own scale.
+        """
+        news = ctx.get("news_sentiment", {}) or {}
+        if int(news.get("article_count", 0)) <= 0:
+            return 0.0
+
+        score = float(news.get("score", 0.0))
+        if direction == "LONG":
+            aligned = score
+        elif direction == "SHORT":
+            aligned = -score
+        else:
+            return 0.0
+
+        return max(0.0, min(aligned, 1.0))
 
     @staticmethod
     def _hft_flow_contradiction_penalty(ctx: dict, direction: str) -> int:
