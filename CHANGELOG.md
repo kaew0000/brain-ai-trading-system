@@ -1,5 +1,53 @@
 # CHANGELOG
 
+## [Unreleased] — News Sentiment: RSS Ingestion + VADER Scoring (V16 §69)
+
+Closes the "News Sentiment Agent (Phase 55)" item from the 2026-08-05
+project tracker, flagged there as started-but-never-completed. See
+`docs/architecture.md` §69 (which also has a section-numbering note —
+this branched from the same base as the still-unmerged
+`fix/test-housekeeping-batch`, which independently claims "§68"; merge
+that one first to avoid a header renumber).
+
+### Added
+- `intelligence/news_sentiment_feed.py` (new) — background RSS
+  ingestion (8 verified feeds) + VADER lexicon sentiment scoring. Off
+  by default (`NEWS_SENTIMENT_ENABLED`). Never touches the live
+  trading cycle — same background-job/cache shape as §67's fee
+  backfill.
+- `decision/confidence_engine.py` — new `news_sentiment` category,
+  `DEFAULT_WEIGHTS["news_sentiment"] = 0.0` (mathematically inert by
+  default, same precedent as `hft_flow`/§45).
+  `NEWS_SENTIMENT_LIVE_ENABLED`/`NEWS_SENTIMENT_LIVE_WEIGHT` opt-in
+  pair to raise it later, fully independent of the existing
+  `HFT_FLOW_LIVE_*` pair. No contradiction-penalty mechanism —
+  opposing sentiment floors at 0, never subtracts or blocks.
+- `intelligence/market_context_builder.py` — populates the
+  previously-always-`None` `"news_sentiment"` key (an existing,
+  never-used placeholder — reused rather than duplicated).
+- `main.py::run_news_sentiment_job(sys)` — scheduled job, mirrors
+  `run_fee_backfill_job()`'s guarded shape.
+- `config/settings.py` — 6 new settings, all off/inert by default.
+- `.env.example` — documents all 6; also retroactively adds §67's
+  `FEE_BACKFILL_*` block, missing from that phase.
+- `requirements.txt` — `feedparser`, `vaderSentiment`.
+- 47 new tests across `tests/test_news_sentiment_feed.py`,
+  `tests/test_news_sentiment_confidence_integration.py`,
+  `tests/test_news_sentiment_live_enable_switch.py`,
+  `tests/test_market_context_news_sentiment.py`.
+
+### Note
+Deliberately **not** registered as a `agents/ceo_agent.py` "AI
+employee" (a second, separate signal-fusion system this phase
+discovered but did not audit further) — see §69 for why.
+
+All 3141 pre-existing tests pass unchanged, including the full
+existing `hft_flow` suite (38 tests, zero regressions). Full suite:
+3188 passed (up from 3141), 4 skipped, 45 deselected, 0 failed. ruff
+clean, vulture clean, `import main` succeeds.
+
+---
+
 ## [Unreleased] — Commission/Fee Backfill (V16 §67)
 
 Closes the "fee capture" item from the 2026-08-05 project tracker's

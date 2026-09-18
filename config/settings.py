@@ -822,6 +822,53 @@ class Settings(BaseSettings):
     # nothing to multiply against.
     HFT_FLOW_LIVE_ENABLED: bool = Field(default=False, alias="HFT_FLOW_LIVE_ENABLED")
 
+    # ── V16 Phase 55: News Sentiment (RSS ingestion + VADER lexicon score) ──
+    # Two independent, separately-gated mechanisms, same shape as HFT Flow
+    # above: a fetch/ingestion flag and a decision-weight flag. Fetch can
+    # be on with decision weight still off (observe-only, dashboard/journal
+    # visibility only) — decision weight requires fetch on too (nothing to
+    # weight otherwise).
+    #
+    # Fetch/ingestion — off by default. When True, journal/... no, this is
+    # intelligence/news_sentiment_feed.py's background job (mirrors
+    # journal/fee_backfill.py's shape): fetches each configured RSS feed at
+    # most once per interval, scores headlines with VADER (lexicon-based,
+    # offline, no API key/network dependency beyond the RSS fetch itself),
+    # and keeps a rolling in-memory average. Never touches the live
+    # trading cycle directly — market_context_builder.py reads the cached
+    # result, the job itself runs on main.py's shared scheduler thread
+    # exactly like run_fee_backfill_job.
+    NEWS_SENTIMENT_ENABLED: bool = Field(default=False, alias="NEWS_SENTIMENT_ENABLED")
+    NEWS_SENTIMENT_INTERVAL_MINUTES: int = Field(default=15, alias="NEWS_SENTIMENT_INTERVAL_MINUTES")
+    # Only headlines published within this window count toward the current
+    # score — old news shouldn't keep influencing sentiment indefinitely.
+    NEWS_SENTIMENT_LOOKBACK_HOURS: int = Field(default=6, alias="NEWS_SENTIMENT_LOOKBACK_HOURS")
+    # Caps articles scored per source per run (each source's own feed is
+    # usually well under this; guards against one misbehaving feed
+    # ballooning run time).
+    NEWS_SENTIMENT_MAX_ARTICLES_PER_SOURCE: int = Field(
+        default=30, alias="NEWS_SENTIMENT_MAX_ARTICLES_PER_SOURCE"
+    )
+
+    # Decision weight — same two-flag shape as HFT_FLOW_LIVE_WEIGHT/
+    # HFT_FLOW_LIVE_ENABLED directly above, for the same reason (a
+    # candidate weight can sit in config without silently taking effect,
+    # and the on/off state stays greppable in one place). Default weight
+    # is deliberately small (5.0, same value HFT Flow uses for the same
+    # reason) — about 5% of total confidence weight, so even if mistakenly
+    # applied it can only nudge an already-close decision, never dominate
+    # SMC/Volume/OI/Funding/Regime.
+    NEWS_SENTIMENT_LIVE_WEIGHT: float = Field(default=5.0, alias="NEWS_SENTIMENT_LIVE_WEIGHT")
+    # This setting alone (default False) has zero automatic effect
+    # anywhere — DEFAULT_WEIGHTS in decision/confidence_engine.py still
+    # hardcodes news_sentiment at 0.0. Only when explicitly True does
+    # resolve_confidence_weights() apply NEWS_SENTIMENT_LIVE_WEIGHT to the
+    # news_sentiment slot. Also requires NEWS_SENTIMENT_ENABLED=True to
+    # have any real effect — without it, market_context's news_sentiment
+    # key never carries real article data, so this weight has nothing to
+    # multiply against.
+    NEWS_SENTIMENT_LIVE_ENABLED: bool = Field(default=False, alias="NEWS_SENTIMENT_LIVE_ENABLED")
+
     # V16 ML Extensions Integration Layer — off by default, same posture
     # as SCHEDULER_ENABLED/CEO_MULTI_SYMBOL_ENABLED/HFT_FLOW_LIVE_ENABLED
     # above. When True, main.py's build_system() wires
