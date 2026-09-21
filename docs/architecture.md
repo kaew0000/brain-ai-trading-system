@@ -6765,6 +6765,11 @@ content changes needed either way, purely a header/cross-reference
 fix. Kaew: merge the housekeeping batch before this one to avoid that
 step entirely.
 
+**Update, 2026-09-18: this is what happened.** News Sentiment (this
+phase) merged first as PR #104. The housekeeping batch merged after,
+renumbered §68→§70 rather than disturbing this already-public
+section — see §70 below for that renumbering's own note.
+
 ## 69. News Sentiment (RSS Ingestion + VADER Scoring) (2026-09-17)
 
 ### Context
@@ -6936,3 +6941,75 @@ Full suite: 3188 passed (3141 + 47 new), 4 skipped, 45 deselected, 0
 failed. `ruff check .` clean repo-wide. `vulture --min-confidence 80`
 clean on every changed/new source file. `python -c "import main"`
 succeeds.
+## 70. Test/Tooling Housekeeping Batch (2026-09-17)
+
+**Renumbered from §68 to §70** (2026-09-18): as predicted by §69's
+"Section-numbering note" above, this branch was merged after §69, not
+before -- the assumption that note was written under didn't hold. Per
+that note's own contingency plan, the collision is resolved here by
+renumbering this phase's header rather than touching §69 (already
+public on `main` by the time this merged); no content changes, purely
+this header and the cross-references to it. Originally verified
+(bundle SHA `050877e6de18...`) against `main` @ `544493b` (§67 only,
+pre-§69); re-verified against `main` @ `9498a05` (post-§69) before
+this merge -- same diff, same test results (see Testing below for
+both baselines).
+
+Closes the two remaining Low-severity items from the 2026-08-05
+project tracker's Bug Tracker / Risk Register that weren't already
+resolved by §65–§67.
+
+### `tests/test_execution_factory.py` `os.environ` leak
+
+`TestExecutionFactory._factory(mode)` sets both
+`os.environ["EXECUTION_MODE"]` and `config.settings.settings.
+EXECUTION_MODE` directly, with no teardown — flagged in
+docs/architecture.md's Hotfix 2026-08-05 section as "Follow-up found
+but not fixed here," latent-only because this file's last test happens
+to call `_factory("paper")`, coincidentally leaving both back at
+`"paper"`. Fixed with an autouse, function-scoped fixture on
+`TestExecutionFactory` that snapshots both values before each test and
+restores them after, regardless of outcome or run order — no changes
+to any test body or to `_factory()` itself.
+
+### `bundle_history.json` phantom SHA (Phase 2E record)
+
+The first record's `sha`
+(`d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683`) was re-confirmed absent
+from the repository (`git cat-file -t`, fails). The real Phase 2E
+commit — matching this record's branch, bundle filename, and
+imported_at — is `2426966698d3954d97926f18e1b84588bab1de02`
+("feat(execution): merge Phase 2E Execution Wiring & Live
+Orchestrator", 2026-07-20), confirmed via `git log`.
+
+Per this repo's own 2026-08-02 stabilization report policy — document
+inferable-but-not-provable discrepancies rather than silently rewrite
+them — the original (wrong) `sha` is preserved, not replaced. This
+correction is provable, not merely inferable (`git cat-file` proves
+non-existence; the branch/bundle_filename/imported_at triple uniquely
+identifies the real commit), so it's recorded as an explicit
+correction: two new optional fields, `corrected_sha` and
+`correction_note`, added to `tools/history.py`'s `BundleRecord`
+dataclass (not just patched into the raw JSON) so the correction
+survives the next time any tool run calls `BundleHistory.save()` —
+`save()` serializes via `asdict()` on the dataclass, so an
+undeclared JSON-only field would have been silently dropped on the
+next rewrite. Both new fields default to `None` and are backward
+compatible with every pre-existing record.
+
+### Testing
+
+`tests/test_bundle_manager_history.py` — 2 new tests:
+`corrected_sha`/`correction_note` default to `None` on a normal
+record; a manually-set correction round-trips through `save()` and a
+fresh `BundleHistory` reload (the actual bug this closes — proving it
+would have survived rather than been silently stripped).
+
+Original verification (against `main` @ `544493b`, pre-§69): 3143
+passed (up from 3141 in §67), 4 skipped, 45 deselected, 0 failed.
+Re-verification at merge time (against `main` @ `9498a05`, post-§69):
+3190 passed (up from 3188 in §69 -- same +2 delta), 4 skipped, 45
+deselected, 0 failed. `ruff check .` clean repo-wide both times.
+`vulture --min-confidence 80` clean both times. `python -c "import
+main"` succeeds both times. `bundle_history.json` re-validated as
+parseable JSON after the edit.

@@ -1,124 +1,125 @@
-# PATCH NOTES — News Sentiment: RSS Ingestion + VADER Scoring (V16 §69)
+# PATCH NOTES — Test/Tooling Housekeeping Batch (V16 §70)
 
-Branch: `feat/news-sentiment-agent`
-Base: `main` @ `544493b` (merge of PR #103, commission/fee backfill)
-
-Closes the "News Sentiment Agent (Phase 55, observe-only, RSS feeds)"
-item from the 2026-08-05 project tracker (flagged there as started
-mid-session and never completed; a 2026-09-17 audit confirmed zero
-trace of it anywhere in the repository).
+Branch: `fix/test-housekeeping-batch` (rebuilt as
+`fix/test-housekeeping-batch-v2` on top of the new base — same diff,
+see Section-numbering note below)
+Original base: `main` @ `544493b` (merge of PR #103, commission/fee
+backfill). Re-verified base: `main` @ `9498a05` (merge of PR #104,
+news sentiment, §69) — see Section-numbering note.
 
 ## Section-numbering note
 
-This branched from the same base (`544493b`) as the still-unmerged
-`fix/test-housekeeping-batch` branch, whose own docs call itself
-"§68". Both independently claim "the section after §67" — a real
-collision. This phase is numbered §69, assuming
-`fix/test-housekeeping-batch` merges first. **Merge that one before
-this one** to avoid a header renumber; if merged in the other order,
-swap one "§68"/"§69" header — no content changes needed either way.
+Originally written and delivered as "§68" against `main` @ `544493b`.
+A second, independent branch (news sentiment) was created from the
+same base around the same time and also claimed "the section after
+§67" — a real collision, flagged in that phase's own docs at the time
+(`docs/architecture.md`'s §69 "Section-numbering note"). Kaew merged
+news sentiment first (PR #104), so this phase is renumbered §68→§70
+here rather than disturbing §69, which was already public on `main` by
+the time this merged. No content/behavior changes from the
+renumbering — purely this header and cross-references to it. Cherry-
+picked cleanly onto the new base (all four affected code files applied
+without conflict); only the four docs files needed conflict resolution
+for the renumbering itself.
 
-## Design decisions (confirmed with the repo owner before implementation)
+Closes the two remaining Low-severity items from the 2026-08-05
+project tracker's Bug Tracker / Risk Register that weren't already
+resolved by §65 (HMM contamination), §66/§67 (N+1 fix, per-agent
+attribution, fee capture).
 
-1. **Sentiment method: VADER** — lexicon-based, offline, no API key,
-   deterministic, fully reproducible. Chosen over an LLM-based
-   approach for lower cost/latency and easier validation against a
-   real trading track record before trusting it with decision weight.
-2. **8 RSS feeds**, all URL-verified against each publisher's own site
-   / the FeedSpot RSS database before use — never guessed: CoinDesk,
-   Cointelegraph, Decrypt, The Block (the tracker's original 4) +
-   CryptoSlate, The Defiant, NewsBTC, CryptoPotato (added per "if it
-   makes the system better, add it" — independent, reputable,
-   market-news-focused outlets; NFT/podcast/VC-essay/exchange-
-   marketing feeds deliberately excluded).
-3. **Real decision weight, using the HFT Flow (§45) precedent exactly**
-   — repo owner asked for weight "if it can't break trading, or
-   recommend." Recommended and accepted: `DEFAULT_WEIGHTS["news_
-   sentiment"] = 0.0` (present in the real formula, mathematically
-   inert), with a separate `NEWS_SENTIMENT_LIVE_ENABLED`/`_WEIGHT`
-   opt-in to raise it later — identical shape to `HFT_FLOW_LIVE_*`.
+## Item 1: `tests/test_execution_factory.py` `os.environ` leak
 
-## A real architecture finding, surfaced rather than worked around
+### Root cause
 
-This codebase has two independent signal-fusion systems:
-`ConfidenceEngine`'s category weights (where `hft_flow` lives, and
-where `news_sentiment` was added) and `agents/ceo_agent.py`'s separate
-"AI employee" weighted-vote system (its own `self.WEIGHTS`/
-`_effective_weights()`, fully independent mechanism). `hft_flow` was
-never registered as a CEO agent either. This phase follows that same
-precedent — `news_sentiment` is wired **only** through
-`ConfidenceEngine`, the mechanism already proven to have a hard,
-mathematical "0.0 = provably inert" guarantee. Registering it as a CEO
-agent too was considered and explicitly deferred: that system's own
-cold-start/weighting behavior for a new, unvalidated voter has not
-been audited, and mixing an unaudited path into a safety-motivated
-rollout would defeat the purpose of the rollout.
+`TestExecutionFactory._factory(mode)` sets both
+`os.environ["EXECUTION_MODE"]` and `config.settings.settings.
+EXECUTION_MODE` directly with no teardown, then reloads
+`execution.execution_factory` to pick up the change. Flagged in
+docs/architecture.md's Hotfix 2026-08-05 section as "Follow-up found
+but not fixed here" — latent-only because this file's last test
+happens to call `_factory("paper")`, coincidentally leaving both back
+at `"paper"`. Order-dependent luck, not a guarantee — a future test
+addition or reorder could leak a non-default `EXECUTION_MODE` into
+later tests in the same process.
 
-## Implementation
+### Fix
 
-- `intelligence/news_sentiment_feed.py` (new) — background-only, same
-  shape as §67's `journal/fee_backfill.py`. `SOURCES` dict (8 URLs),
-  `NewsSentimentSnapshot` dataclass, lock-protected singleton cache,
-  `_fetch_one_source()` (one feed, one best-effort attempt, never
-  raises, checks feedparser's `bozo` flag), `refresh_news_sentiment()`
-  (the scheduled job's entry point — no-ops when disabled).
-- `intelligence/market_context_builder.py` — reused the existing,
-  previously-always-`None` `"news_sentiment"` key (`intelligence`
-  Layer-2 placeholder every caller has always passed `None` for)
-  rather than adding a new one.
-- `decision/confidence_engine.py` — `DEFAULT_WEIGHTS["news_
-  sentiment"] = 0.0`; `resolve_confidence_weights()` extended with an
-  independent `NEWS_SENTIMENT_LIVE_ENABLED`/`_WEIGHT` pair;
-  `_score_news_sentiment()` (0.0-1.0, VADER's compound maps directly
-  since it's already -1..+1 with true 0 as neutral); additive term
-  gated on `article_count > 0`. No contradiction-penalty mechanism —
-  unlike `hft_flow`, opposing sentiment floors at 0, never subtracts
-  or blocks (headline sentiment is a noisier, lower-conviction signal
-  than order-flow microstructure).
-- `main.py::run_news_sentiment_job(sys)` — mirrors
-  `run_fee_backfill_job()`'s guarded shape exactly.
-- `config/settings.py` — 6 new settings (`NEWS_SENTIMENT_ENABLED`,
-  `_INTERVAL_MINUTES`, `_LOOKBACK_HOURS`,
-  `_MAX_ARTICLES_PER_SOURCE`, `_LIVE_ENABLED`, `_LIVE_WEIGHT`), all
-  off/inert by default.
-- `.env.example` — documents all 6 new settings; also retroactively
-  adds §67's `FEE_BACKFILL_*` block (an oversight from that phase,
-  fixed here).
-- `requirements.txt` — `feedparser>=6.0.10`, `vaderSentiment>=3.3.2`
-  (both pure-Python, no native build step).
+Added an autouse, function-scoped `_restore_execution_mode` fixture on
+`TestExecutionFactory` that snapshots `os.environ.get("EXECUTION_MODE")`
+and `config.settings.EXECUTION_MODE` before each test and restores
+both after, regardless of outcome. No changes to any test body or to
+`_factory()` itself — purely additive.
+
+## Item 2: `bundle_history.json` phantom SHA (Phase 2E record)
+
+### Root cause
+
+The tracker's Bundle History tab (2026-08-05 snapshot) flagged this
+record's `sha` (`d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683`) as not
+existing in the repository, with the real Phase 2E commit being a
+different hash. Re-confirmed against current `main`:
+`git cat-file -t d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683` still fails.
+The real commit — matching this record's branch, bundle_filename, and
+imported_at — is `2426966698d3954d97926f18e1b84588bab1de02`
+("feat(execution): merge Phase 2E Execution Wiring & Live
+Orchestrator", 2026-07-20 17:19:27 +0700), confirmed via `git log`.
+
+### Fix
+
+Per this repo's own 2026-08-02 stabilization report policy —
+inferable-but-not-provable discrepancies get documented, not silently
+rewritten — the original `sha` is preserved. This correction is
+provable (not merely inferable), so it's recorded explicitly: two new
+optional fields on `tools/history.py`'s `BundleRecord` dataclass,
+`corrected_sha` and `correction_note`, both defaulting to `None`
+(backward compatible with every pre-existing record). Added as real
+dataclass fields rather than raw untyped JSON keys because
+`BundleHistory.save()` serializes via `dataclasses.asdict()` — an
+undeclared field patched only into the JSON would have been silently
+stripped the next time any tool run calls `save()`.
+`bundle_history.json`'s Phase 2E record now carries both fields.
 
 ## Tests
 
-47 new tests across 4 files — see `docs/architecture.md` §69's Testing
-section for the full breakdown. All 3141 pre-existing tests pass
-unchanged, including the full existing `hft_flow` suite (38 tests,
-zero regressions — confirms the two opt-in mechanisms really are
-independent).
+`tests/test_bundle_manager_history.py` — 2 new tests:
+`test_corrected_sha_defaults_to_none`,
+`test_corrected_sha_round_trips_through_save_and_reload` (the latter
+directly proves the fix — that a correction survives a save/reload
+cycle rather than being silently dropped).
 
-Full suite: `pytest` → **3188 passed** (up from 3141), 4 skipped, 45
-deselected, **0 failures**.
+All pre-existing tests pass unchanged at both verification points.
+
+**Original verification** (`main` @ `544493b`, before §69 existed):
+`pytest` → 3143 passed (up from 3141 in §67), 4 skipped, 45
+deselected, 0 failures.
+
+**Re-verification at merge time** (`main` @ `9498a05`, after §69's 47
+tests landed): `pytest` → **3190 passed** (up from 3188 in §69 — same
++2 delta as the original verification), 4 skipped, 45 deselected,
+**0 failures**.
 
 `ruff check . --exclude dashboard_src --exclude dashboard` → all
-checks passed. `vulture . --exclude dashboard_src,dashboard,tests
---min-confidence 80` → clean on every changed/new source file.
-`python -c "import main"` → succeeds.
+checks passed, both times. `vulture . --exclude
+dashboard_src,dashboard,tests --min-confidence 80` → clean, both
+times. `python -c "import main"` → succeeds, both times.
+`python -c "import json; json.load(open('bundle_history.json'))"` →
+valid JSON.
 
-## With this, the 2026-08-05 project tracker's entire backlog is closed
+## Remaining items from the 2026-08-05 tracker
 
-Fee capture (§67, merged), test/tooling housekeeping (§68, delivered,
-awaiting merge), and now News Sentiment (§69) — the last item that
-required actual implementation work. Remaining out-of-scope items
-(Binance API 401/IP whitelist — external account config;
-`fix/office-scene-real-assets` — paused World work) stay as they were.
+With this batch (and §69, merged just before it), the trading-system-
+side backlog from that tracker is now **fully closed** — every item
+that required a code change has shipped. Two items remain, both
+explicitly out of scope for code changes:
+- Binance API 401 (-2015) / IP whitelist — external Binance account
+  config, not verifiable or fixable from this repo.
+- `fix/office-scene-real-assets` unmerged branch — World-track
+  frontend work, paused per Kaew's 2026-09-17 decision to deprioritize
+  World development.
 
 ## Files changed
 
-`.env.example`, `config/settings.py`, `decision/confidence_engine.py`,
-`intelligence/market_context_builder.py`,
-`intelligence/news_sentiment_feed.py` (new), `main.py`,
-`requirements.txt`, `tests/test_market_context_news_sentiment.py`
-(new), `tests/test_news_sentiment_confidence_integration.py` (new),
-`tests/test_news_sentiment_feed.py` (new),
-`tests/test_news_sentiment_live_enable_switch.py` (new),
+`tests/test_execution_factory.py`, `bundle_history.json`,
+`tools/history.py`, `tests/test_bundle_manager_history.py`,
 `PATCH_NOTES.md`, `MIGRATION.md`, `CHANGELOG.md`,
-`docs/architecture.md` (§69).
+`docs/architecture.md` (§70, renumbered from §68).

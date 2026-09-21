@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-14T08:22:46Z",
+  "updated_at": "2026-09-17T00:00:00Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -9,7 +9,9 @@
       "status": "applied",
       "imported_at": "2026-07-20T08:46:16Z",
       "pushed": true,
-      "reason": null
+      "reason": null,
+      "corrected_sha": "2426966698d3954d97926f18e1b84588bab1de02",
+      "correction_note": "V16 §67 housekeeping (2026-09-17): the recorded sha does not exist in this repository (confirmed via 'git cat-file -t', fails). The actual Phase 2E commit reachable on main, matching this record's branch/bundle_filename/imported_at, is corrected_sha above ('feat(execution): merge Phase 2E Execution Wiring & Live Orchestrator', 2026-07-20). The original (wrong) sha is preserved above rather than overwritten, per this repo's own 2026-08-02 stabilization report's stated policy of leaving inferable-but-not-provable discrepancies documented rather than silently rewritten -- this correction is provable (git cat-file confirms non-existence; the commit message/date/branch triple uniquely identifies the real commit), so it is recorded as an explicit correction rather than left as an open question."
     },
     {
       "sha": "367afb8214d0eacddb3e7c28a7f7e12872573110",
