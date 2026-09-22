@@ -28,7 +28,7 @@ import logging
 from typing import Dict, List, Optional, Callable, Any, Union
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Thread, Lock
 import time
 
@@ -350,7 +350,7 @@ class ExtensionsOrchestrator:
 
             # Log performance
             self.performance_log.append({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "symbol": symbol,
                 "features": x,
                 "true": y,
@@ -456,7 +456,7 @@ class ExtensionsOrchestrator:
     def save_state(self, path: Optional[str] = None):
         """Save complete bundle state."""
         if path is None:
-            path = self.results_dir / f"bundle_state_{datetime.now():%Y%m%d_%H%M%S}"
+            path = self.results_dir / f"bundle_state_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}"
 
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
@@ -514,7 +514,7 @@ class ExtensionsOrchestrator:
     def get_report(self) -> Dict[str, Any]:
         """Generate comprehensive performance report."""
         report = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "config": asdict(self.config),
             "current_params": self.current_params,
             "components": {

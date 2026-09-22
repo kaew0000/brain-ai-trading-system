@@ -1,17 +1,26 @@
-# MIGRATION — Test/Tooling Housekeeping Batch (V16 §70, renumbered from §68 — see PATCH_NOTES.md)
+# MIGRATION — News Sentiment Feed Hardening (V16 §71)
 
 ## Do you need to do anything?
 
-**No.** Both fixes in this batch are test/tooling-only:
+**No.** Both fixes are drop-in and backward compatible.
 
-- `tests/test_execution_factory.py`'s fixture change only affects test
-  execution — no production code path is touched, no settings
-  behavior changes, nothing to configure.
-- `bundle_history.json`'s new `corrected_sha`/`correction_note` fields
-  are additive and optional (default `None`). Any tool or script
-  reading this file that doesn't know about the new fields continues
-  to work exactly as before — `tools/history.py`'s own loader already
-  handles their absence via `.get()`.
+- The new `NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS` setting defaults to
+  `10` seconds. No `.env` change is required — this is only worth
+  tuning if a specific configured RSS source is known to be slow but
+  reliable (e.g. behind a proxy) and worth waiting longer for. It has
+  been added to `.env.example` for discoverability, matching every
+  other `NEWS_SENTIMENT_*` setting already documented there.
+- The `ml/extensions/` timestamp fields (`last_drift_time`, trial/
+  bundle `timestamp`, `completed_at`) change from naive to
+  timezone-aware `datetime.now(timezone.utc)`. The only externally
+  visible effect is that their `.isoformat()` string representation
+  gains a `+00:00` suffix (e.g. `2026-09-22T10:15:00` →
+  `2026-09-22T10:15:00+00:00`). Nothing in the repo currently parses
+  these specific fields back into a `datetime` for comparison, so
+  there is nothing to update. If any external tooling outside this
+  repo parses these fields with a strict format string that doesn't
+  expect a UTC offset, it would need updating — none is known to
+  exist.
 
-No database migration, no `.env` changes, no rollback considerations
-beyond a normal `git revert` if ever needed.
+No database migration, no API contract change, no rollback
+considerations beyond a normal `git revert` if ever needed.

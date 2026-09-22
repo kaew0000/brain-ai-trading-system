@@ -22,7 +22,7 @@ import logging
 from typing import Dict, List, Optional, Callable, Any, Literal
 from pathlib import Path
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # Optuna imports
@@ -212,7 +212,7 @@ class HPOManager:
                 "trial_number": trial.number,
                 "params": params,
                 "score": score,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
             return score
@@ -265,7 +265,7 @@ class HPOManager:
             "n_trials_completed": len(self.study.trials),
             "n_trials_pruned": len([t for t in self.study.trials if t.state == optuna.trial.TrialState.PRUNED]),
             "optimization_time": sum([t.duration.total_seconds() for t in self.study.trials if t.duration]),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         # Save results

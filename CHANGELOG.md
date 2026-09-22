@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## [Unreleased] — News Sentiment Feed Hardening (V16 §71)
+
+Two review-discovered fixes closed together (see `docs/architecture.md`
+§71 for full root-cause detail). Branch:
+`fix/news-sentiment-timeout-and-tz-hardening`.
+
+### Fixed
+- `intelligence/news_sentiment_feed.py` — `_fetch_one_source()` no
+  longer lets `feedparser.parse(url)` fetch the URL itself (no
+  built-in timeout). Now fetches via `requests.get(url, timeout=...)`
+  first, then parses the response content. Closes an unbounded-hang
+  risk on main.py's shared scheduler thread (the same thread as
+  `run_trading_cycle`).
+- `ml/extensions/online/learner.py`, `ml/extensions/hpo/manager.py`,
+  `ml/extensions/orchestrator.py`, `ml/extensions/rl/adapter.py` —
+  `datetime.now()` → `datetime.now(timezone.utc)` for all timestamp
+  fields, matching the timezone-aware convention used everywhere else
+  in the repo. Prevents a future `TypeError` from comparing
+  naive/aware datetimes and silent wrong-timezone timestamps on a
+  non-UTC host.
+
+### Added
+- `config/settings.py` / `.env.example` — new
+  `NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS` (default 10).
+- `tests/test_news_sentiment_feed.py` — 2 new tests
+  (`test_fetch_uses_configured_timeout`,
+  `test_http_error_status_returns_not_ok`); 21 existing tests updated
+  to mock the new `requests.get` → `feedparser.parse` fetch path.
+
 ## [Unreleased] — News Sentiment: RSS Ingestion + VADER Scoring (V16 §69)
 
 Closes the "News Sentiment Agent (Phase 55)" item from the 2026-08-05
