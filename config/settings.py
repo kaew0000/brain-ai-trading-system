@@ -849,6 +849,19 @@ class Settings(BaseSettings):
     NEWS_SENTIMENT_MAX_ARTICLES_PER_SOURCE: int = Field(
         default=30, alias="NEWS_SENTIMENT_MAX_ARTICLES_PER_SOURCE"
     )
+    # Per-source HTTP fetch timeout (V16 §71). feedparser.parse(url) has no
+    # timeout of its own when handed a URL directly — an unresponsive feed
+    # would hang indefinitely. Since this job runs on main.py's single
+    # shared `schedule.run_pending()` thread (same thread as
+    # run_trading_cycle itself), an unbounded hang here would stall live
+    # trading, not just this job. Same 10s-class value as
+    # BUNDLE_GIT_TIMEOUT_SECONDS's pattern elsewhere in this file; matches
+    # FearGreedProvider's `requests.get(..., timeout=5)` precedent in
+    # intelligence/market_intelligence_service.py, sized up slightly since
+    # RSS feeds are larger payloads than the Fear & Greed API's.
+    NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS: int = Field(
+        default=10, alias="NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS"
+    )
 
     # Decision weight — same two-flag shape as HFT_FLOW_LIVE_WEIGHT/
     # HFT_FLOW_LIVE_ENABLED directly above, for the same reason (a

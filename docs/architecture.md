@@ -7013,3 +7013,103 @@ deselected, 0 failed. `ruff check .` clean repo-wide both times.
 `vulture --min-confidence 80` clean both times. `python -c "import
 main"` succeeds both times. `bundle_history.json` re-validated as
 parseable JSON after the edit.
+
+## 71. News Sentiment Feed Hardening — Fetch Timeout + UTC Timestamp Consistency (2026-09-22)
+
+Two review-discovered fixes closed together, both hardening of code
+delivered in §69/§70: an unbounded-hang risk in the RSS fetch path,
+and a naive-vs-aware `datetime` inconsistency in `ml/extensions/`.
+Grouped into one phase per this repo's own "housekeeping batch"
+precedent (§70) — both are review-discovered latent bugs in existing
+code, not new features, and neither touches the other's files.
+
+### Item 1: `intelligence/news_sentiment_feed.py` unbounded fetch hang
+
+**Root cause:** `_fetch_one_source()` called `feedparser.parse(url)`
+directly. `feedparser.parse()` has no timeout of its own when handed
+a URL — a known limitation of the library — so an unresponsive feed
+would hang the call indefinitely. This job runs via
+`schedule.every(...).minutes.do(run_news_sentiment_job, components)`
+on main.py's single shared `schedule.run_pending()` loop — the same
+loop that runs `run_trading_cycle`, `monitor_open_trades`, and every
+other scheduled job. An unbounded hang here would have stalled live
+trading itself, not just left the sentiment cache stale as the
+module's own docstring claimed (that claim assumed the fetch was
+merely failure-tolerant, not that it was also time-bounded — it
+wasn't, until this fix).
+
+**Evidence this is a regression from an existing project convention,
+not a new gap:** `intelligence/market_intelligence_service.py`'s
+`FearGreedProvider.fetch()` — the only other place in the codebase
+that fetches an external feed synchronously — already uses
+`requests.get(url, timeout=5)`. `news_sentiment_feed.py` (§69) missed
+this convention.
+
+**Fix:** `_fetch_one_source()` now fetches raw bytes via
+`requests.get(url, timeout=settings.NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS)`
++ `response.raise_for_status()`, then hands `response.content` to
+`feedparser.parse()` instead of letting feedparser fetch the URL
+itself. New setting `NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS` (default
+10, same `_TIMEOUT_SECONDS` naming convention as
+`BUNDLE_GIT_TIMEOUT_SECONDS`) added to `config/settings.py` and
+`.env.example`. The single try/except around both calls preserves
+`_fetch_one_source()`'s existing "never raises" contract — a request
+exception, an HTTP error status, and a feedparser parse failure all
+land in the same `sources_failed` path as before. Module docstring
+corrected to state the fetch/read decoupling depends on the fetch
+being time-bounded, rather than implying it was unconditionally safe.
+
+### Item 2: naive `datetime.now()` in four `ml/extensions/` files
+
+**Root cause:** `ml/extensions/online/learner.py`,
+`ml/extensions/hpo/manager.py`, `ml/extensions/orchestrator.py`, and
+`ml/extensions/rl/adapter.py` all used naive `datetime.now()` for
+timestamp fields (`last_drift_time`, trial/bundle `timestamp`,
+`completed_at`). Every other timestamp-producing module in the repo
+(journal, telemetry, fee_backfill, and news_sentiment above) uses
+`datetime.now(timezone.utc)` — confirmed via a repo-wide grep that
+these 4 files were the only non-test exceptions. Latent rather than
+active: today these values only ever reach `.isoformat()` for
+logging/storage, never compared against an aware datetime. The risk
+is forward-looking — code that later compares one of these fields
+against an aware timestamp (the shape `NewsSentimentSnapshot.is_stale()`
+above already uses) would raise `TypeError: can't subtract
+offset-naive and offset-aware datetimes`; on a server not running in
+UTC, the naive value would also be silently wrong.
+
+**Fix:** all four files changed `from datetime import datetime` to
+`from datetime import datetime, timezone` and every
+`datetime.now()` call to `datetime.now(timezone.utc)`. No field
+names, formats, or call signatures changed — `.isoformat()` output
+simply gains a `+00:00` offset suffix. No existing test asserted on
+the naive form, so this is a pure additive fix.
+
+### Testing
+
+`tests/test_news_sentiment_feed.py`: existing 21 tests updated to
+mock `requests.get` (returning a fake response whose `.content` is
+the requested URL, re-decoded inside the `feedparser.parse` mock so
+every existing per-source differentiation test needed no logic
+changes) instead of mocking `feedparser.parse(url)` directly. 2 new
+tests added: `test_fetch_uses_configured_timeout` (regression test —
+asserts `requests.get` is actually called with
+`NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS`, proving the root cause is
+closed) and `test_http_error_status_returns_not_ok` (new
+`raise_for_status()` behavior). 23/23 passed.
+
+Full suite (against `main` @ `7d3dca6`, post-§70): 3189 passed, 45
+deselected, 0 failed from this change. 7 pre-existing failures
+verified unrelated by reproducing them identically against unmodified
+`main` before applying this phase's diff: 3 in
+`tests/test_dashboard_serving.py` (documented in §67's Correction —
+require `npm run build` in `dashboard_src/`, absent in this sandbox)
+and 4 in `tests/test_ml_extensions_integration.py` (`stable_baselines3`
+not installed — an optional dependency per the ML Extensions
+Integration Layer's own graceful-degradation design; the sandbox's
+"4 skipped" elsewhere in the suite, matching every prior phase's
+verification note, confirms this matches the project's own reference
+test environment, which also lacks this optional stack).
+`ruff check .` clean repo-wide. `vulture --min-confidence 80` clean on
+every changed file (whole-repo run surfaces only pre-existing,
+unrelated warnings in untouched test files). `python -c "import
+main"` succeeds.

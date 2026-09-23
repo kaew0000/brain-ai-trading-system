@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Union, Any, Literal
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # River imports
@@ -79,7 +79,7 @@ class ConceptDriftTracker:
 
         if self.adwin.drift_detected:
             self.drift_detected_count += 1
-            self.last_drift_time = datetime.now()
+            self.last_drift_time = datetime.now(timezone.utc)
             self.drift_history.append({
                 "time": self.last_drift_time.isoformat(),
                 "error": prediction_error,
@@ -238,7 +238,7 @@ class OnlineLearner:
 
         # Log learning history
         self.learning_history.append({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "true": y,
             "pred": y_pred,
             "error": error,
@@ -325,7 +325,7 @@ class OnlineLearner:
     def save(self, path: Optional[str] = None):
         """Save model to disk."""
         if path is None:
-            path = self.model_dir / f"online_model_{datetime.now():%Y%m%d_%H%M%S}.pkl"
+            path = self.model_dir / f"online_model_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.pkl"
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)

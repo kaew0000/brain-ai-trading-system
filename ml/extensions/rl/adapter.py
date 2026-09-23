@@ -21,7 +21,7 @@ import json
 import logging
 from typing import Optional, Dict, Any, Tuple
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import gymnasium as gym
@@ -348,7 +348,7 @@ class RLAdapter:
             "algorithm": self.algorithm_name,
             "total_timesteps": total_timesteps,
             "model_dir": str(self.model_dir),
-            "completed_at": datetime.now().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Save training metadata

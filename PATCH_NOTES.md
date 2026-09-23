@@ -1,125 +1,112 @@
-# PATCH NOTES — Test/Tooling Housekeeping Batch (V16 §70)
+# PATCH NOTES — News Sentiment Feed Hardening (V16 §71)
 
-Branch: `fix/test-housekeeping-batch` (rebuilt as
-`fix/test-housekeeping-batch-v2` on top of the new base — same diff,
-see Section-numbering note below)
-Original base: `main` @ `544493b` (merge of PR #103, commission/fee
-backfill). Re-verified base: `main` @ `9498a05` (merge of PR #104,
-news sentiment, §69) — see Section-numbering note.
+Branch: `fix/news-sentiment-timeout-and-tz-hardening`
+Base: `main` @ `7d3dca6` (merge of PR #105, test/tooling housekeeping
+batch, §70)
 
-## Section-numbering note
+Closes two review-discovered latent bugs found in a code-level review
+pass over the work delivered in §69 (News Sentiment) and the wider
+`ml/extensions/` package — not new features, hardening of existing
+code. Grouped into one phase per this repo's own "housekeeping batch"
+precedent (§70): both are review-found, both are small, neither
+touches the other's files. Full root-cause detail in
+`docs/architecture.md` §71; this file summarizes.
 
-Originally written and delivered as "§68" against `main` @ `544493b`.
-A second, independent branch (news sentiment) was created from the
-same base around the same time and also claimed "the section after
-§67" — a real collision, flagged in that phase's own docs at the time
-(`docs/architecture.md`'s §69 "Section-numbering note"). Kaew merged
-news sentiment first (PR #104), so this phase is renumbered §68→§70
-here rather than disturbing §69, which was already public on `main` by
-the time this merged. No content/behavior changes from the
-renumbering — purely this header and cross-references to it. Cherry-
-picked cleanly onto the new base (all four affected code files applied
-without conflict); only the four docs files needed conflict resolution
-for the renumbering itself.
-
-Closes the two remaining Low-severity items from the 2026-08-05
-project tracker's Bug Tracker / Risk Register that weren't already
-resolved by §65 (HMM contamination), §66/§67 (N+1 fix, per-agent
-attribution, fee capture).
-
-## Item 1: `tests/test_execution_factory.py` `os.environ` leak
+## Item 1: `intelligence/news_sentiment_feed.py` — unbounded fetch hang
 
 ### Root cause
 
-`TestExecutionFactory._factory(mode)` sets both
-`os.environ["EXECUTION_MODE"]` and `config.settings.settings.
-EXECUTION_MODE` directly with no teardown, then reloads
-`execution.execution_factory` to pick up the change. Flagged in
-docs/architecture.md's Hotfix 2026-08-05 section as "Follow-up found
-but not fixed here" — latent-only because this file's last test
-happens to call `_factory("paper")`, coincidentally leaving both back
-at `"paper"`. Order-dependent luck, not a guarantee — a future test
-addition or reorder could leak a non-default `EXECUTION_MODE` into
-later tests in the same process.
+`_fetch_one_source()` called `feedparser.parse(url)` directly.
+`feedparser.parse()` has no timeout of its own when given a URL — a
+known limitation of the library (see feedparser#76) — so an
+unresponsive RSS server would hang the call indefinitely. This job
+runs on main.py's single shared `schedule.run_pending()` loop, the
+same loop that runs `run_trading_cycle` — an unbounded hang here would
+have delayed live trading itself, not just left the sentiment cache
+stale as the module's own docstring implied.
+
+The project's own convention for this exact situation already existed
+and was missed: `intelligence/market_intelligence_service.py`'s
+`FearGreedProvider.fetch()` — the only other synchronous external-feed
+fetch in the codebase — already uses `requests.get(url, timeout=5)`.
 
 ### Fix
 
-Added an autouse, function-scoped `_restore_execution_mode` fixture on
-`TestExecutionFactory` that snapshots `os.environ.get("EXECUTION_MODE")`
-and `config.settings.EXECUTION_MODE` before each test and restores
-both after, regardless of outcome. No changes to any test body or to
-`_factory()` itself — purely additive.
+`_fetch_one_source()` now does:
 
-## Item 2: `bundle_history.json` phantom SHA (Phase 2E record)
+```python
+response = requests.get(url, timeout=settings.NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS)
+response.raise_for_status()
+parsed = feedparser.parse(response.content)
+```
+
+instead of `feedparser.parse(url)`. Both calls stay inside the
+existing single try/except, so the function's "never raises" contract
+is unchanged — a connection failure, an HTTP error status, and a
+feedparser parse failure all land in the same `sources_failed` path
+as before. New setting `NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS` (default
+`10`) added to `config/settings.py` and `.env.example`, same
+`_TIMEOUT_SECONDS` naming convention as the existing
+`BUNDLE_GIT_TIMEOUT_SECONDS`. Module docstring corrected: the
+fetch/read decoupling claim now correctly states it depends on the
+fetch being time-bounded, rather than implying it was unconditionally
+safe regardless of fetch duration.
+
+## Item 2: naive `datetime.now()` in four `ml/extensions/` files
 
 ### Root cause
 
-The tracker's Bundle History tab (2026-08-05 snapshot) flagged this
-record's `sha` (`d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683`) as not
-existing in the repository, with the real Phase 2E commit being a
-different hash. Re-confirmed against current `main`:
-`git cat-file -t d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683` still fails.
-The real commit — matching this record's branch, bundle_filename, and
-imported_at — is `2426966698d3954d97926f18e1b84588bab1de02`
-("feat(execution): merge Phase 2E Execution Wiring & Live
-Orchestrator", 2026-07-20 17:19:27 +0700), confirmed via `git log`.
+`ml/extensions/online/learner.py`, `ml/extensions/hpo/manager.py`,
+`ml/extensions/orchestrator.py`, and `ml/extensions/rl/adapter.py`
+all used naive `datetime.now()` for timestamp fields (`last_drift_time`,
+trial/bundle `timestamp`, `completed_at`). A repo-wide grep confirmed
+these 4 files are the only non-test code using naive `datetime.now()`
+— every other timestamp-producing module (journal, telemetry,
+fee_backfill, and news_sentiment above) already uses
+`datetime.now(timezone.utc)`. Latent rather than active today — these
+values currently only reach `.isoformat()` for logging/storage, never
+compared against another datetime. Forward risk: any future code that
+compares one of these fields against an aware timestamp (the shape
+`NewsSentimentSnapshot.is_stale()` above already uses) would raise
+`TypeError: can't subtract offset-naive and offset-aware datetimes`;
+on a host not running in UTC, the value would also be silently wrong.
 
 ### Fix
 
-Per this repo's own 2026-08-02 stabilization report policy —
-inferable-but-not-provable discrepancies get documented, not silently
-rewritten — the original `sha` is preserved. This correction is
-provable (not merely inferable), so it's recorded explicitly: two new
-optional fields on `tools/history.py`'s `BundleRecord` dataclass,
-`corrected_sha` and `correction_note`, both defaulting to `None`
-(backward compatible with every pre-existing record). Added as real
-dataclass fields rather than raw untyped JSON keys because
-`BundleHistory.save()` serializes via `dataclasses.asdict()` — an
-undeclared field patched only into the JSON would have been silently
-stripped the next time any tool run calls `save()`.
-`bundle_history.json`'s Phase 2E record now carries both fields.
+All four files: `from datetime import datetime` →
+`from datetime import datetime, timezone`; every `datetime.now()` →
+`datetime.now(timezone.utc)`. No field names, formats, or call
+signatures changed — `.isoformat()` output only gains a `+00:00`
+offset suffix. No existing test asserted on the naive form.
 
-## Tests
+## Testing
 
-`tests/test_bundle_manager_history.py` — 2 new tests:
-`test_corrected_sha_defaults_to_none`,
-`test_corrected_sha_round_trips_through_save_and_reload` (the latter
-directly proves the fix — that a correction survives a save/reload
-cycle rather than being silently dropped).
+`tests/test_news_sentiment_feed.py`: 21 existing tests migrated to
+mock `requests.get` (returning a fake response whose `.content` is the
+requested URL, re-decoded inside the `feedparser.parse` mock, so every
+existing per-source differentiation test needed no logic changes)
+instead of mocking `feedparser.parse(url)` directly. 2 new tests:
+`test_fetch_uses_configured_timeout` (regression test proving
+`requests.get` is actually called with
+`NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS` — the root-cause assertion) and
+`test_http_error_status_returns_not_ok` (new `raise_for_status()`
+path). **23/23 passed.**
 
-All pre-existing tests pass unchanged at both verification points.
+Full suite (against this branch, base `main` @ `7d3dca6`): **3189
+passed, 45 deselected, 0 failed** attributable to this change. 7
+pre-existing failures reproduced identically on unmodified `main`
+before this diff was applied (confirmed by stash/verify, not assumed):
+3 in `tests/test_dashboard_serving.py` (documented since §67 —
+requires `npm run build` in `dashboard_src/`, absent from this
+sandbox) and 4 in `tests/test_ml_extensions_integration.py`
+(`stable_baselines3` not installed in this sandbox — an optional,
+gracefully-degrading dependency of the ML Extensions layer; the
+suite's usual "4 skipped" elsewhere for `gymnasium`-gated tests
+confirms this sandbox matches the project's own reference test
+environment, which also lacks this optional stack).
 
-**Original verification** (`main` @ `544493b`, before §69 existed):
-`pytest` → 3143 passed (up from 3141 in §67), 4 skipped, 45
-deselected, 0 failures.
-
-**Re-verification at merge time** (`main` @ `9498a05`, after §69's 47
-tests landed): `pytest` → **3190 passed** (up from 3188 in §69 — same
-+2 delta as the original verification), 4 skipped, 45 deselected,
-**0 failures**.
-
-`ruff check . --exclude dashboard_src --exclude dashboard` → all
-checks passed, both times. `vulture . --exclude
-dashboard_src,dashboard,tests --min-confidence 80` → clean, both
-times. `python -c "import main"` → succeeds, both times.
-`python -c "import json; json.load(open('bundle_history.json'))"` →
-valid JSON.
-
-## Remaining items from the 2026-08-05 tracker
-
-With this batch (and §69, merged just before it), the trading-system-
-side backlog from that tracker is now **fully closed** — every item
-that required a code change has shipped. Two items remain, both
-explicitly out of scope for code changes:
-- Binance API 401 (-2015) / IP whitelist — external Binance account
-  config, not verifiable or fixable from this repo.
-- `fix/office-scene-real-assets` unmerged branch — World-track
-  frontend work, paused per Kaew's 2026-09-17 decision to deprioritize
-  World development.
-
-## Files changed
-
-`tests/test_execution_factory.py`, `bundle_history.json`,
-`tools/history.py`, `tests/test_bundle_manager_history.py`,
-`PATCH_NOTES.md`, `MIGRATION.md`, `CHANGELOG.md`,
-`docs/architecture.md` (§70, renumbered from §68).
+`ruff check .`: **clean, repo-wide.**
+`vulture . --min-confidence 80`: **clean on every changed file**
+(whole-repo run surfaces only pre-existing, unrelated warnings in
+untouched test files).
+`python -c "import main"`: **succeeds.**

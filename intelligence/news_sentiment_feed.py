@@ -12,9 +12,16 @@ A scheduled job (main.py's run_news_sentiment_job()) calls
 refresh_news_sentiment() on an interval; market_context_builder.py
 reads the cached result via get_news_sentiment_snapshot() when
 assembling each cycle's market_context. The fetch and the read are
-fully decoupled — a slow or failing RSS fetch can never block or delay
-a trading decision, only leave the cache stale (which is itself
-visible via the snapshot's `as_of`/`stale` fields).
+fully decoupled at the data level — a failing RSS fetch never poisons
+the cache, only leaves it stale (visible via the snapshot's
+`as_of`/`stale` fields). The fetch itself, however, runs on main.py's
+single shared `schedule.run_pending()` thread alongside every other
+job, including run_trading_cycle — so a *slow* fetch is not merely a
+stale-cache concern, it delays the live trading cycle too. This only
+holds in practice because the fetch is time-bounded (see
+NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS, V16 §71); before that fix,
+`feedparser.parse(url)`'s lack of a built-in timeout meant one
+unresponsive feed could hang this thread indefinitely.
 
 Sentiment method: VADER (Valence Aware Dictionary and sEntiment
 Reasoner) — a lexicon-based, offline sentiment analyzer. No API key,
@@ -126,11 +133,21 @@ def _fetch_one_source(name: str, url: str, analyzer, cutoff: datetime, max_artic
     `ok` is False on a fetch/parse failure (feedparser's own `bozo`
     flag, or any exception) — that source is simply skipped for this
     run, same as every RSS-consuming reference implementation checked
-    while designing this module."""
+    while designing this module.
+
+    Fetches the raw bytes via `requests.get(..., timeout=...)` first
+    and hands those to `feedparser.parse()`, rather than letting
+    feedparser fetch the URL itself — `feedparser.parse(url)` has no
+    timeout of its own (a known feedparser limitation) and would hang
+    this call indefinitely on an unresponsive feed (V16 §71 fix; see
+    NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS)."""
     import feedparser
+    import requests
 
     try:
-        parsed = feedparser.parse(url)
+        response = requests.get(url, timeout=settings.NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        parsed = feedparser.parse(response.content)
     except Exception as exc:
         logger.warning(f"news_sentiment: fetch failed for {name}: {exc}")
         return [], False

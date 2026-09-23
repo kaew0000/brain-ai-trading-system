@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from config.settings import settings
 from intelligence.news_sentiment_feed import (
     NewsSentimentSnapshot,
     SOURCES,
@@ -118,6 +119,33 @@ def _struct_time(dt: datetime):
     return dt.timetuple()
 
 
+class _FakeResponse:
+    """Stand-in for requests.Response — only `.content` and
+    `.raise_for_status()` are used by _fetch_one_source."""
+    def __init__(self, content: bytes = b"", status_ok: bool = True):
+        self.content = content
+        self._status_ok = status_ok
+
+    def raise_for_status(self):
+        if not self._status_ok:
+            import requests
+            raise requests.HTTPError("simulated HTTP error")
+
+
+def _mock_fetch(monkeypatch, parse_fn, *, status_ok: bool = True):
+    """Wires requests.get -> feedparser.parse the way _fetch_one_source
+    now calls them (V16 §71: fetch via requests with a timeout, then
+    hand the raw bytes to feedparser.parse() instead of letting
+    feedparser fetch the URL itself). `parse_fn(url) -> _FakeParsed`
+    keeps every existing test's per-source differentiation logic
+    unchanged — the url is threaded through as the fake response's
+    content and decoded back out before calling parse_fn."""
+    def _fake_get(url, timeout=None):
+        return _FakeResponse(url.encode(), status_ok=status_ok)
+    monkeypatch.setattr("requests.get", _fake_get)
+    monkeypatch.setattr("feedparser.parse", lambda content: parse_fn(content.decode()))
+
+
 class TestFetchOneSource:
 
     def test_scores_in_window_headlines(self, monkeypatch):
@@ -126,9 +154,7 @@ class TestFetchOneSource:
             _FakeEntry("Bitcoin surges past new high", _struct_time(now)),
             _FakeEntry("Market crash wipes out gains", _struct_time(now)),
         ]
-        monkeypatch.setattr(
-            "feedparser.parse", lambda url: _FakeParsed(entries)
-        )
+        _mock_fetch(monkeypatch, lambda url: _FakeParsed(entries))
         cutoff = now - timedelta(hours=6)
         scores, ok = _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=30)
         assert ok is True
@@ -141,14 +167,14 @@ class TestFetchOneSource:
             _FakeEntry("Bitcoin surges past new high", _struct_time(now)),
             _FakeEntry("Old rally news", _struct_time(old)),
         ]
-        monkeypatch.setattr("feedparser.parse", lambda url: _FakeParsed(entries))
+        _mock_fetch(monkeypatch, lambda url: _FakeParsed(entries))
         cutoff = now - timedelta(hours=6)
         scores, ok = _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=30)
         assert scores == [0.8]  # only the recent one
 
     def test_scores_headline_with_no_published_date_anyway(self, monkeypatch):
         entries = [_FakeEntry("Bitcoin surges", published_parsed=None)]
-        monkeypatch.setattr("feedparser.parse", lambda url: _FakeParsed(entries))
+        _mock_fetch(monkeypatch, lambda url: _FakeParsed(entries))
         cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
         scores, ok = _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=30)
         assert scores == [0.8]
@@ -156,14 +182,14 @@ class TestFetchOneSource:
     def test_respects_max_articles_cap(self, monkeypatch):
         now = datetime.now(timezone.utc)
         entries = [_FakeEntry(f"Headline {i}", _struct_time(now)) for i in range(10)]
-        monkeypatch.setattr("feedparser.parse", lambda url: _FakeParsed(entries))
+        _mock_fetch(monkeypatch, lambda url: _FakeParsed(entries))
         cutoff = now - timedelta(hours=6)
         scores, ok = _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=3)
         assert len(scores) == 3
 
     def test_bozo_feed_returns_not_ok(self, monkeypatch):
-        monkeypatch.setattr(
-            "feedparser.parse",
+        _mock_fetch(
+            monkeypatch,
             lambda url: _FakeParsed([], bozo=True, bozo_exception="malformed XML"),
         )
         cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
@@ -172,18 +198,50 @@ class TestFetchOneSource:
         assert ok is False
 
     def test_exception_during_fetch_returns_not_ok(self, monkeypatch):
-        def _raise(url):
+        """Simulates a network-level failure (connection refused, DNS
+        failure, etc.) — this now happens at requests.get(), which is
+        exactly the class of failure the V16 §71 timeout fix targets."""
+        def _raise(url, timeout=None):
             raise RuntimeError("connection refused")
-        monkeypatch.setattr("feedparser.parse", _raise)
+        monkeypatch.setattr("requests.get", _raise)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
         scores, ok = _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=30)
         assert scores == []
         assert ok is False
 
+    def test_http_error_status_returns_not_ok(self, monkeypatch):
+        """New in V16 §71: raise_for_status() means a 4xx/5xx response
+        is treated as a fetch failure, not handed to feedparser."""
+        _mock_fetch(monkeypatch, lambda url: _FakeParsed([]), status_ok=False)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        scores, ok = _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=30)
+        assert scores == []
+        assert ok is False
+
+    def test_fetch_uses_configured_timeout(self, monkeypatch):
+        """Regression test for the V16 §71 root cause: requests.get()
+        must be called with a timeout, not left to feedparser's own
+        no-timeout default fetch (the bug that could hang the shared
+        scheduler thread — see intelligence/news_sentiment_feed.py's
+        module docstring)."""
+        captured = {}
+
+        def _fake_get(url, timeout=None):
+            captured["timeout"] = timeout
+            return _FakeResponse(b"")
+        monkeypatch.setattr("requests.get", _fake_get)
+        monkeypatch.setattr("feedparser.parse", lambda content: _FakeParsed([]))
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=30)
+
+        assert captured["timeout"] == settings.NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS
+        assert captured["timeout"] is not None
+
     def test_entry_without_title_is_skipped(self, monkeypatch):
         class _NoTitle:
             published_parsed = None
-        monkeypatch.setattr("feedparser.parse", lambda url: _FakeParsed([_NoTitle()]))
+        _mock_fetch(monkeypatch, lambda url: _FakeParsed([_NoTitle()]))
         cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
         scores, ok = _fetch_one_source("test", "http://x", _FakeAnalyzer(), cutoff, max_articles=30)
         assert scores == []
@@ -215,7 +273,7 @@ class TestRefreshNewsSentiment:
                 return _FakeParsed([_FakeEntry("Market crash", _struct_time(now))])
             return _FakeParsed([])  # every other configured source: empty but ok
 
-        monkeypatch.setattr("feedparser.parse", _fake_parse)
+        _mock_fetch(monkeypatch, _fake_parse)
         monkeypatch.setattr(
             "vaderSentiment.vaderSentiment.SentimentIntensityAnalyzer", _FakeAnalyzer
         )
@@ -243,7 +301,7 @@ class TestRefreshNewsSentiment:
                 raise RuntimeError("simulated network failure")
             return _FakeParsed([_FakeEntry("Bitcoin rally continues", _struct_time(now))])
 
-        monkeypatch.setattr("feedparser.parse", _fake_parse)
+        _mock_fetch(monkeypatch, _fake_parse)
         monkeypatch.setattr(
             "vaderSentiment.vaderSentiment.SentimentIntensityAnalyzer", _FakeAnalyzer
         )
@@ -258,7 +316,7 @@ class TestRefreshNewsSentiment:
         monkeypatch.setattr("intelligence.news_sentiment_feed.settings.NEWS_SENTIMENT_ENABLED", True)
         monkeypatch.setattr("intelligence.news_sentiment_feed.settings.NEWS_SENTIMENT_LOOKBACK_HOURS", 6)
         monkeypatch.setattr("intelligence.news_sentiment_feed.settings.NEWS_SENTIMENT_MAX_ARTICLES_PER_SOURCE", 30)
-        monkeypatch.setattr("feedparser.parse", lambda url: _FakeParsed([]))
+        _mock_fetch(monkeypatch, lambda url: _FakeParsed([]))
         monkeypatch.setattr(
             "vaderSentiment.vaderSentiment.SentimentIntensityAnalyzer", _FakeAnalyzer
         )
