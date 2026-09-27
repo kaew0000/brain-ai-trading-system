@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## [Unreleased] — AI Self-Improvement Governance Phase 3 / G5: Recommendation Proposals (V16 §72)
+
+Wires `learning/`'s daily recommendation batch into the governance
+proposal pipeline (§58's `model_promotion` pattern, extended). Full
+detail in `docs/architecture.md` §72 — including the scope decision to
+**defer `agent_weight` governance** to G6 Tier 1 (`DYNAMIC_AGENT_WEIGHTS_ENABLED`
+is a continuous live-recomputed blend, not a discrete candidate a
+proposal can wrap; not an active gap today — defaults `False`).
+Branch: `feat/governance-phase3-recommendation-proposals`.
+
+### Fixed
+- `main.py::run_learning_recommendation_refresh()` (daily @ 02:30) no
+  longer writes generated recommendations straight into the live-read
+  `learning_recommendations` state unattended — same unattended-batch
+  shape §58 fixed for `model_promotion`, now also closed for this
+  producer.
+
+### Added
+- `governance/recommendation_proposals.py` — `gate_recommendations()`,
+  the proposal producer + live-eligibility reader for `learning/`
+  recommendations.
+- `config/settings.py` — new `RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL`
+  (default `True`).
+- `governance/apply_proposal.py` — `proposal_type == "recommendation_param"`
+  now has a defined apply behavior (approved → applied, no other side
+  effect).
+- `api/app.py` — approve endpoint recognizes `recommendation_param` as
+  a type with a defined apply behavior.
+- `tests/test_governance_phase3_recommendations.py` — 16 new tests.
+
+### Changed
+- `governance/__init__.py` — module docstring brought current (was
+  still describing Phase 2 as undelivered).
+- `tests/test_governance_phase2.py` — one test's error-message
+  assertion updated to match `apply_proposal()`'s now-accurate message
+  (the behavior it tests — an unsupported type still raises — is
+  unchanged).
+
 ## [Unreleased] — News Sentiment Feed Hardening (V16 §71)
 
 Two review-discovered fixes closed together (see `docs/architecture.md`

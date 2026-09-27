@@ -2016,16 +2016,21 @@ async def governance_list_proposals(
 
 @app.post("/api/governance/proposals/approve")
 async def governance_approve_proposal(request: Request, body: dict):
-    """Approve a pending proposal and, for proposal_type=="model_promotion"
-    (the only type with a defined apply behavior in Phase 2 -- see
-    governance/apply_proposal.py), immediately apply it: promote the
-    model and reload MLAdvisor if it's the meta_label model. If apply
-    fails, the proposal is left at status="apply_failed" (not silently
-    "approved" forever) and this endpoint returns 500 with the failure
-    reason -- the approval itself did happen and is not rolled back.
+    """Approve a pending proposal and, for proposal_type in
+    ("model_promotion", "recommendation_param") -- the only types with a
+    defined apply behavior as of Phase 3, V16 §72 -- immediately apply
+    it: for model_promotion, promote the model and reload MLAdvisor if
+    it's the meta_label model; for recommendation_param, mark it live-
+    eligible (governance/apply_proposal.py's _apply_recommendation_param()
+    -- no disk/DB action, the status transition itself is the effect).
+    If apply fails, the proposal is left at status="apply_failed" (not
+    silently "approved" forever) and this endpoint returns 500 with the
+    failure reason -- the approval itself did happen and is not rolled
+    back.
 
     Body: { "proposal_id": 42 }. OPERATOR role required -- this makes a
-    new model start driving real trading decisions with real money.
+    new model, or a learning recommendation, start driving real trading
+    decisions with real money.
     """
     proposal_id = (body or {}).get("proposal_id")
     if not isinstance(proposal_id, int):
@@ -2048,11 +2053,11 @@ async def governance_approve_proposal(request: Request, body: dict):
         store.set_status(proposal_id, "approved")
         logger.critical(f"GOVERNANCE: proposal #{proposal_id} approved by operator={operator}")
 
-        if proposal.proposal_type != "model_promotion":
+        if proposal.proposal_type not in ("model_promotion", "recommendation_param"):
             return _ok({
                 "approved": True, "applied": False,
                 "proposal": store.get(proposal_id).to_row() | {"id": proposal_id},
-                "note": f"no defined apply behavior for {proposal.proposal_type!r} yet (Phase 2 scope: model_promotion only)",
+                "note": f"no defined apply behavior for {proposal.proposal_type!r} yet (Phase 3 scope: model_promotion, recommendation_param only)",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 

@@ -10,9 +10,21 @@ until a human explicitly approves or rejects it; nothing in this codebase
 calls ProposalStore.set_status(..., 'approved') automatically.
 
 Phase 1 scope (this package, as delivered): the proposal record + store +
-review agent only. Wiring an actual proposal *producer* — e.g.
-ml/learning_mode.py's nightly retrain creating a 'model_promotion' proposal
-instead of calling ModelRegistry.promote() directly — is Phase 2 and not
-part of this delivery; see PATCH_NOTES.md.
+review agent only, no producer wired in yet.
+
+Phase 2 (§58, 2026-09-08): wired the first real proposal producer —
+ml/learning_mode.py's nightly retrain creates a "model_promotion" proposal
+instead of calling ModelRegistry.promote() directly (gated behind
+MODEL_PROMOTION_REQUIRES_APPROVAL) — plus apply_proposal.py (the one place
+an approved proposal takes effect) and the three /api/governance/proposals
+endpoints.
+
+Phase 3 / G5 (§72): a second proposal producer,
+recommendation_proposals.py — gates learning/'s daily recommendation batch
+(main.py::run_learning_recommendation_refresh()) behind the same
+propose/review/approve pipeline (RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL),
+extending apply_proposal.py accordingly. agent_weight, strategy_selection,
+and logic_change proposal types remain unwired — see docs/architecture.md
+§72's own scope note for why agent_weight specifically was deferred.
 """
 from __future__ import annotations

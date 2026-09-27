@@ -217,11 +217,26 @@ class Settings(BaseSettings):
     # reachable from it — see agents/ceo_agent.py and
     # learning/application/recommendation_advisor.py.
     RECOMMENDATION_APPLICATION_ENABLED: bool = Field(default=False, alias="RECOMMENDATION_APPLICATION_ENABLED")
+    # V16 §72 (Phase 3 / G5): when RECOMMENDATION_APPLICATION_ENABLED is
+    # True, gate each recommendation behind the same
+    # governance/ propose -> human-review -> approve pipeline
+    # model_promotion already uses (§58, Phase 2) before it becomes
+    # eligible to influence a live decision — mirrors
+    # MODEL_PROMOTION_REQUIRES_APPROVAL's name/default exactly. False
+    # preserves the pre-§72 behavior byte-for-byte: every recommendation
+    # is immediately eligible, no proposal created at all. See
+    # governance/recommendation_proposals.py.
+    RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL: bool = Field(
+        default=True, alias="RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL"
+    )
     # How long a generated Recommendation is considered current before
     # RecommendationValidator marks it "expired". Recommendations are
-    # regenerated from a live dataset each learning-report run (there is no
-    # scheduled cadence today), so this is a safety ceiling against a stale
-    # snapshot being reused long after the market conditions it described.
+    # regenerated daily by main.py's run_learning_recommendation_refresh()
+    # job (schedule.every().day.at("02:30"), V16 Phase 4C Step 4), so this
+    # is also a safety ceiling against a stale snapshot being reused long
+    # after the market conditions it described — and, since §72, the same
+    # window a recommendation's governance approval stays valid for (see
+    # governance/recommendation_proposals.py's own docstring).
     RECOMMENDATION_TTL_HOURS: float = Field(default=24.0, alias="RECOMMENDATION_TTL_HOURS")
     # Minimum `based_on.metric.sample_size` (or `.length` for streak
     # patterns) before a recommendation is trusted enough to be applied —

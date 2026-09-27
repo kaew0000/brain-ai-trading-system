@@ -1,112 +1,98 @@
-# PATCH NOTES — News Sentiment Feed Hardening (V16 §71)
+# PATCH NOTES — AI Self-Improvement Governance Phase 3 / G5: Recommendation Proposals (V16 §72)
 
-Branch: `fix/news-sentiment-timeout-and-tz-hardening`
-Base: `main` @ `7d3dca6` (merge of PR #105, test/tooling housekeeping
-batch, §70)
+Branch: `feat/governance-phase3-recommendation-proposals`
+Base: `main` @ `2d19ffd` (merge of PR #106, §71 news sentiment hardening)
 
-Closes two review-discovered latent bugs found in a code-level review
-pass over the work delivered in §69 (News Sentiment) and the wider
-`ml/extensions/` package — not new features, hardening of existing
-code. Grouped into one phase per this repo's own "housekeeping batch"
-precedent (§70): both are review-found, both are small, neither
-touches the other's files. Full root-cause detail in
-`docs/architecture.md` §71; this file summarizes.
+Wires the second real proposal producer into the AI Self-Improvement
+Governance Layer (`docs/architecture.md` §48's roadmap): `learning/`'s
+daily recommendation batch now goes through the same propose → review
+→ human-approve pipeline `model_promotion` has used since §58 (Phase
+2), instead of becoming live-eligible unattended. Full root-cause and
+design detail in `docs/architecture.md` §72; this file summarizes.
 
-## Item 1: `intelligence/news_sentiment_feed.py` — unbounded fetch hang
+## Root cause
 
-### Root cause
+`main.py::run_learning_recommendation_refresh()` runs daily at 02:30
+(same cron shape as `run_nightly_retrain()`). It wrote every generated
+`Recommendation` straight into the in-memory `learning_recommendations`
+state, which the live, CEO-gated decision path reads every cycle and
+uses to nudge decision confidence — zero human checkpoint. Same
+unattended-nightly-batch shape §58 (G2) already closed for
+`model_promotion`, just a different producer that hadn't been wired
+yet.
 
-`_fetch_one_source()` called `feedparser.parse(url)` directly.
-`feedparser.parse()` has no timeout of its own when given a URL — a
-known limitation of the library (see feedparser#76) — so an
-unresponsive RSS server would hang the call indefinitely. This job
-runs on main.py's single shared `schedule.run_pending()` loop, the
-same loop that runs `run_trading_cycle` — an unbounded hang here would
-have delayed live trading itself, not just left the sentiment cache
-stale as the module's own docstring implied.
+## Scope decision: `agent_weight` deferred (not built this phase)
 
-The project's own convention for this exact situation already existed
-and was missed: `intelligence/market_intelligence_service.py`'s
-`FearGreedProvider.fetch()` — the only other synchronous external-feed
-fetch in the codebase — already uses `requests.get(url, timeout=5)`.
+§48's original roadmap scoped G5 as covering both
+`RECOMMENDATION_APPLICATION_ENABLED` and `DYNAMIC_AGENT_WEIGHTS_ENABLED`.
+Investigated before writing any code: `RECOMMENDATION_APPLICATION_ENABLED`'s
+producer is a discrete daily batch (clean fit for a proposal — this
+phase). `DYNAMIC_AGENT_WEIGHTS_ENABLED` is a continuous, live-recomputed
+blend re-derived every decision cycle (~5 min TTL) with no discrete
+candidate value anywhere to wrap in a proposal — already bounded
+(0.5×–1.5×) and off by default (not an active live-trading gap).
+Discussed three concrete designs with the project owner; decided to
+defer entirely and fold into G6 Tier 1 (`externalize+tune
+ceo_agent.WEIGHTS`), which already plans to move the static base into
+config — doing that refactor once, there, avoids doing it twice.
 
-### Fix
+## What changed
 
-`_fetch_one_source()` now does:
-
-```python
-response = requests.get(url, timeout=settings.NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS)
-response.raise_for_status()
-parsed = feedparser.parse(response.content)
-```
-
-instead of `feedparser.parse(url)`. Both calls stay inside the
-existing single try/except, so the function's "never raises" contract
-is unchanged — a connection failure, an HTTP error status, and a
-feedparser parse failure all land in the same `sources_failed` path
-as before. New setting `NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS` (default
-`10`) added to `config/settings.py` and `.env.example`, same
-`_TIMEOUT_SECONDS` naming convention as the existing
-`BUNDLE_GIT_TIMEOUT_SECONDS`. Module docstring corrected: the
-fetch/read decoupling claim now correctly states it depends on the
-fetch being time-bounded, rather than implying it was unconditionally
-safe regardless of fetch duration.
-
-## Item 2: naive `datetime.now()` in four `ml/extensions/` files
-
-### Root cause
-
-`ml/extensions/online/learner.py`, `ml/extensions/hpo/manager.py`,
-`ml/extensions/orchestrator.py`, and `ml/extensions/rl/adapter.py`
-all used naive `datetime.now()` for timestamp fields (`last_drift_time`,
-trial/bundle `timestamp`, `completed_at`). A repo-wide grep confirmed
-these 4 files are the only non-test code using naive `datetime.now()`
-— every other timestamp-producing module (journal, telemetry,
-fee_backfill, and news_sentiment above) already uses
-`datetime.now(timezone.utc)`. Latent rather than active today — these
-values currently only reach `.isoformat()` for logging/storage, never
-compared against another datetime. Forward risk: any future code that
-compares one of these fields against an aware timestamp (the shape
-`NewsSentimentSnapshot.is_stale()` above already uses) would raise
-`TypeError: can't subtract offset-naive and offset-aware datetimes`;
-on a host not running in UTC, the value would also be silently wrong.
-
-### Fix
-
-All four files: `from datetime import datetime` →
-`from datetime import datetime, timezone`; every `datetime.now()` →
-`datetime.now(timezone.utc)`. No field names, formats, or call
-signatures changed — `.isoformat()` output only gains a `+00:00`
-offset suffix. No existing test asserted on the naive form.
+- **`config/settings.py`** — new `RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL`
+  (default `True`), naming/default pattern matches
+  `MODEL_PROMOTION_REQUIRES_APPROVAL`. Also corrected a stale
+  `RECOMMENDATION_TTL_HOURS` comment claiming no scheduled cadence
+  exists — one has existed (daily @ 02:30) since Phase 4C Step 4.
+- **`governance/recommendation_proposals.py`** (new) —
+  `gate_recommendations()`: one proposal per `Recommendation`, keyed
+  by its own stable deterministic `id` (confirmed time-independent —
+  a hash of category + based_on fields — before relying on it for
+  dedup). A recommendation's governance approval has the *same*
+  lifetime as the recommendation's own TTL, deliberately — a
+  still-recurring pattern needs re-approval every refresh cycle rather
+  than one approval standing in forever. `RECOMMENDATION_TTL_HOURS` is
+  the lever to widen that window if unwanted.
+- **`governance/apply_proposal.py`** — extended for
+  `proposal_type == "recommendation_param"`: approved → applied, no
+  other side effect (the proposal row's own status is the
+  live-eligibility signal `gate_recommendations()` reads next cycle —
+  unlike `model_promotion`, there's no separate disk/DB state to
+  mutate). `agent_weight`/`strategy_selection`/`logic_change` still
+  raise, unchanged.
+- **`api/app.py`** — approve endpoint's defined-behavior type set
+  extended to include `recommendation_param`. List/reject already
+  generic, untouched.
+- **`main.py`** — `run_learning_recommendation_refresh()` now filters
+  through `gate_recommendations()` before writing state. Flag-off
+  behavior verified byte-identical to pre-§72.
+- **`governance/__init__.py`** — docstring brought current (documents
+  §58 and §72 as delivered; had gone stale after §58 too).
+- **`agents/update_review_agent.py`** — no changes; already generically
+  handles any non-`model_promotion` type as unscored, confirmed by
+  reading the file first, not assumed.
 
 ## Testing
 
-`tests/test_news_sentiment_feed.py`: 21 existing tests migrated to
-mock `requests.get` (returning a fake response whose `.content` is the
-requested URL, re-decoded inside the `feedparser.parse` mock, so every
-existing per-source differentiation test needed no logic changes)
-instead of mocking `feedparser.parse(url)` directly. 2 new tests:
-`test_fetch_uses_configured_timeout` (regression test proving
-`requests.get` is actually called with
-`NEWS_SENTIMENT_FETCH_TIMEOUT_SECONDS` — the root-cause assertion) and
-`test_http_error_status_returns_not_ok` (new `raise_for_status()`
-path). **23/23 passed.**
+`tests/test_governance_phase3_recommendations.py` (new, 16 tests):
+producer dedup/eligibility/expiry/fault-isolation, apply-behavior for
+the new type, API approve/reject, and `main.py` wiring including a
+byte-identical flag-off check. One pre-existing test in
+`tests/test_governance_phase2.py` had its error-message assertion
+updated to match `apply_proposal()`'s now-accurate message (the
+behavior it actually tests — an unsupported type still raises — is
+unchanged). Five other pre-existing test files on the same code paths
+read and re-run to confirm compatibility, not just re-run blind:
+`test_recommendations_api.py`, `test_recommendation_dataset_row_count_wiring.py`,
+`test_ceo_live_recommendation_wiring.py`, `test_recommendation_service.py`,
+`test_recommendation_explanation_persistence.py` — all pass unmodified.
 
-Full suite (against this branch, base `main` @ `7d3dca6`): **3189
-passed, 45 deselected, 0 failed** attributable to this change. 7
-pre-existing failures reproduced identically on unmodified `main`
-before this diff was applied (confirmed by stash/verify, not assumed):
-3 in `tests/test_dashboard_serving.py` (documented since §67 —
-requires `npm run build` in `dashboard_src/`, absent from this
-sandbox) and 4 in `tests/test_ml_extensions_integration.py`
-(`stable_baselines3` not installed in this sandbox — an optional,
-gracefully-degrading dependency of the ML Extensions layer; the
-suite's usual "4 skipped" elsewhere for `gymnasium`-gated tests
-confirms this sandbox matches the project's own reference test
-environment, which also lacks this optional stack).
+Full suite: **3205 passed** (+16 over the §71 baseline of 3189, exactly
+this phase's new tests), **45 deselected, 0 failed** attributable to
+this change. Same 7 pre-existing, unrelated failures as §71 (3
+dashboard-build, 4 missing-optional-`stable_baselines3`).
 
 `ruff check .`: **clean, repo-wide.**
-`vulture . --min-confidence 80`: **clean on every changed file**
-(whole-repo run surfaces only pre-existing, unrelated warnings in
-untouched test files).
+`vulture . --min-confidence 80`: **clean on every changed/new file**
+(2 pre-existing findings in untouched lines of `test_governance_phase2.py`,
+confirmed identical on unmodified `main`).
 `python -c "import main"`: **succeeds.**
