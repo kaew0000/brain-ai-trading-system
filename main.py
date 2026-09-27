@@ -1835,6 +1835,16 @@ def run_learning_recommendation_refresh(sys: dict) -> None:
     learning/learning_report.py::LearningReportGenerator unchanged, and
     the existing api/app.py::set_state() in-memory slot — no new state
     mechanism, no new schedule library, no new file writes.
+
+    V16 §72 (Phase 3 / G5): the recommendations this job produces no
+    longer go straight into the live-read "learning_recommendations"
+    state unattended — governance/recommendation_proposals.py's
+    gate_recommendations() sits in between, mirroring
+    _register_and_gate_promotion()'s (§58) register-then-gate shape.
+    settings.RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL=False preserves
+    the pre-§72 behavior exactly (every recommendation immediately
+    eligible); True (the default) requires human approval first — see
+    that module's own docstring for the full design.
     """
     if not settings.RECOMMENDATION_APPLICATION_ENABLED:
         logger.debug("Learning recommendation refresh skipped — "
@@ -1842,13 +1852,15 @@ def run_learning_recommendation_refresh(sys: dict) -> None:
         return
     try:
         from learning.learning_report import LearningReportGenerator
+        from governance.recommendation_proposals import gate_recommendations
 
         jrn = sys["journal_v2"]
         bundle = LearningReportGenerator(jrn).generate()
+        eligible = gate_recommendations(bundle.recommendations)
 
         try:
             import api.app as _api_module
-            _api_module.set_state("learning_recommendations", bundle.recommendations)
+            _api_module.set_state("learning_recommendations", eligible)
             _api_module.set_state("learning_dataset_row_count", bundle.dataset.row_count)
         except Exception as exc:
             logger.debug(f"Dashboard state update skipped for learning recommendations: {exc}")
@@ -1856,7 +1868,8 @@ def run_learning_recommendation_refresh(sys: dict) -> None:
         logger.info(
             f"Learning recommendation refresh complete | "
             f"rows={bundle.dataset.row_count} "
-            f"recommendations={len(bundle.recommendations)}"
+            f"recommendations={len(bundle.recommendations)} "
+            f"eligible={len(eligible)}"
         )
     except Exception as exc:
         logger.error(f"run_learning_recommendation_refresh error: {exc}", exc_info=True)

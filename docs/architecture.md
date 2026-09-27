@@ -7113,3 +7113,168 @@ test environment, which also lacks this optional stack).
 every changed file (whole-repo run surfaces only pre-existing,
 unrelated warnings in untouched test files). `python -c "import
 main"` succeeds.
+
+## 72. AI Self-Improvement Governance — Phase 3 / G5: Recommendation Proposals (2026-09-27)
+
+Wires the second real proposal producer into the governance layer §48
+scoped as "Phase 3 (G5)": `learning/`'s daily recommendation batch now
+goes through the same propose → review → human-approve pipeline
+`model_promotion` has used since §58 (Phase 2), instead of becoming
+live-eligible unattended. `agent_weight` — the other half of G5 as
+originally scoped — is explicitly **deferred**; see "Scope decision:
+agent_weight deferred" below for why.
+
+### Root cause
+
+`main.py::run_learning_recommendation_refresh()` runs daily at 02:30
+(same cron shape as `run_nightly_retrain()`). Before this phase, it
+wrote every `Recommendation` `LearningReportGenerator.generate()`
+produced straight into the in-memory `"learning_recommendations"`
+state — no human checkpoint at all. `agents/multi_symbol_adapter.py`'s
+live, CEO-gated decision path reads that state every cycle (when
+`RECOMMENDATION_APPLICATION_ENABLED=True`) and nudges each decision's
+confidence accordingly (`learning/application/recommendation_advisor.py`,
+bounded by `RECOMMENDATION_MAX_CONFIDENCE_ADJUSTMENT` /
+`RECOMMENDATION_MAX_APPLIED_PER_DECISION` already — this phase adds a
+*human* gate on top of those existing *algorithmic* bounds, it doesn't
+replace them). This is the exact same unattended-nightly-batch shape
+§58 (G2) already fixed for `model_promotion`, just a different
+producer that had not yet been wired.
+
+### Scope decision: agent_weight deferred
+
+The other flag named in §48's original G5 scope note,
+`DYNAMIC_AGENT_WEIGHTS_ENABLED`, does **not** map onto the same
+propose/approve pattern the way `RECOMMENDATION_APPLICATION_ENABLED`
+does, and implementing it as literally scoped would not have delivered
+real governance value. Investigated in this session before any code
+was written (per this repo's own "several rounds of clarifying
+questions before Phase 1 began" precedent):
+
+- `RECOMMENDATION_APPLICATION_ENABLED`'s producer
+  (`run_learning_recommendation_refresh()`) is a **discrete daily
+  batch** — `generated_at` is "stamped once per generate() batch"
+  (`learning/recommendation_engine.py`) — exactly the same shape as
+  `run_nightly_retrain()`'s discrete candidate-model-per-run. A
+  discrete candidate is something a proposal can meaningfully wrap.
+- `DYNAMIC_AGENT_WEIGHTS_ENABLED`'s mechanism
+  (`agents/ceo_agent.py::_effective_weights()`) is a **continuous,
+  live-recomputed blend** — re-derived from win-rate data every
+  decision cycle (TTL-cached at `DYNAMIC_WEIGHT_REFRESH_SECONDS`,
+  default 300s = 5 minutes), already bounded (0.5×–1.5× multiplier,
+  renormalized) and already exception-safe (falls back to static
+  `WEIGHTS` on any error). There is no discrete "candidate value"
+  artifact anywhere in this mechanism for a proposal to wrap — nothing
+  is ever computed once and held for approval before taking effect.
+
+Three concrete designs exist for "agent_weight governance" and were
+weighed with the project owner before proceeding:
+1. **Gate only the static base `WEIGHTS` dict** (move it into
+   config, require approval to change it) — the dynamic blend still
+   recomputes from that base every cycle regardless, so this governs
+   the *starting point*, not the value actually used to trade.
+2. **Redesign the dynamic blend into a periodic (e.g. daily) frozen
+   snapshot**, proposed/approved the same way — the only design that
+   would govern the value actually used live, but changes the
+   mechanism's responsiveness from ~5-minute to daily and is a real
+   behavior change to how live trading already works, not just an
+   added checkpoint.
+3. **Defer entirely, fold into G6 Tier 1** — G6 Tier 1 (§48's own
+   roadmap) already plans "externalize+tune ceo_agent.WEIGHTS" into
+   config; doing that refactor once, as part of that phase, avoids
+   doing it twice (once here, once for G6 Tier 1).
+
+**Decision: option 3.** `DYNAMIC_AGENT_WEIGHTS_ENABLED` defaults to
+`False` and is not documented in `.env.example` (confirmed via a repo
+grep before deciding — this is not an active live-trading gap the way
+`model_promotion`'s unattended promotion was in §58), so there is no
+urgency forcing options 1 or 2 now. Revisit when G6 Tier 1 is scoped.
+
+### What changed
+
+- `config/settings.py`, new `RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL`
+  (default `True`), same name/default pattern as
+  `MODEL_PROMOTION_REQUIRES_APPROVAL`. Also corrected a stale comment
+  on `RECOMMENDATION_TTL_HOURS` claiming "no scheduled cadence today"
+  — there has been one (daily @ 02:30) since Phase 4C Step 4, predating
+  this phase; drive-by fix, not otherwise part of this diff.
+- `governance/recommendation_proposals.py` (new) — `gate_recommendations()`,
+  the proposal producer + live-eligibility reader. One proposal per
+  `Recommendation`, keyed by its own stable deterministic `id`
+  (`learning/recommendation_engine.py::_stable_recommendation_id()` —
+  a hash of category + based_on.kind + based_on.subject, confirmed
+  time-independent before relying on it for dedup). Design note in the
+  module's own docstring: a recommendation's governance approval has
+  the *same* lifetime as the recommendation's own TTL (not longer) —
+  deliberate, so a still-recurring pattern requires re-approval every
+  refresh cycle rather than one approval silently standing in forever;
+  `RECOMMENDATION_TTL_HOURS` is the lever if that's unwanted.
+- `governance/apply_proposal.py` — extended to handle
+  `proposal_type == "recommendation_param"`: transitions
+  approved → applied with no other side effect (no disk/DB mutation
+  the way `model_promotion`'s apply has — the proposal row's own
+  status *is* the live-eligibility signal that
+  `gate_recommendations()` reads on the next cycle). `agent_weight`,
+  `strategy_selection`, `logic_change` still raise `ProposalApplyError`
+  — unchanged, still no defined behavior for those three.
+- `api/app.py` — the approve endpoint's "does this type have a defined
+  apply behavior" check extended from `{"model_promotion"}` to
+  `{"model_promotion", "recommendation_param"}`. List/reject endpoints
+  were already fully generic across proposal_type — no change needed.
+- `main.py::run_learning_recommendation_refresh()` — now calls
+  `gate_recommendations(bundle.recommendations)` and stores the
+  returned (filtered) list instead of the raw batch.
+  `RECOMMENDATION_PROPOSALS_REQUIRE_APPROVAL=False` preserves the
+  pre-§72 behavior byte-for-byte (verified by test, see below).
+- `governance/__init__.py` — module docstring updated: documents
+  Phase 2 (§58) and this Phase 3 (§72) as delivered, matching the
+  file's own existing "keep this docstring current" convention (it
+  had gone stale after §58 too — still said "Phase 2 ... not part of
+  this delivery" until this pass).
+- `agents/update_review_agent.py` — **no changes**. Already generically
+  scores only `model_promotion` and returns an honest unscored result
+  for every other type (`recommendation_param` included) — confirmed
+  by reading the file before writing any code, not assumed.
+
+### Testing
+
+`tests/test_governance_phase3_recommendations.py` (new, 16 tests):
+`gate_recommendations()` — flag off/on, fresh proposal creation,
+dedup against pending, eligibility once approved, exclusion once
+rejected, re-proposal after expiry, per-item fault isolation on a
+simulated store failure, multi-recommendation independence, confirms
+new proposals stay unscored. `apply_proposal()`'s new branch — rejects
+non-approved, applies approved, not-found still raises. API approve/
+reject for `recommendation_param`. `main.py` wiring — only approved
+recommendations reach state; flag-off path is byte-identical to
+pre-§72.
+
+One pre-existing test in `tests/test_governance_phase2.py`
+(`test_apply_rejects_non_model_promotion_type`) asserted on the exact
+substring `"model_promotion only"` in `apply_proposal()`'s error
+message for unsupported types — legitimately stale once that message
+correctly grew to name `recommendation_param` as supported too.
+Updated the match string; the test's actual assertion (an unsupported
+type like `agent_weight` still raises) is unchanged and still passes.
+
+Five other pre-existing test files exercising the same code paths —
+`test_recommendations_api.py`, `test_recommendation_dataset_row_count_wiring.py`,
+`test_ceo_live_recommendation_wiring.py` (`TestLearningRecommendationRefreshJob`
+specifically, the closest existing coverage of
+`run_learning_recommendation_refresh()` itself),
+`test_recommendation_service.py`,
+`test_recommendation_explanation_persistence.py` — all still pass
+unmodified; read each one before running to confirm they either
+exercise the flag-off path or feed an empty trade history (hence
+empty recommendations, trivially gated) rather than relying on the
+old unattended-write behavior.
+
+Full suite: 3205 passed (up from 3189 pre-phase, a +16 delta — exactly
+this phase's new test file), 45 deselected, 0 failed from this change.
+Same 7 pre-existing failures as §71 (3 dashboard-build,
+4 missing-optional-`stable_baselines3`), reproduced unrelated to this
+diff by the same method §71 used. `ruff check .` clean repo-wide.
+`vulture --min-confidence 80` clean on every changed/new file (2
+pre-existing, unrelated findings in `test_governance_phase2.py` at
+lines untouched by this diff, confirmed identical on unmodified
+`main`). `python -c "import main"` succeeds.

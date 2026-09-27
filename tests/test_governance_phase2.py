@@ -203,13 +203,20 @@ class TestApplyProposal:
         assert store.get(pid).status == "pending"   # unchanged
 
     def test_apply_rejects_non_model_promotion_type(self, store, reg):
+        """agent_weight specifically — still unwired as of V16 §72
+        (Phase 3 deferred it to G6 Tier 1, see docs/architecture.md
+        §72's scope note). recommendation_param gained a defined apply
+        behavior in §72; this test's job is to confirm a type that
+        still has none (agent_weight) still raises, not to pin the
+        exact message — see test_governance_phase3_recommendations.py
+        for recommendation_param's own apply coverage."""
         proposal = UpdateProposal(
             proposal_type="agent_weight", target="ceo_agent.WEIGHTS.smc",
             before={}, after={}, rationale="test", generated_by="test",
         )
         pid = store.create(proposal)
         store.set_status(pid, "approved")
-        with pytest.raises(ProposalApplyError, match="model_promotion only"):
+        with pytest.raises(ProposalApplyError, match="has no defined behavior"):
             apply_proposal(pid)
         # Left at 'approved', not silently marked applied or failed.
         assert store.get(pid).status == "approved"

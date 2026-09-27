@@ -17,10 +17,16 @@ reason — it's the only proposal type with a concrete "what does
 approving this actually DO" answer today (see that module's docstring).
 Every other proposal_type raises rather than silently no-op'ing, so a
 caller can never mistake "nothing happened" for "applied".
+
+V16 §72 (Phase 3 / G5) extends this to proposal_type ==
+"recommendation_param" too — see _apply_recommendation_param() below
+for why that one case needs no real side-effecting action the way
+model_promotion's does. agent_weight, strategy_selection, and
+logic_change still raise; none has a defined apply behavior yet.
 """
 from __future__ import annotations
 
-from governance.proposal_store import get_proposal_store
+from governance.proposal_store import ProposalStore, get_proposal_store
 from governance.update_proposal import UpdateProposal
 from utils.logger import get_logger
 
@@ -29,6 +35,21 @@ logger = get_logger(__name__)
 
 class ProposalApplyError(Exception):
     pass
+
+
+def _apply_recommendation_param(store: ProposalStore, proposal: UpdateProposal, proposal_id: int) -> UpdateProposal:
+    """"Applying" a recommendation_param proposal has no disk/DB/reload
+    side effect the way promoting a model does — the row itself IS the
+    live-eligibility signal. governance/recommendation_proposals.py's
+    gate_recommendations() (called every run_learning_recommendation_refresh()
+    cycle, not from here) queries for status in ("approved", "applied")
+    directly; this function's only job is the status transition itself,
+    kept as a real step (not skipped by the API layer) so the status
+    lifecycle stays uniform across every proposal_type — "applied"
+    means "now in effect" everywhere, never special-cased per type."""
+    store.set_status(proposal_id, "applied")
+    logger.critical(f"GOVERNANCE: proposal #{proposal_id} (recommendation_param) applied -- now live-eligible")
+    return store.get(proposal_id)
 
 
 def apply_proposal(proposal_id: int) -> UpdateProposal:
@@ -57,11 +78,14 @@ def apply_proposal(proposal_id: int) -> UpdateProposal:
             f"call ProposalStore.set_status(id, 'approved') first"
         )
 
+    if proposal.proposal_type == "recommendation_param":
+        return _apply_recommendation_param(store, proposal, proposal_id)
+
     if proposal.proposal_type != "model_promotion":
         raise ProposalApplyError(
             f"apply_proposal() has no defined behavior for "
-            f"proposal_type={proposal.proposal_type!r} yet (Phase 2 scope: "
-            f"model_promotion only) -- proposal left at status='approved'"
+            f"proposal_type={proposal.proposal_type!r} yet (Phase 3 scope: "
+            f"model_promotion, recommendation_param only) -- proposal left at status='approved'"
         )
 
     model_type = proposal.metrics.get("model_type")
