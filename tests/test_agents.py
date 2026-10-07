@@ -708,3 +708,39 @@ class TestForwardTestEvaluator:
         r  = ev.evaluate(trades)
         assert r.max_drawdown > 0
         assert r.max_drawdown_pct > 0
+
+
+class TestSMCAnalystH4BosSymmetry:
+    """H4 BOS must score by direction, symmetrically for LONG and SHORT."""
+
+    @staticmethod
+    def _ctx(h4_dir: str, h4_bos: bool = True) -> dict:
+        return {
+            "symbol": "BTCUSDT",
+            "mtf_aligned": False, "mtf_direction": "",
+            "smc_m15": {"trend_bias": "NEUTRAL"},
+            "smc_h1": {},
+            "smc_h4": {"bos": h4_bos, "bos_dir": h4_dir, "trend_bias": "NEUTRAL"},
+        }
+
+    def test_bearish_h4_bos_does_not_score_bullish(self):
+        from agents.smc_analyst import SMCAnalyst
+        r = SMCAnalyst().analyse(self._ctx("Bearish"))
+        assert r.signal != "LONG"
+
+    def test_h4_bos_adds_one_point_each_side(self):
+        from agents.smc_analyst import SMCAnalyst
+        ctx_l = self._ctx("Bullish")
+        ctx_l["smc_m15"] = {"trend_bias": "LONG_BIAS"}
+        ctx_s = self._ctx("Bearish")
+        ctx_s["smc_m15"] = {"trend_bias": "SHORT_BIAS"}
+        rl = SMCAnalyst().analyse(ctx_l)
+        rs = SMCAnalyst().analyse(ctx_s)
+        assert rl.signal == "LONG" and rs.signal == "SHORT"
+        assert rl.confidence == rs.confidence
+
+    def test_h4_bos_without_direction_scores_neither(self):
+        from agents.smc_analyst import SMCAnalyst
+        ctx = self._ctx("")
+        ctx["smc_m15"] = {"trend_bias": "LONG_BIAS"}
+        assert SMCAnalyst().analyse(ctx).signal == "NEUTRAL"

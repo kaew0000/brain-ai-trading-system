@@ -49,6 +49,7 @@ class SMCAnalyst(BaseAgent):
         h4_bias = h4.get("trend_bias", "")
         h1_bias = h1.get("trend_bias", "")
         h4_bos  = bool(h4.get("bos", False))
+        h4_bos_dir = h4.get("bos_dir", "")
         h1_bos  = bool(h1.get("bos", False))
 
         # ── Signal detection + EventBus publish ───────────────────────────
@@ -86,7 +87,7 @@ class SMCAnalyst(BaseAgent):
             ob and ("ullish" in ob_dir or ob_dir in ("LONG","Bullish")),
             mtf_aligned and mtf_dir == "LONG",
             "LONG" in trend_bias or "ullish" in trend_bias,
-            h4_bos,
+            h4_bos and ("ullish" in h4_bos_dir or h4_bos_dir in ("LONG","Bullish")),
         ])
         bearish_pts = sum([
             bos and ("earish" in bos_dir or bos_dir in ("SHORT","Bearish")),
@@ -95,6 +96,7 @@ class SMCAnalyst(BaseAgent):
             ob and ("earish" in ob_dir or ob_dir in ("SHORT","Bearish")),
             mtf_aligned and mtf_dir == "SHORT",
             "SHORT" in trend_bias or "earish" in trend_bias,
+            h4_bos and ("earish" in h4_bos_dir or h4_bos_dir in ("SHORT","Bearish")),
         ])
 
         if bullish_pts > bearish_pts and bullish_pts >= 2:
