@@ -648,6 +648,16 @@ class ConfidenceEngine:
         if direction == "SHORT" and ctx.get("blocks_short"):
             blocks.append("FUTURES_BLOCK_SHORT")
 
+        # SMC top-down gate (features/smc_topdown.py) — both flags default
+        # False, so by default this adds nothing. A missing "topdown" key
+        # (older/test contexts) never blocks.
+        td = ctx.get("topdown") or {}
+        if td and direction in ("LONG", "SHORT"):
+            if settings.SMC_TF_CONFLICT_BLOCKS_TRADE and td.get("conflict"):
+                blocks.append(f"TF_CONFLICT {'; '.join(td.get('reasons', []))}")
+            elif settings.SMC_TOPDOWN_GATE_ENABLED and not td.get("ready"):
+                blocks.append(f"TOPDOWN_{td.get('state', 'UNKNOWN')}")
+
         # Legacy funding gate (matches v1 settings)
         rate = float(ctx.get("funding_rate", 0.0))
         if direction == "LONG"  and rate > settings.FUNDING_BLOCK_LONG:

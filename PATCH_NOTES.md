@@ -1,59 +1,51 @@
-# PATCH NOTES — SMC Liquidity Sweep as a Real Condition
+# PATCH NOTES — SMC Top-Down Confirmation, M5 Timeframe, Conflict Block
 
-Branch: `feature/phase-smc-liquidity-sweep`
-Stacked on: `feature/phase-smc-bos-symmetry` (phase 1, commit `f602916`) — merge phase 1 first.
+Branch: `feature/phase-smc-m5-gating`
+Stacked on: phase 3 (`d1be45c`) -> phase 2 (`80d2d7f`) -> phase 1 (`f602916`). Merge in order.
 Base: `main` @ `1904ccb`
 
 ## Root cause
 
-1. `SMCEngine._extract_liquidity()` kept only **unswept** pools and threw
-   away the library's `Swept` index, so a sweep was never observable
-   downstream.
-2. `SMCAnalyst` therefore had nothing to score: the "Liquidity" factor
-   verdict was hardcoded `"NEUTRAL"` and CHoCH was scored independently
-   of any sweep, unlike the SMC doc (sweep -> return -> CHoCH).
-3. Found while testing: `_dir_verdict()` compared the signal (`LONG`/`SHORT`)
-   with engine directions (`Bullish`/`Bearish`) directly, so BOS/CHoCH/FVG/OB
-   factors showed `OPPOSES` even when supporting. Display-only (the
-   causal explainer builds its own verdicts), now normalised.
+The live path (`main.py` -> `MarketContextBuilder` -> `ConfidenceEngine`) only
+ever saw H4/H1/M15, picked a direction by trend-bias voting, and scored all
+SMC factors independently. There was no M5 data, no ordering
+(zone -> sweep -> CHoCH -> entry trigger), and `mtf_aligned=False` never
+stopped a trade, unlike the SMC doc (confirm top-down, skip on conflict).
 
 ## Changes
 
-- `features/smc_engine.py`: new `SMCSignals` fields `sweep`,
-  `sweep_direction`, `sweep_level`, `sweep_extreme`, `sweep_bars_ago`;
-  new `_extract_sweep()` (reuses the single `smc.liquidity` call;
-  `_extract_liquidity` now also returns the raw frame).
-  Equal lows swept -> "Bullish"; equal highs swept -> "Bearish".
-  Requires sweep within `SMC_SWEEP_LOOKBACK_BARS` and, by default, a
-  close back across the level ("sweep, then return").
-  `sweep_extreme` = wick extreme since the sweep (anchor for phase 3 SL).
-- `intelligence/market_context_builder.py`: `_smc_to_dict` adds
-  `sweep`, `sweep_dir`, `sweep_level`, `sweep_extreme`, `sweep_bars_ago`.
-- `agents/smc_analyst.py`: Liquidity factor verdict reflects the sweep;
-  `raw` exposes it; optional scoring and CHoCH gate (flags below);
-  direction-name normalisation in `_dir_verdict`.
-- `config/settings.py`: 4 new settings.
-- `tests/test_smc_sweep.py`: 13 tests.
-
-## Settings (all additive)
-
-| Setting | Default | Effect |
-|---|---|---|
-| `SMC_SWEEP_LOOKBACK_BARS` | 20 | max age of a counted sweep |
-| `SMC_SWEEP_REQUIRES_RECLAIM` | True | sweep counts only after price returns |
-| `SMC_SWEEP_SCORING_ENABLED` | **False** | same-direction sweep = +1 point (max 8) |
-| `SMC_CHOCH_REQUIRES_SWEEP` | **False** | M15 CHoCH scores only after same-direction sweep |
+- `features/smc_topdown.py` (new, pure logic): `evaluate_topdown()` state machine
+  BIAS (H4 matches, H1 not opposing) -> ZONE (price in H1 OB/FVG) ->
+  CONFIRM (M15 sweep AND CHoCH, same direction) -> ENTRY (M5 CHoCH + FVG/OB;
+  skipped with `m5_used=False` when no M5). `CONFLICT` when any analysed TF bias,
+  or an M5 CHoCH, opposes the direction.
+- `data/binance_provider.py`: `_ohlcv_timeframes()` helper (h4/h1/m15 unchanged)
+  and best-effort `_fetch_optional_m5()` called from both
+  `get_all_market_data()` and `get_market_data_for()`. M5 failure is logged
+  and non-fatal (h4/h1/m15 failures still raise as before).
+- `intelligence/market_context_builder.py`: adds `smc_m5` (`{}` when absent) and
+  `topdown` to the context. Existing keys untouched.
+- `decision/confidence_engine.py::_check_blocks`: two opt-in hard blocks
+  (`TF_CONFLICT ...`, `TOPDOWN_<state>`) using the existing block mechanism.
+- `config/settings.py`: `M5_TIMEFRAME`, `SMC_M5_ENABLED`, `SMC_TOPDOWN_GATE_ENABLED`,
+  `SMC_TF_CONFLICT_BLOCKS_TRADE`, `SMC_ZONE_TOLERANCE_PCT`.
+- `tests/test_smc_topdown.py`: 24 tests (state machine, blocks, M5 fetch,
+  real `MarketContextBuilder.build()` with and without M5).
 
 ## Impact
 
-With defaults, scoring and signals are unchanged. New fields are
-informational and the Liquidity factor verdict now shows sweep support.
-Behaviour-changing logic is opt-in because this runs against live capital.
+All new flags default off, so existing behaviour is unchanged; the context
+just carries two extra informational keys. `SMCEngine.analyze_mtf` already
+handles any timeframe keys, and no code iterates all timeframes.
+With `SMC_M5_ENABLED` there is one extra klines call per symbol per cycle.
 
 ## Limitations / follow-up
 
-- Sweep is detected on whichever TF's frame is analysed; the analyst
-  reads M15's. H1-zone / M5 sequencing is phase 4.
-- "Sweep preceded CHoCH" is approximated as "recent same-direction
-  sweep and CHoCH both present"; bar-order between them is not checked.
-- Entry/SL/TP from the swept swing: phase 3.
+- M5 is used for the entry *trigger* only; entry price and SL/TP still come from
+  M15 OB / sweep (phase 3). Anchoring entry to the M5 FVG/OB is not done.
+- The gate evaluates the single M15-bias direction; it does not search the
+  opposite direction.
+- `BrainDecisionEngine` (legacy v1) and `smc_oi_regime_multi` strategy do not
+  consult `topdown`; the gate applies on the ConfidenceEngine path
+  (main loop, portfolio signal provider).
+- Thresholds (zone tolerance, "conflict = any opposing TF") are first-cut; validate on paper/testnet.

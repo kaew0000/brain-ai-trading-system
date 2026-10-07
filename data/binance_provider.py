@@ -51,6 +51,12 @@ _TRADE_BREAKER  = get_breaker("binance_trade",  failure_threshold=5, recovery_ti
 _HTTP_TIMEOUT = 10  # seconds; applied to every requests.Session
 
 
+def _ohlcv_timeframes() -> list[tuple[str, str]]:
+    """Timeframes fetched each cycle. M5 is appended only when
+    SMC_M5_ENABLED (see _fetch_optional_m5); h4/h1/m15 are unchanged."""
+    return [("h4", settings.H4_TIMEFRAME), ("h1", settings.H1_TIMEFRAME), ("m15", settings.M15_TIMEFRAME)]
+
+
 class BinanceDataProvider:
     """Single entry-point for all Binance Futures market data.
 
@@ -544,10 +550,25 @@ class BinanceDataProvider:
                 })
         return positions
 
+    def _fetch_optional_m5(self, ohlcv: dict, symbol: str | None = None) -> None:
+        """Add the M5 frame when SMC_M5_ENABLED. Unlike h4/h1/m15 this is
+        best-effort: a failure is logged and M5 is simply absent, so the
+        top-down check skips its entry step instead of killing the cycle."""
+        if not settings.SMC_M5_ENABLED:
+            return
+        try:
+            df = self.get_ohlcv(settings.M5_TIMEFRAME, symbol=symbol)
+            is_valid, reasons = validate_ohlcv(df)
+            if not is_valid:
+                logger.warning(f"OHLCV validation issues [{settings.M5_TIMEFRAME}]: {reasons} — cleaning anyway")
+            ohlcv["m5"] = clean_ohlcv(df)
+        except Exception as exc:
+            logger.warning(f"M5 fetch failed (non-fatal, M5 step skipped): {exc}")
+
     def get_all_market_data(self) -> dict:
         """Fetch all market data needed for one pipeline cycle."""
         ohlcv = {}
-        for tf_key, tf_val in [("h4", settings.H4_TIMEFRAME), ("h1", settings.H1_TIMEFRAME), ("m15", settings.M15_TIMEFRAME)]:
+        for tf_key, tf_val in _ohlcv_timeframes():
             try:
                 df = self.get_ohlcv(tf_val)
                 # BUG-V15-BP-05: validate_ohlcv returns (bool, reasons) tuple —
@@ -561,6 +582,8 @@ class BinanceDataProvider:
             except Exception as exc:
                 logger.error(f"OHLCV fetch failed for {tf_val}: {exc}")
                 raise
+
+        self._fetch_optional_m5(ohlcv)
 
         mark_price    = self.get_mark_price()
         open_interest = self.get_current_open_interest()
@@ -610,7 +633,7 @@ class BinanceDataProvider:
         code that doesn't need it.
         """
         ohlcv = {}
-        for tf_key, tf_val in [("h4", settings.H4_TIMEFRAME), ("h1", settings.H1_TIMEFRAME), ("m15", settings.M15_TIMEFRAME)]:
+        for tf_key, tf_val in _ohlcv_timeframes():
             try:
                 df = self.get_ohlcv(tf_val, symbol=symbol)
                 is_valid, reasons = validate_ohlcv(df)
@@ -621,6 +644,8 @@ class BinanceDataProvider:
             except Exception as exc:
                 logger.error(f"OHLCV fetch failed for {symbol}/{tf_val}: {exc}")
                 raise
+
+        self._fetch_optional_m5(ohlcv, symbol=symbol)
 
         mark_price    = self.get_mark_price(symbol=symbol)
         open_interest = self.get_current_open_interest(symbol=symbol)

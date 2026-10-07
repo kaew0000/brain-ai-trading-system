@@ -1912,6 +1912,50 @@ def daily_report(sys: dict) -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _sweep_levels(
+    direction: str, entry: float, smc_m15: dict
+) -> tuple[float, float] | None:
+    """
+    SL/TP anchored to the swept swing, or None when it does not apply
+    (disabled, no same-direction sweep, invalid/too-wide stop).
+
+    LONG : SL below the sweep's low extreme; TP at liquidity_high.
+    SHORT: SL above the sweep's high extreme; TP at liquidity_low.
+    """
+    if not settings.SMC_SWEEP_LEVELS_ENABLED or not smc_m15.get("sweep"):
+        return None
+    sweep_dir = str(smc_m15.get("sweep_dir", ""))
+    extreme = float(smc_m15.get("sweep_extreme", 0.0) or 0.0)
+    if extreme <= 0:
+        return None
+    buf = settings.SMC_SWEEP_SL_BUFFER_PCT
+
+    if direction == "LONG":
+        if "ullish" not in sweep_dir:
+            return None
+        sl = extreme * (1 - buf)
+        risk = entry - sl
+        target = float(smc_m15.get("liquidity_high", 0.0) or 0.0)
+        target_ok = target > entry
+    else:
+        if "earish" not in sweep_dir:
+            return None
+        sl = extreme * (1 + buf)
+        risk = sl - entry
+        target = float(smc_m15.get("liquidity_low", 0.0) or 0.0)
+        target_ok = 0 < target < entry
+
+    if risk <= 0 or risk / entry > settings.SMC_SWEEP_MAX_SL_PCT:
+        return None
+
+    sign = 1 if direction == "LONG" else -1
+    if target_ok and abs(target - entry) / risk >= settings.SMC_SWEEP_MIN_RR:
+        tp = target
+    else:
+        tp = entry + sign * risk * settings.SMC_SWEEP_FALLBACK_RR
+    return sl, tp
+
+
 def _derive_levels(
     direction: str,
     mark_price: float,
@@ -1920,8 +1964,10 @@ def _derive_levels(
     """
     Derive entry / stop-loss / take-profit from market context.
 
-    Uses SMC Order Block levels when available; falls back to ATR-based
-    percentage offsets so the engine always has valid levels.
+    Entry uses the SMC Order Block when valid. SL/TP use the swept swing
+    when SMC_SWEEP_LEVELS_ENABLED and a same-direction sweep exists;
+    otherwise (and by default) fixed percentage offsets so the engine
+    always has valid levels.
     """
     if not direction or not mark_price:
         return 0.0, 0.0, 0.0
@@ -1930,22 +1976,26 @@ def _derive_levels(
     ob_top    = float(smc_m15.get("ob_top",    0.0))
     ob_bottom = float(smc_m15.get("ob_bottom", 0.0))
 
-    # ATR-based fallback offsets (configurable in settings if needed)
-    SL_PCT = 0.018     # 1.8% stop
-    TP_PCT = 0.054     # 5.4% take profit  (3R)
+    SL_PCT = settings.LEVEL_SL_PCT
+    TP_PCT = settings.LEVEL_TP_PCT
+    OB_MAX = settings.LEVEL_OB_MAX_DIST_PCT
 
     if direction == "LONG":
-        # OB bottom must be BELOW current price and within 3% (not stale/distant)
-        ob_valid = ob_bottom and 0 < ob_bottom < mark_price and (mark_price - ob_bottom) / mark_price < 0.03
+        # OB bottom must be BELOW current price and within OB_MAX (not stale/distant)
+        ob_valid = ob_bottom and 0 < ob_bottom < mark_price and (mark_price - ob_bottom) / mark_price < OB_MAX
         entry = ob_bottom if ob_valid else mark_price
         sl    = entry * (1 - SL_PCT)
         tp    = entry * (1 + TP_PCT)
     else:  # SHORT
-        # OB top must be ABOVE current price and within 3%
-        ob_valid = ob_top and ob_top > mark_price and (ob_top - mark_price) / mark_price < 0.03
+        # OB top must be ABOVE current price and within OB_MAX
+        ob_valid = ob_top and ob_top > mark_price and (ob_top - mark_price) / mark_price < OB_MAX
         entry = ob_top if ob_valid else mark_price
         sl    = entry * (1 + SL_PCT)
         tp    = entry * (1 - TP_PCT)
+
+    swept = _sweep_levels(direction, entry, smc_m15)
+    if swept is not None:
+        sl, tp = swept
 
     return round(entry, 2), round(sl, 2), round(tp, 2)
 

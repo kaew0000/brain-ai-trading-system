@@ -37,6 +37,8 @@ Output schema
   "smc_h4":        dict,
   "smc_h1":        dict,
   "smc_m15":       dict,
+  "smc_m5":        dict,            # {} unless SMC_M5_ENABLED
+  "topdown":       dict,            # features.smc_topdown.TopDownResult.to_dict()
 
   // Layer 6 — Futures Intelligence
   "futures":       dict,            # full FuturesIntelResult.to_dict(),
@@ -93,6 +95,7 @@ from utils.logger import get_logger
 from trend.trend_engine import TrendEngine, TrendResult
 from futures.futures_intel_engine import FuturesIntelEngine, FuturesIntelResult
 from features.smc_engine import SMCSignals
+from features.smc_topdown import evaluate_topdown
 from features.volume_engine import VolumeSignals
 from regime.regime_engine import RegimeResult
 from intelligence.news_sentiment_feed import get_news_sentiment_snapshot
@@ -209,6 +212,10 @@ class MarketContextBuilder:
         # ── MTF direction consensus ───────────────────────────────────────────
         mtf_dir, mtf_aligned = _mtf_direction(h4, h1, m15)
 
+        # ── Top-down confirmation (M5 optional; observational unless gated) ───
+        m5 = smc_signals.get("m5")
+        topdown = evaluate_topdown(mtf_dir, h4, h1, m15, m5, mark_price)
+
         # ── Layer 2 defaults ──────────────────────────────────────────────────
         intel = intelligence or {}
 
@@ -232,6 +239,8 @@ class MarketContextBuilder:
             "smc_h4":  _smc_to_dict(h4),
             "smc_h1":  _smc_to_dict(h1),
             "smc_m15": _smc_to_dict(m15),
+            "smc_m5":  _smc_to_dict(m5) if m5 is not None else {},
+            "topdown": topdown.to_dict(),
 
             # Layer 6
             "futures":           futures.to_dict(),

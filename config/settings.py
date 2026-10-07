@@ -113,6 +113,7 @@ class Settings(BaseSettings):
     H4_TIMEFRAME: str = Field(default="4h")
     H1_TIMEFRAME: str = Field(default="1h")
     M15_TIMEFRAME: str = Field(default="15m")
+    M5_TIMEFRAME: str = Field(default="5m")
 
     # ── SMC liquidity-sweep confirmation (V16 SMC doc alignment, phase 2) ──
     # SMC_SWEEP_LOOKBACK_BARS: a swept equal-highs/lows pool counts as a
@@ -130,6 +131,40 @@ class Settings(BaseSettings):
     SMC_SWEEP_REQUIRES_RECLAIM: bool = Field(default=True, alias="SMC_SWEEP_REQUIRES_RECLAIM")
     SMC_SWEEP_SCORING_ENABLED: bool = Field(default=False, alias="SMC_SWEEP_SCORING_ENABLED")
     SMC_CHOCH_REQUIRES_SWEEP: bool = Field(default=False, alias="SMC_CHOCH_REQUIRES_SWEEP")
+
+    # ── Entry / SL / TP derivation (main._derive_levels) ───────────────────
+    # LEVEL_* are the values that used to be hardcoded in _derive_levels();
+    # defaults are identical, so behaviour is unchanged.
+    LEVEL_SL_PCT: float = Field(default=0.018, alias="LEVEL_SL_PCT")
+    LEVEL_TP_PCT: float = Field(default=0.054, alias="LEVEL_TP_PCT")
+    LEVEL_OB_MAX_DIST_PCT: float = Field(default=0.03, alias="LEVEL_OB_MAX_DIST_PCT")
+    # SMC_SWEEP_LEVELS_ENABLED (default False): when a same-direction M15
+    # liquidity sweep exists, put SL just beyond the sweep's wick extreme
+    # (+ SMC_SWEEP_SL_BUFFER_PCT) and TP at the opposite liquidity pool if
+    # that gives >= SMC_SWEEP_MIN_RR; otherwise TP = SMC_SWEEP_FALLBACK_RR x
+    # risk. A swept-SL wider than SMC_SWEEP_MAX_SL_PCT of entry is rejected
+    # and the fixed-percentage levels are used instead.
+    SMC_SWEEP_LEVELS_ENABLED: bool = Field(default=False, alias="SMC_SWEEP_LEVELS_ENABLED")
+    SMC_SWEEP_SL_BUFFER_PCT: float = Field(default=0.001, alias="SMC_SWEEP_SL_BUFFER_PCT")
+    SMC_SWEEP_MAX_SL_PCT: float = Field(default=0.05, alias="SMC_SWEEP_MAX_SL_PCT")
+    SMC_SWEEP_MIN_RR: float = Field(default=1.5, alias="SMC_SWEEP_MIN_RR")
+    SMC_SWEEP_FALLBACK_RR: float = Field(default=3.0, alias="SMC_SWEEP_FALLBACK_RR")
+
+    # ── SMC top-down confirmation + M5 entry timeframe ─────────────────────
+    # All default False/off: existing behaviour is unchanged unless enabled.
+    #   SMC_M5_ENABLED            fetch + analyse the M5 timeframe (extra API
+    #                             call per symbol per cycle; M5 failure is
+    #                             non-fatal and just disables the M5 step)
+    #   SMC_TOPDOWN_GATE_ENABLED  hard-block unless the sequence
+    #                             H4/H1 bias -> H1 zone -> M15 sweep+CHoCH
+    #                             -> M5 trigger (if M5 on) is READY
+    #   SMC_TF_CONFLICT_BLOCKS_TRADE  hard-block when any analysed timeframe's
+    #                             bias opposes the trade direction
+    # SMC_ZONE_TOLERANCE_PCT widens H1 OB/FVG zones when testing "price in zone".
+    SMC_M5_ENABLED: bool = Field(default=False, alias="SMC_M5_ENABLED")
+    SMC_TOPDOWN_GATE_ENABLED: bool = Field(default=False, alias="SMC_TOPDOWN_GATE_ENABLED")
+    SMC_TF_CONFLICT_BLOCKS_TRADE: bool = Field(default=False, alias="SMC_TF_CONFLICT_BLOCKS_TRADE")
+    SMC_ZONE_TOLERANCE_PCT: float = Field(default=0.002, alias="SMC_ZONE_TOLERANCE_PCT")
     KLINE_LIMIT: int = Field(default=500)
 
     # ── Logging ───────────────────────────────────────────
