@@ -313,6 +313,11 @@ def _smc_to_dict(sig: SMCSignals) -> dict:
         "liquidity_low":  sig.liquidity_low,
         "prev_high":    sig.prev_high,
         "prev_low":     sig.prev_low,
+        "sweep":          sig.sweep,
+        "sweep_dir":      sig.sweep_direction,
+        "sweep_level":    sig.sweep_level,
+        "sweep_extreme":  sig.sweep_extreme,
+        "sweep_bars_ago": sig.sweep_bars_ago,
     }
 
 

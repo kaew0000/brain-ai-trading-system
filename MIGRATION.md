@@ -1,18 +1,24 @@
-# MIGRATION — SMC Analyst H4 BOS Symmetry
+# MIGRATION — SMC Liquidity Sweep
 
 ## Do you need to do anything?
 
-No. No config, schema, API or dependency changes. No restart steps beyond
-the normal deploy.
+No. Defaults keep existing scoring and signals unchanged. No schema or
+dependency changes.
 
-## Behavioural notes
+## Opting in (set in `.env`, restart the bot)
 
-- SHORT signals can now score up to 7/7 (previously 6/7), so SHORT
-  confidence may be higher by 1/7 (~14 points) when H4 prints a bearish BOS.
-- A bearish H4 BOS no longer adds to LONG scoring.
-- If you have thresholds tuned against the old SHORT confidence ceiling,
-  re-check them.
+- `SMC_SWEEP_SCORING_ENABLED=True` — sweep adds a scoring point; SMC
+  confidence is then computed over 8 points instead of 7, so absolute
+  confidence values shift slightly.
+- `SMC_CHOCH_REQUIRES_SWEEP=True` — CHoCH only scores after a
+  same-direction sweep; expect fewer SMC signals.
 
-## Rollback
+Test on testnet/paper first and re-check any thresholds tuned on SMC confidence.
 
-Revert the single commit; nothing is persisted by this change.
+## Notes
+
+- Context dicts gain new `smc_*` keys (`sweep*`); consumers using `.get`
+  are unaffected.
+- SMCAnalyst factor verdicts for BOS/CHoCH/FVG/OB now read `SUPPORTS`
+  correctly (previously `OPPOSES`); display only.
+- Rollback: revert the commit; nothing is persisted.
