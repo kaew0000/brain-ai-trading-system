@@ -13,6 +13,7 @@ NPC speech driven by actual signal state — no demo text.
 
 from __future__ import annotations
 
+from config.settings import settings
 from events.event_bus import smc_pub
 from .base_agent import BaseAgent, AgentReport
 
@@ -44,6 +45,12 @@ class SMCAnalyst(BaseAgent):
         liq_low     = m15.get("liquidity_low",  0.0)
         prev_high   = m15.get("prev_high", 0.0)
         prev_low    = m15.get("prev_low",  0.0)
+
+        # Liquidity sweep (sweep-then-return) — absent on older contexts
+        sweep       = bool(m15.get("sweep", False))
+        sweep_dir   = m15.get("sweep_dir", "")
+        sweep_bull  = sweep and ("ullish" in sweep_dir or sweep_dir == "LONG")
+        sweep_bear  = sweep and ("earish" in sweep_dir or sweep_dir == "SHORT")
 
         # H4/H1 agreement
         h4_bias = h4.get("trend_bias", "")
@@ -80,31 +87,43 @@ class SMCAnalyst(BaseAgent):
                             {"direction": mtf_dir})
 
         # ── Score ──────────────────────────────────────────────────────────
+        # Optional sequential gate (SMC_CHOCH_REQUIRES_SWEEP): a CHoCH only
+        # scores when a same-direction liquidity sweep preceded it.
+        choch_bull = choch and ("ullish" in choch_dir or choch_dir in ("LONG","Bullish"))
+        choch_bear = choch and ("earish" in choch_dir or choch_dir in ("SHORT","Bearish"))
+        if settings.SMC_CHOCH_REQUIRES_SWEEP:
+            choch_bull = choch_bull and sweep_bull
+            choch_bear = choch_bear and sweep_bear
+        sweep_scoring = settings.SMC_SWEEP_SCORING_ENABLED
+
         bullish_pts = sum([
             bos and ("ullish" in bos_dir or bos_dir in ("LONG","Bullish")),
-            choch and ("ullish" in choch_dir or choch_dir in ("LONG","Bullish")),
+            choch_bull,
             fvg and ("ullish" in fvg_dir or fvg_dir in ("LONG","Bullish")),
             ob and ("ullish" in ob_dir or ob_dir in ("LONG","Bullish")),
             mtf_aligned and mtf_dir == "LONG",
             "LONG" in trend_bias or "ullish" in trend_bias,
             h4_bos and ("ullish" in h4_bos_dir or h4_bos_dir in ("LONG","Bullish")),
+            sweep_scoring and sweep_bull,
         ])
         bearish_pts = sum([
             bos and ("earish" in bos_dir or bos_dir in ("SHORT","Bearish")),
-            choch and ("earish" in choch_dir or choch_dir in ("SHORT","Bearish")),
+            choch_bear,
             fvg and ("earish" in fvg_dir or fvg_dir in ("SHORT","Bearish")),
             ob and ("earish" in ob_dir or ob_dir in ("SHORT","Bearish")),
             mtf_aligned and mtf_dir == "SHORT",
             "SHORT" in trend_bias or "earish" in trend_bias,
             h4_bos and ("earish" in h4_bos_dir or h4_bos_dir in ("SHORT","Bearish")),
+            sweep_scoring and sweep_bear,
         ])
+        max_pts = 8 if sweep_scoring else 7
 
         if bullish_pts > bearish_pts and bullish_pts >= 2:
             signal     = "LONG"
-            confidence = min(100.0, bullish_pts / 7 * 100)
+            confidence = min(100.0, bullish_pts / max_pts * 100)
         elif bearish_pts > bullish_pts and bearish_pts >= 2:
             signal     = "SHORT"
-            confidence = min(100.0, bearish_pts / 7 * 100)
+            confidence = min(100.0, bearish_pts / max_pts * 100)
         else:
             signal     = "NEUTRAL"
             confidence = 0.0
@@ -112,7 +131,12 @@ class SMCAnalyst(BaseAgent):
         # ── Build factors list ─────────────────────────────────────────────
         def _dir_verdict(detected: bool, direction: str, wanted: str) -> str:
             if not detected: return "NEUTRAL"
-            return "SUPPORTS" if (wanted in direction or direction == wanted) else "OPPOSES"
+            # Engine directions are "Bullish"/"Bearish" while the signal is
+            # "LONG"/"SHORT"; normalise so the two compare correctly.
+            norm = ("LONG" if ("ullish" in direction or direction == "LONG")
+                    else "SHORT" if ("earish" in direction or direction == "SHORT")
+                    else direction)
+            return "SUPPORTS" if norm == wanted else "OPPOSES"
 
         factors = [
             self._factor("BOS",
@@ -137,8 +161,10 @@ class SMCAnalyst(BaseAgent):
                          f"H4/H1/M15 bias: {h4_bias}/{h1_bias}/{trend_bias}"),
             self._factor("Liquidity",
                          f"H={liq_high:.0f} L={liq_low:.0f}" if liq_high else "—",
-                         "NEUTRAL",
-                         f"Prev high={prev_high:.0f} Prev low={prev_low:.0f}"),
+                         _dir_verdict(sweep, sweep_dir, signal),
+                         (f"Prev high={prev_high:.0f} Prev low={prev_low:.0f}"
+                          + (f" | {sweep_dir} sweep of {m15.get('sweep_level', 0.0):.0f} "
+                             f"{m15.get('sweep_bars_ago', -1)} bars ago" if sweep else ""))),
         ]
 
         summary = self._build_summary(signal, bos, bos_dir, choch, fvg, ob, mtf_aligned, mtf_dir)
@@ -158,6 +184,7 @@ class SMCAnalyst(BaseAgent):
                 "mtf_aligned": mtf_aligned, "mtf_direction": mtf_dir,
                 "trend_bias": trend_bias,
                 "liquidity_high": liq_high, "liquidity_low": liq_low,
+                "sweep": sweep, "sweep_dir": sweep_dir,
                 "h4_bias": h4_bias, "h1_bias": h1_bias,
             },
         )

@@ -113,6 +113,23 @@ class Settings(BaseSettings):
     H4_TIMEFRAME: str = Field(default="4h")
     H1_TIMEFRAME: str = Field(default="1h")
     M15_TIMEFRAME: str = Field(default="15m")
+
+    # ── SMC liquidity-sweep confirmation (V16 SMC doc alignment, phase 2) ──
+    # SMC_SWEEP_LOOKBACK_BARS: a swept equal-highs/lows pool counts as a
+    # "recent sweep" only if the sweeping candle is at most this many bars
+    # old. SMC_SWEEP_REQUIRES_RECLAIM: the sweep only counts once the last
+    # close is back on the original side of the swept level (sweep, then
+    # return). Both only shape the new sweep_* fields; they never change
+    # existing signals on their own.
+    # SMC_SWEEP_SCORING_ENABLED / SMC_CHOCH_REQUIRES_SWEEP change live
+    # signal scoring, so both default False (existing behaviour unchanged):
+    #   scoring  -> a same-direction sweep adds one point to SMCAnalyst
+    #   gating   -> an M15 CHoCH only scores when a same-direction sweep
+    #               preceded it (sweep -> CHoCH, not independent factors)
+    SMC_SWEEP_LOOKBACK_BARS: int = Field(default=20, alias="SMC_SWEEP_LOOKBACK_BARS")
+    SMC_SWEEP_REQUIRES_RECLAIM: bool = Field(default=True, alias="SMC_SWEEP_REQUIRES_RECLAIM")
+    SMC_SWEEP_SCORING_ENABLED: bool = Field(default=False, alias="SMC_SWEEP_SCORING_ENABLED")
+    SMC_CHOCH_REQUIRES_SWEEP: bool = Field(default=False, alias="SMC_CHOCH_REQUIRES_SWEEP")
     KLINE_LIMIT: int = Field(default=500)
 
     # ── Logging ───────────────────────────────────────────

@@ -49,6 +49,11 @@ class SMCSignals:
         "ob_top",
         "prev_high",
         "prev_low",
+        "sweep",
+        "sweep_bars_ago",
+        "sweep_direction",
+        "sweep_extreme",
+        "sweep_level",
         "swing_highs",
         "swing_lows",
         "trend_bias",
@@ -71,6 +76,14 @@ class SMCSignals:
         self.liquidity_low: float = 0.0
         self.prev_high: float = 0.0
         self.prev_low: float = 0.0
+        # Recent liquidity sweep (sweep-then-return). direction is the
+        # trade bias it implies: "Bullish" = sell-side liquidity (equal
+        # lows) swept, "Bearish" = buy-side liquidity (equal highs) swept.
+        self.sweep: bool = False
+        self.sweep_direction: str = ""
+        self.sweep_level: float = 0.0      # swept liquidity level
+        self.sweep_extreme: float = 0.0    # wick extreme since the sweep (SL anchor)
+        self.sweep_bars_ago: int = -1
         self.swing_highs: list[float] = []
         self.swing_lows: list[float] = []
         self.trend_bias: str = ""          # "Bullish" | "Bearish" | ""
@@ -257,13 +270,16 @@ class SMCEngine:
 
     def _extract_liquidity(
         self, df: pd.DataFrame, swing_hl: pd.DataFrame, signals: SMCSignals
-    ) -> None:
+    ) -> pd.DataFrame | None:
+        """Fill liquidity_high/low (unswept pools). Returns the raw
+        liquidity frame so _extract_sweep can reuse it (one library call)."""
         liq_df = smc.liquidity(df, swing_hl, range_percent=0.01)
         if liq_df is None or len(liq_df) == 0:
-            return
+            return None
 
         if "Liquidity" not in liq_df.columns or "Level" not in liq_df.columns:
-            return
+            return None
+        raw_liq_df = liq_df
 
         # Unswept liquidity only
         if "Swept" in liq_df.columns:
@@ -276,6 +292,54 @@ class SMCEngine:
             signals.liquidity_high = float(highs.iloc[-1])
         if len(lows) > 0:
             signals.liquidity_low = float(lows.iloc[-1])
+        return raw_liq_df
+
+    def _extract_sweep(
+        self, df: pd.DataFrame, liq_df: pd.DataFrame | None, signals: SMCSignals
+    ) -> None:
+        """
+        Detect the most recent liquidity sweep.
+
+        A pool counts when its sweeping candle is within
+        SMC_SWEEP_LOOKBACK_BARS of the last bar and (if
+        SMC_SWEEP_REQUIRES_RECLAIM) the last close is back on the original
+        side of the level — i.e. "swept, then returned".
+        """
+        if liq_df is None or "Swept" not in liq_df.columns:
+            return
+
+        n = len(df)
+        swept_rows = liq_df[
+            liq_df["Liquidity"].isin([1, -1]) & (liq_df["Swept"] > 0)
+        ].dropna(subset=["Level", "Swept"])
+        if len(swept_rows) == 0:
+            return
+
+        row = swept_rows.loc[swept_rows["Swept"].idxmax()]
+        swept_idx = int(row["Swept"])
+        bars_ago = n - 1 - swept_idx
+        if swept_idx >= n or bars_ago > settings.SMC_SWEEP_LOOKBACK_BARS:
+            return
+
+        level = float(row["Level"])
+        last_close = float(df["close"].iloc[-1])
+        if row["Liquidity"] == -1:        # equal lows taken -> bullish setup
+            direction = "Bullish"
+            extreme = float(df["low"].iloc[swept_idx:].min())
+            reclaimed = last_close > level
+        else:                             # equal highs taken -> bearish setup
+            direction = "Bearish"
+            extreme = float(df["high"].iloc[swept_idx:].max())
+            reclaimed = last_close < level
+
+        if settings.SMC_SWEEP_REQUIRES_RECLAIM and not reclaimed:
+            return
+
+        signals.sweep = True
+        signals.sweep_direction = direction
+        signals.sweep_level = level
+        signals.sweep_extreme = extreme
+        signals.sweep_bars_ago = bars_ago
 
     def _extract_prev_hl(self, df: pd.DataFrame, signals: SMCSignals) -> None:
         prev_df = smc.previous_high_low(df, time_frame="1D")
@@ -317,7 +381,8 @@ class SMCEngine:
             self._extract_bos_choch(df, swing_hl, signals)
             self._extract_fvg(df, current_price, signals)
             self._extract_ob(df, swing_hl, current_price, signals)
-            self._extract_liquidity(df, swing_hl, signals)
+            liq_df = self._extract_liquidity(df, swing_hl, signals)
+            self._extract_sweep(df, liq_df, signals)
             self._extract_prev_hl(df, signals)
 
             logger.debug(
@@ -326,6 +391,7 @@ class SMCEngine:
                 f"CHOCH={signals.choch}({signals.choch_direction}) "
                 f"FVG={signals.fvg}({signals.fvg_direction}) "
                 f"OB={signals.ob}({signals.ob_direction}) "
+                f"SWEEP={signals.sweep}({signals.sweep_direction}) "
                 f"bias={signals.trend_bias}"
             )
 
