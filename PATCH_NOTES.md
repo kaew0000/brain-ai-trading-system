@@ -1,59 +1,43 @@
-# PATCH NOTES — SMC Liquidity Sweep as a Real Condition
+# PATCH NOTES — Entry/SL/TP Anchored to the Swept Swing
 
-Branch: `feature/phase-smc-liquidity-sweep`
-Stacked on: `feature/phase-smc-bos-symmetry` (phase 1, commit `f602916`) — merge phase 1 first.
+Branch: `feature/phase-smc-sweep-levels`
+Stacked on: `feature/phase-smc-liquidity-sweep` (phase 2, `80d2d7f`) -> phase 1 (`f602916`). Merge in order.
 Base: `main` @ `1904ccb`
 
 ## Root cause
 
-1. `SMCEngine._extract_liquidity()` kept only **unswept** pools and threw
-   away the library's `Swept` index, so a sweep was never observable
-   downstream.
-2. `SMCAnalyst` therefore had nothing to score: the "Liquidity" factor
-   verdict was hardcoded `"NEUTRAL"` and CHoCH was scored independently
-   of any sweep, unlike the SMC doc (sweep -> return -> CHoCH).
-3. Found while testing: `_dir_verdict()` compared the signal (`LONG`/`SHORT`)
-   with engine directions (`Bullish`/`Bearish`) directly, so BOS/CHoCH/FVG/OB
-   factors showed `OPPOSES` even when supporting. Display-only (the
-   causal explainer builds its own verdicts), now normalised.
+`main.py::_derive_levels()` always used fixed percentages (SL 1.8%, TP 5.4%,
+OB max distance 3%) hardcoded in the function. SL/TP never reflected where
+liquidity was actually taken, contrary to the SMC doc (SL beyond the swept
+swing, TP at opposite liquidity). The values were also hardcoded, against
+the project's config rule.
 
 ## Changes
 
-- `features/smc_engine.py`: new `SMCSignals` fields `sweep`,
-  `sweep_direction`, `sweep_level`, `sweep_extreme`, `sweep_bars_ago`;
-  new `_extract_sweep()` (reuses the single `smc.liquidity` call;
-  `_extract_liquidity` now also returns the raw frame).
-  Equal lows swept -> "Bullish"; equal highs swept -> "Bearish".
-  Requires sweep within `SMC_SWEEP_LOOKBACK_BARS` and, by default, a
-  close back across the level ("sweep, then return").
-  `sweep_extreme` = wick extreme since the sweep (anchor for phase 3 SL).
-- `intelligence/market_context_builder.py`: `_smc_to_dict` adds
-  `sweep`, `sweep_dir`, `sweep_level`, `sweep_extreme`, `sweep_bars_ago`.
-- `agents/smc_analyst.py`: Liquidity factor verdict reflects the sweep;
-  `raw` exposes it; optional scoring and CHoCH gate (flags below);
-  direction-name normalisation in `_dir_verdict`.
-- `config/settings.py`: 4 new settings.
-- `tests/test_smc_sweep.py`: 13 tests.
-
-## Settings (all additive)
-
-| Setting | Default | Effect |
-|---|---|---|
-| `SMC_SWEEP_LOOKBACK_BARS` | 20 | max age of a counted sweep |
-| `SMC_SWEEP_REQUIRES_RECLAIM` | True | sweep counts only after price returns |
-| `SMC_SWEEP_SCORING_ENABLED` | **False** | same-direction sweep = +1 point (max 8) |
-| `SMC_CHOCH_REQUIRES_SWEEP` | **False** | M15 CHoCH scores only after same-direction sweep |
+- `main.py`: new `_sweep_levels()`; `_derive_levels()` keeps its signature
+  and entry logic, reads the three formerly hardcoded values from settings,
+  and overrides SL/TP only when `_sweep_levels()` returns a result.
+  - LONG: SL = sweep low extreme x (1 - buffer); TP = `liquidity_high` if RR >= min,
+    else entry + fallback_RR x risk.
+  - SHORT: mirrored with `sweep_extreme` (high) and `liquidity_low`.
+  - Falls back to fixed percentages when: flag off, no sweep, opposite-direction
+    sweep, missing/invalid extreme, SL on the wrong side of entry, or risk > max.
+- `config/settings.py`: `LEVEL_SL_PCT`, `LEVEL_TP_PCT`, `LEVEL_OB_MAX_DIST_PCT`
+  (same defaults as the old constants) and `SMC_SWEEP_LEVELS_ENABLED`
+  (default **False**), `SMC_SWEEP_SL_BUFFER_PCT` 0.001, `SMC_SWEEP_MAX_SL_PCT` 0.05,
+  `SMC_SWEEP_MIN_RR` 1.5, `SMC_SWEEP_FALLBACK_RR` 3.0.
+- `tests/test_derive_levels_sweep.py`: 11 tests.
 
 ## Impact
 
-With defaults, scoring and signals are unchanged. New fields are
-informational and the Liquidity factor verdict now shows sweep support.
-Behaviour-changing logic is opt-in because this runs against live capital.
+Default behaviour is byte-for-byte the same output. Both call sites in
+`main.py` and `execution/portfolio_signal_provider.py` (imports
+`_derive_levels`) are unaffected. When enabled, stops are tighter or wider
+than 1.8% depending on the sweep; position sizing derives from SL distance
+elsewhere, so size changes accordingly (capped by `SMC_SWEEP_MAX_SL_PCT`).
 
 ## Limitations / follow-up
 
-- Sweep is detected on whichever TF's frame is analysed; the analyst
-  reads M15's. H1-zone / M5 sequencing is phase 4.
-- "Sweep preceded CHoCH" is approximated as "recent same-direction
-  sweep and CHoCH both present"; bar-order between them is not checked.
-- Entry/SL/TP from the swept swing: phase 3.
+- Uses M15 sweep data only. Entry price still comes from the M15 OB or market
+  price, not an M5 FVG/OB (phase 4).
+- Spread/slippage is not modelled in the stop buffer.

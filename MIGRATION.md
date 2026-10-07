@@ -1,24 +1,18 @@
-# MIGRATION — SMC Liquidity Sweep
+# MIGRATION — Sweep-Anchored Levels
 
 ## Do you need to do anything?
 
-No. Defaults keep existing scoring and signals unchanged. No schema or
-dependency changes.
+No. Defaults reproduce the previous levels exactly. Requires phase 2
+(sweep fields in the SMC context); merge phases in order.
 
-## Opting in (set in `.env`, restart the bot)
+## Opting in
 
-- `SMC_SWEEP_SCORING_ENABLED=True` — sweep adds a scoring point; SMC
-  confidence is then computed over 8 points instead of 7, so absolute
-  confidence values shift slightly.
-- `SMC_CHOCH_REQUIRES_SWEEP=True` — CHoCH only scores after a
-  same-direction sweep; expect fewer SMC signals.
+`SMC_SWEEP_LEVELS_ENABLED=True` in `.env`, restart. Optional tuning:
+`SMC_SWEEP_SL_BUFFER_PCT`, `SMC_SWEEP_MAX_SL_PCT`, `SMC_SWEEP_MIN_RR`,
+`SMC_SWEEP_FALLBACK_RR`. Validate on testnet/paper first: stop distance
+now varies per trade, which changes position size and risk-per-trade
+outcomes; with real capital, check the minimum-notional impact too.
 
-Test on testnet/paper first and re-check any thresholds tuned on SMC confidence.
+## Rollback
 
-## Notes
-
-- Context dicts gain new `smc_*` keys (`sweep*`); consumers using `.get`
-  are unaffected.
-- SMCAnalyst factor verdicts for BOS/CHoCH/FVG/OB now read `SUPPORTS`
-  correctly (previously `OPPOSES`); display only.
-- Rollback: revert the commit; nothing is persisted.
+Unset the flag (instant) or revert the commit. Nothing is persisted.
