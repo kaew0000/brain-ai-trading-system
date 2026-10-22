@@ -1,0 +1,25 @@
+{
+  "id": "sr-bounce-knowledge",
+  "name": "Support and resistance bounce",
+  "category": "support_resistance",
+  "engine": null,
+  "description": "Fade tests of well-established horizontal support/resistance zones with confirmation, stopping beyond the zone. Knowledge-only: zone detection is discretionary and has no built-in engine here.",
+  "parameters": {},
+  "market_conditions": [
+    "RANGE"
+  ],
+  "invalidation_conditions": [
+    "decisive close through the zone"
+  ],
+  "tags": [
+    "support",
+    "resistance",
+    "levels"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}

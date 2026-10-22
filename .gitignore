@@ -53,3 +53,6 @@ update/failed/*
 # .gitignore pattern in this repo (verified: no match anywhere before
 # this line). `npm install` there stages ~8000 files if not excluded.
 node_modules/
+
+# Brain Strategy Intelligence runtime output (databases, reports) - never committed
+brain_strategy_intelligence_data/

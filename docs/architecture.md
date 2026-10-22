@@ -7278,3 +7278,46 @@ diff by the same method §71 used. `ruff check .` clean repo-wide.
 pre-existing, unrelated findings in `test_governance_phase2.py` at
 lines untouched by this diff, confirmed identical on unmodified
 `main`). `python -c "import main"` succeeds.
+
+## 73. Strategy Intelligence Bundle — research-only (2026-10-22)
+
+Adds `brain_strategy_intelligence/`, an analytical subsystem that stores strategies, researches them against a market snapshot,
+evaluates them honestly, ranks them transparently and learns from verified closed trades. **It is not an execution engine and
+nothing in the live path imports it.** Operator docs: `docs/strategy_intelligence/` (AUDIT, ARCHITECTURE, USAGE, INTEGRATION,
+SECURITY, TESTING, TROUBLESHOOTING).
+
+### Root cause
+
+No strategy knowledge base, no strategy backtester, no LLM client and no cost-aware out-of-sample ranking existed (audit evidence
+in `AUDIT.md`). `ranking/` ranks opportunities, `learning/` observes live trades read-only; neither can evaluate a candidate
+strategy. ORSTAC (MIT, reference only) has no Python; only its concepts (knowledge base, ingest/reason/learn loop, optional n8n)
+were adapted.
+
+### Design decisions
+
+- Own namespace and own validated config (`config/strategy_intelligence.yaml`); `config/settings.py` and `requirements.txt`
+  untouched (PyYAML imported lazily). Runtime output in gitignored `brain_strategy_intelligence_data/`.
+- `bundle.mode` accepts only `research_only`. `Recommendation` has no order/size/price/leverage field; `may_execute` is
+  `Literal[False]`. No exchange imports, no `eval/exec/subprocess` (enforced by a source-scan test).
+- Fail closed: missing regime/risk, blocked risk, stale/invalid snapshot, internal error -> non-OK status, zero candidates.
+  Risk context must come from the caller's own `RiskEngine`; the bundle never calls or replaces it.
+- Validation lifecycle: UNVALIDATED -> BACKTESTED (COMPLETE evaluation) -> VALIDATED only via `mark_validated` with a named
+  approver and a COMPLETE non-synthetic evaluation. Revising a strategy creates a new version reset to UNVALIDATED.
+- Evaluation never fabricates: insufficient bars/trades/walk-forward windows -> INCOMPLETE with reasons; INCOMPLETE is never ranked.
+  Signals at bar close, fills at next open with adverse slippage; stops fill at the worse of stop/gap-open; parameters tuned on
+  train ranges only (tests mutate future/test data and assert earlier results are unchanged).
+- LLM output (optional) must pass a strict schema, reference only candidate ids and only numbers present in the snapshot or
+  parameters; `missing_data` is computed by code; strategy text is wrapped as untrusted data; failure falls back to offline rules.
+- CEOAgent.WEIGHTS boundary respected: no wiring into agent voting. Any such wiring needs governance approval (G5/G6).
+
+### Scope boundaries / follow-ups
+
+Not wired: risk-context mapping (RiskEngine return semantics unverified), journal -> `TradeRecord` mapping (columns unverified),
+candle-history `DataAdapter` (no stable interface verified). Three example strategies are knowledge-only (no engine). Not executed:
+PostgreSQL/pgvector backend, live LLM provider, n8n workflow, Windows. All test data synthetic.
+
+### Verification
+
+Baseline on `main` @ `9bffc44`: 3256 passed, 3 failed, 4 skipped, 45 deselected. This phase: 3357 passed (+101, the new
+`tests/test_bsi_*.py`), same 3 pre-existing `test_dashboard_serving` failures (need `dashboard_src/dist`), 4 skipped, 45
+deselected. `ruff check .` clean; `vulture --min-confidence 80` clean; `python -c "import main"` succeeds.

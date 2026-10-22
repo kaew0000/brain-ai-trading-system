@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## [Unreleased] — Strategy Intelligence Bundle, research-only (V16 §73)
+
+New self-contained `brain_strategy_intelligence/` package: strategy knowledge base (SQLite, optional pgvector), provider-independent
+research agent (offline by default), cost-aware backtesting with walk-forward/out-of-sample evaluation, explainable ranking,
+trade-outcome learning, and an **advisory-only** Brain Bot adapter. Full detail in `docs/architecture.md` §73 and
+`docs/strategy_intelligence/`. Branch: `feature/phase-strategy-intelligence`. Not wired into any live path.
+
+### Added
+- `brain_strategy_intelligence/` (knowledge, research, evaluation, ranking, learning, integration, reporting, CLI).
+- `config/strategy_intelligence.yaml`, `docs/strategy_intelligence/*`, `tests/test_bsi_*.py` (101 tests) + `tests/_bsi_helpers.py`.
+- `.gitignore`: `brain_strategy_intelligence_data/`.
+
+### Changed / Fixed
+- None. No existing module, setting, dependency or schema changed.
+
+### Known limitations
+- Verified on Python 3.12.3/Linux only; PostgreSQL/pgvector, live LLM, n8n and Windows paths not executed; synthetic test data only.
+
 ## [Unreleased] — AI Self-Improvement Governance Phase 3 / G5: Recommendation Proposals (V16 §72)
 
 Wires `learning/`'s daily recommendation batch into the governance

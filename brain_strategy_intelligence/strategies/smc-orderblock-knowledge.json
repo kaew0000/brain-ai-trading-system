@@ -1,0 +1,27 @@
+{
+  "id": "smc-orderblock-knowledge",
+  "name": "Smart Money Concepts: order block + break of structure",
+  "category": "smart_money_concepts",
+  "engine": null,
+  "description": "Look for a break of market structure, then enter on a retest of the originating order block in the direction of the break, with stops beyond the block. Knowledge-only: requires Brain Bot's SMC feature engine to evaluate, so it cannot be backtested by this bundle.",
+  "parameters": {},
+  "market_conditions": [
+    "TREND",
+    "VOLATILE"
+  ],
+  "invalidation_conditions": [
+    "price closes through the order block",
+    "structure break fails"
+  ],
+  "tags": [
+    "smc",
+    "order block",
+    "bos"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}

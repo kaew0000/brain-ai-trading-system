@@ -1,0 +1,12 @@
+{
+  "name": "BSI scheduled research (optional)",
+  "nodes": [
+    {"parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "0 6 * * *"}]}},
+     "name": "Schedule", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.1, "position": [240, 300]},
+    {"parameters": {"command": "bsi --config config/default.yaml rank --synthetic"},
+     "name": "Run ranking (replace --synthetic with --csv <file>)", "type": "n8n-nodes-base.executeCommand", "typeVersion": 1, "position": [480, 300]}
+  ],
+  "connections": {"Schedule": {"main": [[{"node": "Run ranking (replace --synthetic with --csv <file>)", "type": "main", "index": 0}]]}},
+  "settings": {"executionOrder": "v1"},
+  "meta": {"note": "UNTESTED against a live n8n instance. Optional. Executes only the read-only `bsi` CLI; never places orders."}
+}

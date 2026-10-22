@@ -1,0 +1,41 @@
+{
+  "id": "trend-sma-cross",
+  "name": "SMA crossover trend following",
+  "category": "trend_following",
+  "engine": "sma_cross",
+  "description": "Hold long while the fast simple moving average is above the slow one, short while below. Classic trend following; tends to whipsaw in ranges.",
+  "parameters": {
+    "fast": 20,
+    "slow": 80
+  },
+  "param_grid": {
+    "fast": [
+      10,
+      20,
+      30
+    ],
+    "slow": [
+      60,
+      80,
+      120
+    ]
+  },
+  "market_conditions": [
+    "TREND"
+  ],
+  "invalidation_conditions": [
+    "market enters a sustained RANGE regime",
+    "repeated whipsaw losses"
+  ],
+  "tags": [
+    "sma",
+    "trend",
+    "crossover"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}

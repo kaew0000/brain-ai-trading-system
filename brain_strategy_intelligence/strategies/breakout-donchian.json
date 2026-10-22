@@ -1,0 +1,36 @@
+{
+  "id": "breakout-donchian",
+  "name": "Donchian channel breakout",
+  "category": "breakout",
+  "engine": "donchian_breakout",
+  "description": "Enter when price closes beyond the highest high or lowest low of the previous N bars; exit on a shorter opposite channel break.",
+  "parameters": {
+    "entry_lookback": 55,
+    "exit_lookback": 20
+  },
+  "param_grid": {
+    "entry_lookback": [
+      30,
+      55,
+      80
+    ]
+  },
+  "market_conditions": [
+    "TREND",
+    "SQUEEZE"
+  ],
+  "invalidation_conditions": [
+    "false breakouts cluster in a RANGE regime"
+  ],
+  "tags": [
+    "donchian",
+    "breakout",
+    "channel"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}
