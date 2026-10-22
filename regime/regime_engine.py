@@ -23,6 +23,7 @@ RegimeResult.confidence  : float  0–1
 
 from __future__ import annotations
 
+import time
 import numpy as np
 import pandas as pd
 import warnings
@@ -84,6 +85,10 @@ class RegimeEngine:
         every other symbol — see self.models in __init__.)
     hmm_n_components : int
         Number of hidden states (3 recommended).
+    hmm_retry_cooldown_s : float | None
+        After a symbol's HMM fit fails, that symbol (only) is classified
+        rule-based-only until this many seconds have passed, then the fit
+        is retried. None -> settings.REGIME_HMM_RETRY_COOLDOWN_S.
     """
 
     # ── Rule thresholds ───────────────────────────────────────────────────
@@ -94,9 +99,21 @@ class RegimeEngine:
     BB_VOLATILE_THRESHOLD = 0.08
     ATR_VOLATILE_THRESHOLD = 0.015  # 1.5 % of price
 
-    def __init__(self, use_hmm: bool = True, hmm_n_components: int = 3) -> None:
+    def __init__(
+        self,
+        use_hmm: bool = True,
+        hmm_n_components: int = 3,
+        hmm_retry_cooldown_s: float | None = None,
+    ) -> None:
+        # `use_hmm` is the operator's configured on/off switch and is
+        # never mutated by this class (V16 §74): a per-symbol HMM fit
+        # failure is tracked in self._hmm_failed instead.
         self.use_hmm         = use_hmm
         self.hmm_n_components = hmm_n_components
+        if hmm_retry_cooldown_s is None:
+            from config.settings import settings
+            hmm_retry_cooldown_s = settings.REGIME_HMM_RETRY_COOLDOWN_S
+        self.hmm_retry_cooldown_s = float(hmm_retry_cooldown_s)
         self._scaler          = StandardScaler()
         # Phase 4B Step 3A: one fitted HMM per symbol, keyed by the
         # `symbol` argument classify() now accepts. Presence of a key
@@ -107,15 +124,19 @@ class RegimeEngine:
         # bundle addresses — see docs/architecture.md's Phase 4B Step 3A
         # section for the empirical reproduction).
         #
-        # Callers that don't pass `symbol` to classify() (every existing
-        # caller as of this commit — main.py's legacy single-symbol loop,
-        # execution/portfolio_signal_provider.py) all map to the same
-        # _DEFAULT_MODEL_KEY, reproducing the exact prior one-shared-model
-        # behavior byte-for-byte. This intentionally does NOT yet fix
-        # cross-symbol contamination for those callers — wiring an actual
-        # `symbol=` argument through them is explicitly out of scope for
-        # this bundle (see PATCH_NOTES.md's "Known limitation" section);
-        # this class only builds the capability.
+        # Callers that omit `symbol` (main.py's legacy single-symbol loop)
+        # all map to _DEFAULT_MODEL_KEY — the exact prior one-shared-model
+        # behavior. The multi-symbol caller
+        # (execution/portfolio_signal_provider.py) has passed `symbol=`
+        # since V16 Phase 4B Step 3C, so each symbol gets its own model.
+        #
+        # V16 §74: HMM fit failures are likewise isolated per symbol —
+        # symbol_key -> time.monotonic() of the failed fit. A key present
+        # here is classified rule-based-only until the cooldown elapses.
+        # Previously a single failure set self.use_hmm=False for the
+        # whole engine, silently disabling HMM scoring for every
+        # healthy symbol sharing the instance.
+        self._hmm_failed: dict[str, float] = {}
         self.models: dict[str, hmm.GaussianHMM] = {}
         logger.info(f"RegimeEngine | use_hmm={use_hmm} components={hmm_n_components}")
 
@@ -194,10 +215,21 @@ class RegimeEngine:
             )
             model.fit(X)
             self.models[symbol_key] = model
+            self._hmm_failed.pop(symbol_key, None)
             logger.info(f"HMM fitted | symbol={symbol_key} states={self.hmm_n_components}")
         except Exception as exc:
-            logger.warning(f"HMM fit failed ({exc}); using rule-based only")
-            self.use_hmm = False
+            self._hmm_failed[symbol_key] = time.monotonic()
+            logger.warning(
+                f"HMM fit failed | symbol={symbol_key} ({exc}); rule-based only for this "
+                f"symbol, retry in {self.hmm_retry_cooldown_s:.0f}s"
+            )
+
+    def _hmm_fit_suppressed(self, symbol_key: str) -> bool:
+        """True while `symbol_key` is inside its post-failure cooldown."""
+        failed_at = self._hmm_failed.get(symbol_key)
+        if failed_at is None:
+            return False
+        return (time.monotonic() - failed_at) < self.hmm_retry_cooldown_s
 
     def _hmm_probabilities(self, X: np.ndarray, symbol_key: str) -> dict[str, float]:
         model = self.models.get(symbol_key)
@@ -245,13 +277,14 @@ class RegimeEngine:
         Parameters
         ----------
         symbol : which symbol this OHLCV data is for. Optional — omit for
-            the existing single-symbol callers (main.py's legacy loop,
-            execution/portfolio_signal_provider.py as of this commit),
-            which all fall back to one shared model key, identical to
-            this class's behavior before Phase 4B Step 3A. Passing an
-            explicit symbol gives that symbol its own independently-fit
-            HMM, never reused for a different symbol (see self.models's
-            docstring in __init__ for the audit finding this addresses).
+            the legacy single-symbol caller (main.py's loop), which falls
+            back to one shared model key, identical to this class's
+            behavior before Phase 4B Step 3A. The multi-symbol caller
+            (execution/portfolio_signal_provider.py) passes it
+            explicitly. An explicit symbol gets its own independently-fit
+            HMM, never reused for a different symbol, and its own
+            independent fit-failure state (V16 §74): one symbol's failed
+            fit never disables HMM scoring for another.
 
         Returns
         -------
@@ -286,7 +319,7 @@ class RegimeEngine:
                 X_raw  = feat_df[feat_cols].values
                 X_scaled = self._scaler.fit_transform(X_raw)
 
-                if symbol_key not in self.models:
+                if symbol_key not in self.models and not self._hmm_fit_suppressed(symbol_key):
                     self._fit_hmm(X_scaled, symbol_key)
 
                 if symbol_key in self.models:

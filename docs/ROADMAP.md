@@ -51,6 +51,10 @@ PR, and `docs/architecture.md` section — see that file and
   (§32, tagged `v16-engine-phase4b-step3d`)
 ✅ Phase 4C Step 1 — Autonomous Learning Pipeline (§33, Track A;
   `learning/` package, read-only)
+✅ Regime per-symbol HMM isolation — the `symbol=` call-site wiring
+  landed in Phase 4B Step 3C (§31); the remaining failure-path gap (one
+  symbol's HMM fit failure disabled HMM for all symbols) is closed in
+  §74. This item was listed under "Planned" in error after §31 merged.
 
 **Note on numbering:** the sequence 2A → 2B → 2C → 2E → 2F has no
 "Phase 2D" anywhere in commit messages, `CHANGELOG.md`,
@@ -71,9 +75,6 @@ here, not re-derived:
 
 - Natural SL/TP close monitor for the V16 multi-symbol path (today
   only replacement-triggered closes are wired to attribution).
-- Pass `symbol=` to `RegimeEngine.classify()` from
-  `PortfolioSignalProvider` — closes a still-live cross-symbol HMM
-  contamination gap.
 - Per-agent attribution for CEO-gated multi-symbol trades (agent votes
   still aren't persisted for that path).
 - Fee capture (no write path fetches Binance commission data today).
@@ -91,3 +92,19 @@ here, not re-derived:
 - Phase 4C Step 2+ — actually consuming the Learning Pipeline's
   dataset for something beyond observation (explicitly deferred by
   Phase 4C Step 1's own "observation and recommendation only" brief).
+- **Needs decision — touches live signal path:** `RegimeEngine`'s
+  single shared `StandardScaler` is `fit_transform`-ed on every
+  `classify()` call. The per-symbol HMM is fit once, on the first
+  window's scaling, but scored on every later window re-scaled with that
+  window's own mean/std — a scoring-consistency question. The shared
+  scaler instance is also mutated on every call and is not thread-safe.
+  Not an inter-symbol leak today (refit each call), but any fix (per-
+  symbol scaler persisted with its HMM, or a fixed scaling) changes live
+  regime output and needs an explicit decision plus before/after
+  evidence. See §74 "Not changed here".
+- **Enhancement — propose refit interval + evaluation before
+  implementing:** each symbol's HMM is fit once (first `classify()` call
+  per symbol) and never refit, so it goes stale as that symbol's
+  volatility structure drifts. Needs a proposed refit interval and an
+  offline evaluation (regime stability / agreement with the rule-based
+  classifier, fit cost vs. latency budget) before any code. See §74.

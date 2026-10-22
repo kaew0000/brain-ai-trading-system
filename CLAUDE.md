@@ -240,8 +240,10 @@ reconciliation, emergency, exchange-reject) through one
 §32/§33 "Next up" rather than re-described here: 1) per-agent
 attribution for CEO-confirmed multi-symbol trades (still not wired —
 `agent_attribution_from_ceo_decision()` still isn't called anywhere),
-2) passing `symbol=` to `RegimeEngine.classify()` from
-`PortfolioSignalProvider` (cross-symbol HMM contamination still live),
+2) ~~passing `symbol=` to `RegimeEngine.classify()`~~ — DONE: call site
+wired in §31; failure-path isolation fixed in §74 (open follow-ups,
+both unscheduled: shared-`_scaler` consistency, periodic HMM refit —
+see ROADMAP.md),
 3) per-symbol sub-agent instance state, 4) fee capture,
 5) `get_ensemble_learning_dataset()`'s N+1 read pattern doesn't scale
 past ~1,000 trades (found while building Phase 4C Step 1's benchmark —
