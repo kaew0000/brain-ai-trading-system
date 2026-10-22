@@ -1,25 +1,30 @@
-# MIGRATION — SMC Top-Down Confirmation / M5
+# MIGRATION — Strategy Intelligence Bundle
 
 ## Do you need to do anything?
 
-No. Defaults reproduce current behaviour: no M5 fetch, no new blocks.
-No schema or dependency changes. Merge phases 1-4 in order.
+No. Nothing in Brain Bot imports the new package, there is no new dependency (PyYAML is imported lazily, only when a YAML
+config file is loaded; it is already present transitively via `uvicorn[standard]`), no new `.env`/settings flag, no schema or
+database change. Merge and deploy as usual; trading behaviour is unchanged.
 
-## Opting in (`.env`, then restart)
+## Trying it (optional, from the repo root)
 
-1. `SMC_M5_ENABLED=True` — fetch/analyse M5 (extra API call per cycle; check rate limits).
-2. `SMC_TF_CONFLICT_BLOCKS_TRADE=True` — skip when any timeframe's bias opposes the trade.
-3. `SMC_TOPDOWN_GATE_ENABLED=True` — require the full sequence; expect far fewer trades.
-   Adds `TOPDOWN_<state>` / `TF_CONFLICT` entries to `block_reasons` in the journal.
+1. `pytest tests/test_bsi_*.py -q` — 101 offline tests.
+2. `python -m brain_strategy_intelligence demo` — end-to-end on SYNTHETIC data; output in `brain_strategy_intelligence_data/`
+   (gitignored).
+3. `python -m brain_strategy_intelligence init-kb` then `evaluate <id> --csv <your candles.csv> ...` for real-data evaluation.
+   Edit a copy of `config/strategy_intelligence.yaml` first: fee/slippage/funding values are assumptions.
 
-Recommended order: enable the M5 fetch and watch `topdown` in logged contexts first,
-then the conflict block, then the full gate. Validate on testnet/paper before live capital.
+Optional extras (not needed for offline use): `storage.backend: postgres` (install `psycopg[binary]`, `pgvector`; env
+`BSI_POSTGRES_DSN`); `llm.provider: anthropic` + `llm.model` + env `ANTHROPIC_API_KEY`.
 
-## Related optional flags from earlier phases
+## Wiring into Brain Bot (NOT done in this phase)
 
-`SMC_SWEEP_SCORING_ENABLED`, `SMC_CHOCH_REQUIRES_SWEEP`, `SMC_SWEEP_LEVELS_ENABLED`.
-The top-down gate relies on sweep fields (always computed since phase 2).
+See `docs/strategy_intelligence/INTEGRATION.md` (file-by-file). Manual prerequisites: verify `RiskEngine` semantics for the
+risk-context mapping, verify journal columns for the trade mapping, supply real candles, and never wire the output into
+`CEOAgent.WEIGHTS` voting without governance approval.
 
 ## Rollback
 
-Unset the flags (instant) or revert the commit. Nothing is persisted.
+`git revert` the single commit (or delete `brain_strategy_intelligence/`, `config/strategy_intelligence.yaml`,
+`docs/strategy_intelligence/`, `tests/test_bsi_*.py`, `tests/_bsi_helpers.py`, and the one `.gitignore` line). Delete
+`brain_strategy_intelligence_data/` to remove any local databases/reports. Nothing persisted outside that directory.

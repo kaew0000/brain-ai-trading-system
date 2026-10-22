@@ -1,0 +1,72 @@
+# Brain Strategy Intelligence - default configuration (mirrors the built-in defaults; a test enforces this).
+# Secrets are NEVER read from this file; use environment variables.
+# bundle.mode must stay 'research_only' - any other value is rejected at load time.
+# fee/slippage/funding values are ASSUMPTIONS: set them to your real Binance Futures tier before trusting results.
+# Usage: python -m brain_strategy_intelligence --config config/strategy_intelligence.yaml <command>
+bundle:
+  enabled: true
+  mode: research_only
+storage:
+  backend: sqlite
+  sqlite_path: brain_strategy_intelligence_data/knowledge.sqlite3
+  postgres_dsn_env: BSI_POSTGRES_DSN
+  embedding_dim: 256
+llm:
+  provider: none
+  model: ''
+  api_key_env: ANTHROPIC_API_KEY
+  timeout_seconds: 20.0
+  max_retries: 2
+  max_tokens: 1500
+research:
+  schedule_cron: 0 6 * * *
+  max_candidates: 8
+evaluation:
+  initial_capital: 10000.0
+  position_pct: 0.1
+  max_leverage: 1.0
+  fee_bps: 5.0
+  slippage_bps: 2.0
+  include_funding: true
+  funding_rate_per_8h: 0.0001
+  funding_conservative: true
+  stop_loss_pct: null
+  allow_short: true
+  min_bars: 1000
+  min_oos_trades: 10
+  min_wf_windows: 2
+  max_gap_fraction: 0.02
+  split:
+    train: 0.6
+    validation: 0.2
+    oos: 0.2
+  walk_forward:
+    train_bars: 600
+    test_bars: 150
+    step_bars: 150
+    purge_bars: 5
+  sensitivity_perturbation_pct: 0.2
+ranking:
+  weights:
+    oos_profit_factor: 0.15
+    return_over_drawdown: 0.2
+    drawdown: 0.15
+    regime_stability: 0.15
+    reliability: 0.1
+    degradation: 0.1
+    sensitivity: 0.1
+    cost_drag: 0.05
+  min_reliable_trades: 50
+  max_acceptable_drawdown_pct: 30.0
+  negative_oos_penalty: 0.5
+learning:
+  db_path: brain_strategy_intelligence_data/outcomes.sqlite3
+  min_samples_degradation: 20
+  poor_execution_slippage_ratio: 2.0
+  degradation_z: 1.645
+integration:
+  max_snapshot_age_seconds: 900
+reporting:
+  output_dir: brain_strategy_intelligence_data/reports
+logging:
+  level: INFO

@@ -1,51 +1,58 @@
-# PATCH NOTES — SMC Top-Down Confirmation, M5 Timeframe, Conflict Block
+# PATCH NOTES — Strategy Intelligence Bundle (research-only)
 
-Branch: `feature/phase-smc-m5-gating`
-Stacked on: phase 3 (`d1be45c`) -> phase 2 (`80d2d7f`) -> phase 1 (`f602916`). Merge in order.
-Base: `main` @ `1904ccb`
+Branch: `feature/phase-strategy-intelligence`
+Base: `main` @ `9bffc44` (Merge pull request #110, SMC M5 gating)
+Commit: `feat(strategy-intelligence): Strategy Intelligence Bundle (research-only)` (exactly one)
 
-## Root cause
+## Root cause (why this phase exists)
 
-The live path (`main.py` -> `MarketContextBuilder` -> `ConfidenceEngine`) only
-ever saw H4/H1/M15, picked a direction by trend-bias voting, and scored all
-SMC factors independently. There was no M5 data, no ordering
-(zone -> sweep -> CHoCH -> entry trigger), and `mtf_aligned=False` never
-stopped a trade, unlike the SMC doc (confirm top-down, skip on conflict).
+Brain Bot has no way to store/search strategy knowledge, no strategy backtester, no LLM client, and no
+cost-aware, out-of-sample ranking of candidate strategies (read-only audit on a fresh clone of `main`:
+`grep -rIl -E "anthropic|openai|ollama|llm" --include=*.py` outside tests returned nothing; "backtest" appears only in
+`ml/extensions/*` and `execution/order_timeline.py`; `ranking/` ranks *symbols/opportunities*, `learning/` is read-only
+observation of live trades). Evidence in `docs/strategy_intelligence/AUDIT.md`. The reference project (ORSTAC, MIT) contains
+no Python — only Deriv XML bots and an n8n/PostgreSQL agent — so only its *concepts* were adapted; no code was copied.
 
-## Changes
+## Changes (all additive — no existing code path imports the new package)
 
-- `features/smc_topdown.py` (new, pure logic): `evaluate_topdown()` state machine
-  BIAS (H4 matches, H1 not opposing) -> ZONE (price in H1 OB/FVG) ->
-  CONFIRM (M15 sweep AND CHoCH, same direction) -> ENTRY (M5 CHoCH + FVG/OB;
-  skipped with `m5_used=False` when no M5). `CONFLICT` when any analysed TF bias,
-  or an M5 CHoCH, opposes the direction.
-- `data/binance_provider.py`: `_ohlcv_timeframes()` helper (h4/h1/m15 unchanged)
-  and best-effort `_fetch_optional_m5()` called from both
-  `get_all_market_data()` and `get_market_data_for()`. M5 failure is logged
-  and non-fatal (h4/h1/m15 failures still raise as before).
-- `intelligence/market_context_builder.py`: adds `smc_m5` (`{}` when absent) and
-  `topdown` to the context. Existing keys untouched.
-- `decision/confidence_engine.py::_check_blocks`: two opt-in hard blocks
-  (`TF_CONFLICT ...`, `TOPDOWN_<state>`) using the existing block mechanism.
-- `config/settings.py`: `M5_TIMEFRAME`, `SMC_M5_ENABLED`, `SMC_TOPDOWN_GATE_ENABLED`,
-  `SMC_TF_CONFLICT_BLOCKS_TRADE`, `SMC_ZONE_TOLERANCE_PCT`.
-- `tests/test_smc_topdown.py`: 24 tests (state machine, blocks, M5 fetch,
-  real `MarketContextBuilder.build()` with and without M5).
+New package `brain_strategy_intelligence/` (self-contained, namespace cannot shadow `ranking/`, `research/`, `learning/`):
+- `knowledge/` — versioned strategy store (SQLite default, optional PostgreSQL+pgvector, lazy import), hybrid retrieval,
+  validation policy (everything starts UNVALIDATED; revising resets status; only `mark_validated` with approver + COMPLETE
+  non-synthetic evaluation can validate).
+- `research/` — provider-independent agent: offline rules by default, optional LLM adapter; strict output validation,
+  invented-number guard, bounded retries/timeouts, fallback to offline.
+- `evaluation/` — 6 deterministic engines (no code execution), next-open-fill backtester with fees/slippage/funding/stops,
+  train/validation/OOS split, walk-forward with purge, parameter sensitivity; INCOMPLETE instead of invented numbers.
+- `ranking/` — 8 weighted, explainable components; INCOMPLETE never ranked.
+- `learning/` — idempotent trade-outcome recorder (closed + complete + verified only), MFE/MAE, heuristic failure classes, reports.
+- `integration/brain_bot_adapter.py` — advisory `Recommendation` (no order fields, `may_execute: Literal[False]`), fail-closed.
+- `reporting/`, `cli.py`, `__main__.py` (`python -m brain_strategy_intelligence ...`), `strategies/` (9 examples, no performance
+  claims), `workflows/` (optional n8n, untested).
+- `config/strategy_intelligence.yaml` — mirrors code defaults (a test enforces equality). `bundle.mode` accepts only `research_only`.
+- `tests/test_bsi_*.py` (8 files, 101 tests, all `@unit`) + `tests/_bsi_helpers.py`. `docs/strategy_intelligence/*` + `docs/architecture.md` §73.
+- `.gitignore`: + `brain_strategy_intelligence_data/` (runtime DBs/reports).
+- Untouched on purpose: `config/settings.py`, `requirements.txt` (PyYAML imported lazily), `main.py`, risk/decision/execution/agents.
 
 ## Impact
 
-All new flags default off, so existing behaviour is unchanged; the context
-just carries two extra informational keys. `SMCEngine.analyze_mtf` already
-handles any timeframe keys, and no code iterates all timeframes.
-With `SMC_M5_ENABLED` there is one extra klines call per symbol per cycle.
+Zero runtime impact on trading: nothing imports the package; no new dependency; no settings flag; no schema change; no network
+host other than an optional, off-by-default `api.anthropic.com` call.
 
-## Limitations / follow-up
+## Quality gates (actually executed on this branch)
 
-- M5 is used for the entry *trigger* only; entry price and SL/TP still come from
-  M15 OB / sweep (phase 3). Anchoring entry to the M5 FVG/OB is not done.
-- The gate evaluates the single M15-bias direction; it does not search the
-  opposite direction.
-- `BrainDecisionEngine` (legacy v1) and `smc_oi_regime_multi` strategy do not
-  consult `topdown`; the gate applies on the ConfidenceEngine path
-  (main loop, portfolio signal provider).
-- Thresholds (zone tolerance, "conflict = any opposing TF") are first-cut; validate on paper/testnet.
+- `ruff check .` — All checks passed
+- `vulture . --exclude dashboard_src,dashboard,tests --min-confidence 80` — clean (it caught `self_inner` in a first draft; refactored)
+- `python -c "import main"` — OK
+- `pytest tests/` — **3357 passed, 3 failed, 4 skipped, 45 deselected**. Baseline on unmodified `main` @ `9bffc44`:
+  3256 passed, same 3 failed, 4 skipped, 45 deselected. Delta = +101 = this phase's tests. The 3 failures are
+  `tests/test_dashboard_serving.py` (need `dashboard_src/dist`, which CI builds first) — pre-existing, unrelated.
+
+## Limitations / known follow-up
+
+- Verified only on Python 3.12.3 / Linux. NOT executed: PostgreSQL/pgvector backend, live Anthropic provider, n8n import, Windows.
+- All test and demo data is SYNTHETIC; nothing here says anything about real-market profitability.
+- 3 example strategies (SMC, support/resistance, volume/OI) are knowledge-only (no engine) and evaluate INCOMPLETE.
+- "Multi-timeframe" engine is a lookback-scaled proxy; regime stability is approximated by walk-forward window profitability;
+  statistical heuristics are uncalibrated; liquidation and order-book depth are not modelled; fee/slippage/funding are assumptions.
+- Integration is deliberately NOT wired: risk-context mapping (RiskEngine return semantics unverified), journal -> TradeRecord
+  mapping (columns unverified) and a candle-history DataAdapter are follow-ups (see `docs/strategy_intelligence/INTEGRATION.md`).

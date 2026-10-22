@@ -1,0 +1,35 @@
+{
+  "id": "momentum-roc",
+  "name": "Rate-of-change momentum",
+  "category": "momentum",
+  "engine": "roc_momentum",
+  "description": "Go long when the N-bar rate of change exceeds a positive threshold and short below the negative threshold; otherwise flat.",
+  "parameters": {
+    "lookback": 48,
+    "threshold_pct": 2.0
+  },
+  "param_grid": {
+    "lookback": [
+      24,
+      48,
+      96
+    ]
+  },
+  "market_conditions": [
+    "TREND",
+    "VOLATILE"
+  ],
+  "invalidation_conditions": [
+    "momentum reversals in a choppy RANGE"
+  ],
+  "tags": [
+    "roc",
+    "momentum"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}

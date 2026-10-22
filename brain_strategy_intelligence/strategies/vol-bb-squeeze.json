@@ -1,0 +1,36 @@
+{
+  "id": "vol-bb-squeeze",
+  "name": "Bollinger squeeze breakout",
+  "category": "volatility",
+  "engine": "bb_squeeze_breakout",
+  "description": "After Bollinger bandwidth contracts below a threshold (a squeeze), trade the first close outside the bands; exit at the midline.",
+  "parameters": {
+    "period": 20,
+    "num_std": 2.0,
+    "squeeze_bandwidth_pct": 4.0
+  },
+  "param_grid": {
+    "squeeze_bandwidth_pct": [
+      3.0,
+      4.0,
+      6.0
+    ]
+  },
+  "market_conditions": [
+    "SQUEEZE"
+  ],
+  "invalidation_conditions": [
+    "volatility stays expanded so no squeeze forms"
+  ],
+  "tags": [
+    "bollinger",
+    "volatility",
+    "squeeze"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}

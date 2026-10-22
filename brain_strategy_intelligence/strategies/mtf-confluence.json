@@ -1,0 +1,36 @@
+{
+  "id": "mtf-confluence",
+  "name": "Multi-timeframe trend confluence (lookback-scaled proxy)",
+  "category": "multi_timeframe_confluence",
+  "engine": "mtf_confluence",
+  "description": "Trade only when a fast/slow SMA cross on the base series agrees with price versus a much longer average (a lookback-scaled proxy for a higher timeframe); otherwise flat.",
+  "parameters": {
+    "fast": 10,
+    "slow": 30,
+    "htf_factor": 4
+  },
+  "param_grid": {
+    "htf_factor": [
+      3,
+      4,
+      6
+    ]
+  },
+  "market_conditions": [
+    "TREND"
+  ],
+  "invalidation_conditions": [
+    "base and higher-timeframe views disagree for long periods"
+  ],
+  "tags": [
+    "multi timeframe",
+    "confluence",
+    "trend filter"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}

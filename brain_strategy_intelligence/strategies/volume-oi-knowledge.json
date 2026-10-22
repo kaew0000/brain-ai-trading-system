@@ -1,0 +1,26 @@
+{
+  "id": "volume-oi-knowledge",
+  "name": "Volume and open-interest divergence",
+  "category": "volume_derivatives",
+  "engine": null,
+  "description": "Compare price direction with volume, open interest and funding: rising price with falling open interest suggests a weak move; extreme funding suggests crowded positioning. Knowledge-only: needs derivatives data feeds not bundled here.",
+  "parameters": {},
+  "market_conditions": [
+    "TREND",
+    "VOLATILE"
+  ],
+  "invalidation_conditions": [
+    "derivatives data is stale or unavailable"
+  ],
+  "tags": [
+    "volume",
+    "open interest",
+    "funding"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}

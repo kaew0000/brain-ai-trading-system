@@ -1,0 +1,37 @@
+{
+  "id": "meanrev-rsi",
+  "name": "RSI mean reversion",
+  "category": "mean_reversion",
+  "engine": "rsi_reversion",
+  "description": "Buy when RSI falls below the oversold level and sell short above the overbought level; exit when RSI returns to its midline.",
+  "parameters": {
+    "period": 14,
+    "oversold": 30,
+    "overbought": 70,
+    "exit_level": 50
+  },
+  "param_grid": {
+    "oversold": [
+      25,
+      30,
+      35
+    ]
+  },
+  "market_conditions": [
+    "RANGE"
+  ],
+  "invalidation_conditions": [
+    "strong directional TREND regime (fading into momentum)"
+  ],
+  "tags": [
+    "rsi",
+    "reversion",
+    "oscillator"
+  ],
+  "provenance": {
+    "source": "bundle examples",
+    "origin": "builtin",
+    "notes": "Textbook-style definition; no performance claim is made or implied."
+  },
+  "version": 1
+}
