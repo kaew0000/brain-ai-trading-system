@@ -2086,6 +2086,13 @@ Four things changed the shape of this work from how it was requested:
    multi-symbol positions for a natural SL/TP hit. This phase wires the
    real call path that exists; a natural-close monitor is its own
    future Execution-Layer phase, not folded in here.
+
+   > **Correction (V16 §75, 2026-10-23):** accurate when written, stale
+   > since. §32 (unified lifecycle) and §60 (multi-symbol
+   > `monitor_open_trades()` branch) now journal natural closes through
+   > `TradeLifecycle`. What remained broken was that such a close never
+   > removed the position from the scheduler's `PortfolioState` — fixed
+   > in §75.
 3. **Paper mode's execution engine has no `close_position()` at all**
    (`paper/paper_execution.py` — confirmed by reading it, not assumed).
    `EXECUTION_MODE=paper` is the default, so in a default deployment,
@@ -2148,6 +2155,7 @@ the real (backward-compatible) one it doubles for.
   aren't detected anywhere (see "Discovery" #2) — attribution fires
   correctly for the replacement-close path that exists; a monitor for
   the natural-close path is separate, future Execution-Layer work.
+  *(Superseded — see §60/§32 and §75.)*
 - `fees` is always `None` today (see "Discovery" #4) — the schema/API
   is ready, the data source isn't wired.
 - No weight-learning logic was added — `get_ensemble_learning_dataset()`
@@ -2164,6 +2172,7 @@ the real (backward-compatible) one it doubles for.
   single biggest remaining gap for this phase's own close-side
   attribution to matter broadly (today: replacement closes only).
   Needs its own scoping pass; deliberately not started here.
+  *(Done — see §60/§32 and §75.)*
 - **Make `PortfolioSignalProvider` agent-aware** — the only way
   multi-symbol trades will ever get real (non-empty)
   `agent_participation`. A significant, separate redesign of the
@@ -2369,7 +2378,7 @@ work beyond `get_signal_with_context()`: one dict construction, one
   noted as the natural payoff of doing both, not claimed as done by
   either phase alone.
 - Everything §29 already carried forward and this phase didn't touch:
-  natural SL/TP close monitor, fee capture, Phase 4C dataset
+  natural SL/TP close monitor (since done — §60/§32/§75), fee capture, Phase 4C dataset
   consumption, dashboard exposure, RiskEngine's single account-level
   gate, real correlation tracking, sector-cap capital redistribution.
 
@@ -2582,7 +2591,7 @@ behavior is identical to before this phase existed.
   endpoint — the endpoint exists, no page renders it yet (same pattern
   as every dashboard gap §19/§23/§24 already carried forward).
 - Everything §30 already carried forward and this phase didn't touch:
-  natural SL/TP close monitor, fee capture, Phase 4C dataset
+  natural SL/TP close monitor (since done — §60/§32/§75), fee capture, Phase 4C dataset
   consumption, RiskEngine's single account-level gate, real
   correlation tracking, sector-cap capital redistribution.
 
@@ -2833,7 +2842,7 @@ no data migration, nothing to undo in already-persisted journal rows
   own "Next up" already named this; this phase's unification makes it
   a smaller lift once built (it would just call `TradeLifecycle` like
   everything else now does), but building the detection itself remains
-  out of scope here.
+  out of scope here. *(Built in §60; PortfolioState release in §75.)*
 - Everything §31 already carried forward and this phase didn't touch:
   per-agent attribution for CEO-confirmed multi-symbol trades, the
   dashboard UI panel for `/api/ceo-decisions` and now `/api/lifecycle/*`
@@ -7422,3 +7431,117 @@ deselected. `ruff check . --exclude dashboard_src --exclude dashboard`
 clean; vulture (`--min-confidence 80`) output content-identical to
 `main`; `python -c "import main"` succeeds. Build output is gitignored
 (`dist/`) and not part of this change.
+
+---
+
+## 75. Natural SL/TP Close: Release the PortfolioState Slot (2026-10-23)
+
+Bugfix. Branch: `fix/execution-natural-close-portfolio-release`. Follows §74 (PR #112).
+Implements ROADMAP.md "Planned" → *Natural SL/TP close monitor for the V16
+multi-symbol path* and §29 "Discovery" #2 / §32 "Next up".
+
+### The roadmap item was already mostly done
+
+ROADMAP, §29 and §32 said nothing monitors multi-symbol positions for a
+natural SL/TP hit and that only replacement closes are attributed. That
+stopped being true: §32 unified every close through `TradeLifecycle`,
+and §60 gave `main.py::monitor_open_trades()` a `SCHEDULER_ENABLED`
+branch that checks each open journal row against its own symbol's
+exchange position and, when the position is gone, closes the row through
+`TradeLifecycle` (`CloseSource.STOP_LOSS` / `TAKE_PROFIT`, cooldown
+registered). Reproduced against `main` @ `81dc550`: attribution **is**
+written for a natural close (`source='SL'`, `reason='loss_threshold_heuristic'`).
+
+### Root cause
+
+The same branch never removed the position from the scheduler's
+`PortfolioState` (`sys["portfolio_state"]`). `TradeLifecycle.exit_confirmed()`
+→ `PortfolioManager.notify_position_closed()` registers a cooldown only;
+`ExecutionOrchestrator._execute_replacement_close()` removes its own
+position from `PortfolioState` explicitly, and nothing else did.
+`PortfolioState.active_positions`'s own docstring states the contract:
+closed positions "should be removed via remove_position() rather than
+left in here". So every natural SL/TP close left a ghost position behind.
+
+### Reproduction (against `main` @ `81dc550`, no code changes)
+
+Real `monitor_open_trades`, `TradeJournalV2` (temp SQLite),
+`TradeLifecycle`, `PortfolioManager`, `PortfolioState`; only the exchange
+view is faked (position gone, mark 89.40, SL 90.0):
+
+```
+BEFORE  portfolio positions: ['ETHUSDT'] | open journal trades: 1
+journal open trades          : 0
+attribution record           : result=LOSS exit_price=89.4 pnl=-21.2 source='SL' reason='loss_threshold_heuristic'
+lifecycle state              : CLOSED | exit_source: SL
+PortfolioState held_symbols  : ['ETHUSDT']  position_count: 1        <-- ghost
+(a) re-entry on ETHUSDT after its SL closed -> rejected: [('ETHUSDT', 'already_held')]
+(b) max_positions=5; 5 opened, ALL stopped out; exchange positions=0, PortfolioState.position_count=5
+    new candidate NEWUSDT -> selected: [] | rejected: [('NEWUSDT', 'portfolio_full')]
+```
+
+Consequence: each natural close permanently consumed one of
+`max_positions` slots; after that many closes the scheduler could never
+open anything again ("portfolio_full"), and the symbol was stuck
+`already_held` instead of entering its cooldown. Capital/exposure/sector
+accounting were also inflated by the ghosts.
+
+### Fix
+
+- `portfolio/portfolio_state.py`: `remove_position_for_trade(symbol, trade_id)`
+  — removes the symbol's position only if it belongs to that trade (the
+  close is detected from the journal row, so this can never evict a
+  different, newer position in the same symbol). `remove_position()` is
+  unchanged.
+- `main.py::monitor_open_trades()`: in the multi-symbol branch, release
+  the position before the lifecycle/journal write (the orchestrator's own
+  order), wrapped so a release failure can never stop the journal close.
+  Applies on both the lifecycle path and the duplicate-close fallback.
+  Single-symbol mode never reads `sys["portfolio_state"]`.
+
+No new thread, poller, or event hook: it rides the existing 30 s
+`monitor_open_trades` schedule, consistent with Phase 2F's design.
+Attribution output is byte-for-byte unchanged.
+
+After the fix, the same reproduction: `held_symbols=[]`, ETHUSDT rejected
+as `in_cooldown` (not `already_held`), all 5 slots recovered and
+`NEWUSDT` selected.
+
+### Tests
+
+`tests/test_natural_close_portfolio_release.py` (16 tests): the new
+`PortfolioState` method (match / different trade / absent / no trade_id /
+unconditional `remove_position` unchanged); SL and TP hits release the
+slot (TP also guards attribution `source='TP'`); only the closed symbol
+is released; released symbol is `in_cooldown` not `already_held`; the
+`max_positions` exhaustion scenario; a different trade's position is not
+evicted; duplicate-close-guard path, missing lifecycle, a raising
+release, and a `sys` without `portfolio_state`; single-symbol mode leaves
+PortfolioState untouched. 11 fail against the pre-fix code; the other 5
+are invariant guards that correctly pass on both.
+
+### Not changed here (raised in ROADMAP "Planned")
+
+1. **Fidelity of a natural close's price and cause — needs decision.**
+   Exit price is the poll-time mark (up to ~30 s after the fill), cause
+   is a WIN→TP / LOSS→SL heuristic shared with the single-symbol path.
+   Needs a fill/order-history lookup no data-provider method wraps today.
+2. **Paper mode with `SCHEDULER_ENABLED`** — the monitor has no lane
+   filter, so PAPER-lane rows are treated as exchange-closed on the first
+   poll. Pre-existing; verified identical on `main` and this branch.
+3. **PortfolioState positions with no journal row** (`trade_id=None`)
+   are invisible to a journal-driven monitor and still leak.
+
+### Housekeeping in this PR
+
+`CLAUDE.md` "Branch & PR naming" block (`feature/` vs `fix/`, title
+format, one-PR-per-scope); `ml_models/` added to `.gitignore` under
+"Model artifacts"; test-pollution item added to ROADMAP (P2, hygiene).
+
+### Verification
+
+Baseline `main` @ `81dc550`: 3369 passed, 4 skipped, 45 deselected.
+This PR: 3385 passed (+16), 4 skipped, 45 deselected. `ruff check .
+--exclude dashboard_src --exclude dashboard` clean; vulture
+(`--min-confidence 80`) content-identical to `main` (31 lines each);
+`python -c "import main"` succeeds.

@@ -41,6 +41,29 @@ class PortfolioState:
     def remove_position(self, symbol: str) -> PortfolioPosition | None:
         return self._positions.pop(symbol, None)
 
+    def remove_position_for_trade(self, symbol: str, trade_id: int) -> PortfolioPosition | None:
+        """Remove `symbol`'s position only if it is the one opened for
+        `trade_id`. Returns the removed position, or None (a no-op) if
+        there is no position for `symbol` or it belongs to a different
+        trade.
+
+        V16 §75: used by main.py's monitor_open_trades() when a journal
+        trade is found closed on the exchange (natural SL/TP hit) —
+        that close is detected from the JOURNAL row, so the identity
+        check keeps it from ever evicting a different, newer position
+        that happens to share the symbol. remove_position() stays the
+        unconditional primitive (the orchestrator's replacement path
+        already knows exactly which position it is closing).
+
+        Atomicity: a dict .get() followed by .pop(key, None). A
+        concurrent removal between the two is harmless (pop returns
+        None); no new lock is needed for the same reason
+        remove_position() has none."""
+        position = self._positions.get(symbol)
+        if position is None or position.trade_id != trade_id:
+            return None
+        return self._positions.pop(symbol, None)
+
     def get_position(self, symbol: str) -> PortfolioPosition | None:
         return self._positions.get(symbol)
 

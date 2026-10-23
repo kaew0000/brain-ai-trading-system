@@ -1530,6 +1530,11 @@ def monitor_open_trades(sys: dict) -> None:
     # build_system()'s new "trade_lifecycle" key — e.g. an older test
     # harness. build_system() itself always provides it.
     lifecycle = sys.get("trade_lifecycle")
+    # V16 §75: the scheduler's live PortfolioState (build_system()'s
+    # "portfolio_state" key — None unless SCHEDULER_ENABLED). Only
+    # consulted in the multi-symbol branch below; the single-symbol
+    # path never touches it.
+    portfolio_state = sys.get("portfolio_state") if settings.SCHEDULER_ENABLED else None
 
     try:
         open_trades = jrn.get_open_trades()
@@ -1602,6 +1607,29 @@ def monitor_open_trades(sys: dict) -> None:
             # carried forward exactly as-is, not a new claim of
             # precision this phase adds.
             source = CloseSource.TAKE_PROFIT if result == "WIN" else CloseSource.STOP_LOSS
+
+            # V16 §75: this position is gone on the exchange, so release
+            # its slot in the scheduler's PortfolioState too. Without
+            # this a naturally-closed position stayed in PortfolioState
+            # forever ("already_held" for that symbol, and one slot of
+            # max_positions leaked per natural close) — the replacement
+            # path removes its own position (execution_orchestrator.py),
+            # but nothing did on a natural close. Done BEFORE the
+            # lifecycle/journal write, mirroring the orchestrator's
+            # order, so a journal failure can never leave a ghost.
+            # Never raises: closing the journal row below must not
+            # depend on it.
+            if portfolio_state is not None:
+                try:
+                    released = portfolio_state.remove_position_for_trade(symbol, tid)
+                    if released is not None:
+                        logger.info(
+                            f"Trade #{tid} {symbol}: released from PortfolioState "
+                            f"(closed on exchange)"
+                        )
+                except Exception as exc:
+                    logger.error(f"Trade #{tid} {symbol}: PortfolioState release failed: {exc}")
+
             if lifecycle is not None:
                 handle = lifecycle.request_exit(symbol, source, f"{result.lower()}_threshold_heuristic", trade_id=tid)
                 if handle is not None:
