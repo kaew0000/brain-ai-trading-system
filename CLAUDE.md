@@ -218,6 +218,19 @@ Produce unified diff
 
 Summarize changes
 
+Branch & PR naming
+
+- Features: `feature/<scope>-<short-desc>`
+- Bugfixes: `fix/<scope>-<short-desc>`
+- PR title: `feat(<scope>): <desc> (V16 §<N>)` for features,
+  `fix(<scope>): <desc> (V16 §<N>)` for bugfixes — `<N>` is the next
+  section number in docs/architecture.md
+- One PR per scope; merge in ROADMAP priority order; verify the
+  previous PR is merged and main is green before starting the next
+- Every PR updates tests, docs/architecture.md and CHANGELOG.md, and its
+  description opens by citing the ROADMAP.md / architecture.md section
+  it implements
+
 ---
 
 # Current Priorities

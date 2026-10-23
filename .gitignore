@@ -22,6 +22,12 @@ env/
 *.sqlite
 *.sqlite3
 
+# ─── Model artifacts ───────────────────────────────────────
+# ml/model_registry.py's live registry directory (_MODELS_DIR). Trained
+# model pickles are runtime artifacts, never source. (Ignoring it also
+# keeps a plain `git clean -fd` from deleting real models.)
+ml_models/
+
 # ─── Logs ──────────────────────────────────────────────────
 logs/
 *.log

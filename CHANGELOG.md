@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## [Unreleased] — Natural SL/TP close releases its PortfolioState slot (V16 §75)
+
+Bugfix. When a multi-symbol position was closed on the exchange by its own SL/TP, `monitor_open_trades()` journaled the
+close through `TradeLifecycle` but never removed the position from the scheduler's `PortfolioState`, leaking one
+`max_positions` slot per close and leaving the symbol `already_held`. Full detail in `docs/architecture.md` §75.
+Branch: `fix/execution-natural-close-portfolio-release`.
+
+### Fixed
+- `main.py` `monitor_open_trades()`: multi-symbol branch now releases the closed trade's position from `PortfolioState`
+  (before the lifecycle/journal write; a release failure never blocks the journal close). Attribution unchanged;
+  single-symbol path unchanged.
+
+### Added
+- `portfolio/portfolio_state.py`: `remove_position_for_trade(symbol, trade_id)`.
+- `tests/test_natural_close_portfolio_release.py`: 16 tests (11 fail on pre-fix code, 5 invariant guards).
+
+### Docs / housekeeping
+- Corrected stale "nothing monitors natural closes" claims (ROADMAP, §29/§30/§31/§32 notes): attribution was wired in §32/§60.
+- ROADMAP "Planned": natural-close fidelity (needs decision), paper-mode monitor lane filter (needs decision),
+  trade_id-less PortfolioState positions (hardening), test pollution of `ml_models/` (P2 hygiene).
+- `CLAUDE.md`: "Branch & PR naming" block. `.gitignore`: `ml_models/` under "Model artifacts".
+
 ## [Unreleased] — RegimeEngine per-symbol HMM failure isolation (V16 §74)
 
 Bugfix. One symbol's failed HMM fit used to set `RegimeEngine.use_hmm = False` on the shared engine, silently disabling HMM
