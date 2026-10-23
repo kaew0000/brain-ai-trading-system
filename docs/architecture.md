@@ -2357,6 +2357,7 @@ work beyond `get_signal_with_context()`: one dict construction, one
 - **Pass `symbol=` to `RegimeEngine.classify()` from
   `PortfolioSignalProvider`** — closes Discovery #2's gap; deliberately
   not done here since it changes classification output.
+  *(Done in §31; see also §74.)*
 - **Per-symbol sub-agent state** — needed before one shared `CEOAgent`
   safely services many symbols in a live loop (Discovery #4).
 - Once `MultiSymbolCEOAdapter` is actually wired live: `CEODecision.agent_reports`
@@ -3103,12 +3104,16 @@ own commit message and diff — not from memory, not fabricated.
 
 `execution/portfolio_signal_provider.py`'s own `RegimeEngine.classify()`
 call was explicitly NOT wired to pass `symbol=` — out of scope for that
-bundle. This means the actual multi-symbol production caller that most
-needs per-symbol HMM isolation did not benefit from this phase's work
-at the time, and — per §33's own Discovery #2 (2026-08-02) — **still
-does not today**. This is the same gap §30, §31, §32, and §33 each
-independently re-confirmed still open; it is not fixed by this
-retrospective documentation pass either.
+bundle, so the multi-symbol production caller did not benefit from this
+phase's work at the time.
+
+> **Correction (V16 §74, 2026-10-23):** an earlier revision of this
+> paragraph said the gap was "still open" as of 2026-08-02 and that
+> §30–§33 each re-confirmed it. That was wrong: Phase 4B Step 3C (§31)
+> wired `symbol=symbol` into `PortfolioSignalProvider` (commit
+> `1677653`), so the call-site gap was closed before this retrospective
+> was written. §74 closes the one remaining per-symbol isolation gap
+> (HMM fit failure was global).
 
 ### Testing (as claimed in that phase's own commit message)
 
@@ -7321,3 +7326,99 @@ PostgreSQL/pgvector backend, live LLM provider, n8n workflow, Windows. All test 
 Baseline on `main` @ `9bffc44`: 3256 passed, 3 failed, 4 skipped, 45 deselected. This phase: 3357 passed (+101, the new
 `tests/test_bsi_*.py`), same 3 pre-existing `test_dashboard_serving` failures (need `dashboard_src/dist`), 4 skipped, 45
 deselected. `ruff check .` clean; `vulture --min-confidence 80` clean; `python -c "import main"` succeeds.
+
+---
+
+## 74. RegimeEngine Per-Symbol HMM Failure Isolation (2026-10-23)
+
+Bugfix. Branch: `feature/regime-hmm-failure-isolation`. Follows §73 (PR #111).
+
+### Roadmap item 1 was already half-done
+
+`docs/ROADMAP.md` listed "pass `symbol=` to `RegimeEngine.classify()` from
+`PortfolioSignalProvider`" as open. It was not: Phase 4B Step 3C (§31,
+commit `1677653`) already wired `classify(ohlcv["h1"], symbol=symbol)`
+at `execution/portfolio_signal_provider.py`. ROADMAP, CLAUDE.md and the
+Step 3A retrospective in this file kept saying otherwise; all three are
+corrected in this PR.
+
+### Root cause
+
+`RegimeEngine._fit_hmm()` executed `self.use_hmm = False` in its
+`except` block. `use_hmm` is engine-wide, and one `RegimeEngine`
+instance is shared by `main.py`'s legacy loop and every symbol the
+multi-symbol path handles. So a single symbol's HMM fit failure
+(degenerate/short window, `hmmlearn` convergence error) silently turned
+HMM off for every other symbol, including ones that had not been fitted
+yet. Per-symbol model keying (`self.models`, Step 3A) was correct; the
+failure state was not per-symbol.
+
+### Reproduction (against `main` @ `9ff7016`)
+
+One symbol's fit forced to raise, then a healthy symbol classified on
+the same engine:
+
+```
+use_hmm after AAA failure: False
+BTC model fitted: False        # healthy symbol never got an HMM
+```
+
+### Fix
+
+`regime/regime_engine.py` only (plus one setting, tests, docs):
+
+- `use_hmm` is now the operator's configured switch and is never mutated.
+- `self._hmm_failed: dict[str, float]` records `time.monotonic()` of a
+  failed fit per symbol key (the `_DEFAULT_MODEL_KEY` of symbol-less
+  callers is just another key).
+- A symbol inside its cooldown is classified rule-based-only, exactly
+  what that symbol already received on a failed fit; others are
+  untouched. After the cooldown the fit is retried once; success clears
+  the entry, failure restarts the cooldown.
+- `hmm_retry_cooldown_s` constructor arg (default
+  `settings.REGIME_HMM_RETRY_COOLDOWN_S`, 3600.0 s, env-overridable). No
+  hardcoded value.
+
+Healthy path: unchanged. The cooldown check sits behind
+`symbol_key not in self.models`, so a symbol with a fitted model never
+reaches it. Output is identical when no fit fails.
+
+One deliberate behavior difference for the legacy symbol-less caller:
+after a failed fit it previously lost HMM permanently (process
+lifetime); it now retries after the cooldown. Rule-based output, which
+is what drives the regime result on a failed fit, is unchanged.
+
+### Tests
+
+`tests/test_symbol_isolation.py::TestRegimeEnginePerSymbolFailureIsolation`
+(9 tests): failure isolation across symbols, `use_hmm` never mutated,
+rule-based fallback equals a `use_hmm=False` engine's output, no refit
+per call during cooldown, retry-after-cooldown recovery, failed retry
+restarts cooldown, `_default` key isolation, healthy path leaves
+`_hmm_failed` empty, setting default. All 9 fail against the pre-fix
+engine.
+
+### Not changed here (raised for decision — see ROADMAP "Planned")
+
+1. **Shared `StandardScaler` refit per call — needs decision, touches
+   live signal path.** `classify()` calls `self._scaler.fit_transform()`
+   every time on one engine-wide scaler. The HMM is fit on the first
+   window's scaling and scored on later windows re-scaled by their own
+   mean/std; the shared instance is also mutated per call (not
+   thread-safe). Not an inter-symbol leak today. Any fix changes live
+   regime output.
+2. **No periodic HMM refit — enhancement.** Models are fit once per
+   symbol and never refreshed. Needs a proposed refit interval and an
+   offline evaluation before implementation.
+
+### Verification
+
+Baseline `main` @ `9ff7016`: 3357 passed, 3 failed, 4 skipped, 45
+deselected. The 3 failures (`tests/test_dashboard_serving.py`) are
+environmental: they need `dashboard_src/dist`; after `npm ci && npm run
+build` all 6 tests in that file pass. This PR: 3369 passed (+9 new, +3
+dashboard now passing with the build present), 0 failed, 4 skipped, 45
+deselected. `ruff check . --exclude dashboard_src --exclude dashboard`
+clean; vulture (`--min-confidence 80`) output content-identical to
+`main`; `python -c "import main"` succeeds. Build output is gitignored
+(`dist/`) and not part of this change.

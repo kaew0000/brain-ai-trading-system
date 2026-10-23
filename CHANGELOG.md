@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## [Unreleased] — RegimeEngine per-symbol HMM failure isolation (V16 §74)
+
+Bugfix. One symbol's failed HMM fit used to set `RegimeEngine.use_hmm = False` on the shared engine, silently disabling HMM
+scoring for every other symbol. Failure state is now tracked per symbol with a retry cooldown. Full detail in
+`docs/architecture.md` §74. Branch: `feature/regime-hmm-failure-isolation`.
+
+### Fixed
+- `regime/regime_engine.py`: `_fit_hmm()` no longer mutates `use_hmm`; failures recorded in `_hmm_failed` per symbol key,
+  retried after `hmm_retry_cooldown_s`. No change when no fit fails.
+
+### Added
+- `config/settings.py`: `REGIME_HMM_RETRY_COOLDOWN_S` (default 3600.0). `.env.example` entry.
+- `tests/test_symbol_isolation.py`: 9 regression tests (`TestRegimeEnginePerSymbolFailureIsolation`).
+
+### Docs
+- Corrected stale "symbol= not passed" claims (ROADMAP, CLAUDE.md, §33-era retrospective): call site was wired in §31.
+- ROADMAP "Planned": added shared-`_scaler` consistency (needs decision) and periodic HMM refit (enhancement) entries.
+
+### Known behavior difference
+- Symbol-less legacy caller (`main.py`) previously lost HMM permanently after a failed fit; it now retries after the cooldown.
+
 ## [Unreleased] — Strategy Intelligence Bundle, research-only (V16 §73)
 
 New self-contained `brain_strategy_intelligence/` package: strategy knowledge base (SQLite, optional pgvector), provider-independent

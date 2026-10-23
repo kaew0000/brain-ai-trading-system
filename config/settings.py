@@ -713,6 +713,13 @@ class Settings(BaseSettings):
     # GET /fapi/v1/userTrades call (IP weight 5 each, per Binance docs).
     FEE_BACKFILL_MAX_TRADES_PER_RUN: int = Field(default=50, alias="FEE_BACKFILL_MAX_TRADES_PER_RUN")
 
+    # ── V16 §74: RegimeEngine per-symbol HMM failure isolation ─────────────
+    # After one symbol's HMM fit fails, that symbol alone is classified
+    # rule-based-only for this many seconds before the fit is retried.
+    # Other symbols' HMM scoring is unaffected. Used only on the failure
+    # path; the healthy path is unchanged.
+    REGIME_HMM_RETRY_COOLDOWN_S: float = Field(default=3600.0, ge=0.0, alias="REGIME_HMM_RETRY_COOLDOWN_S")
+
     # ── V16 Phase 4C Track B: HFT Flow — HFT-1 WS Ingestion ────────────────
     # Off by default — same posture as ORDER_RECONCILIATION_ENABLED above.
     # False = byte-identical to before this phase: no WebSocket connection

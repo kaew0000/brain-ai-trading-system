@@ -330,3 +330,135 @@ class TestRegimeEnginePerSymbolModels:
         df = _make_ohlcv(200, seed=10, trend_per_bar=20, noise=50)
         engine.classify(df, symbol="BTCUSDT")
         assert engine.models == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# V16 §74 — per-symbol HMM fit-failure isolation
+# ═══════════════════════════════════════════════════════════════════════
+
+from hmmlearn import hmm as _hmmlearn
+_REAL_GAUSSIAN_HMM = _hmmlearn.GaussianHMM   # captured before any monkeypatch
+
+
+class _FlakyHMM:
+    """Real GaussianHMM whose fit() raises while `FAIL['on']` is True.
+    Calls are sequential in these tests, so a module-level toggle is
+    enough to fail one symbol's fit and not another's."""
+    FAIL = {"on": False, "fit_calls": 0}
+
+    def __init__(self, *args, **kwargs):
+        self._inner = _REAL_GAUSSIAN_HMM(*args, **kwargs)
+
+    def fit(self, X):
+        _FlakyHMM.FAIL["fit_calls"] += 1
+        if _FlakyHMM.FAIL["on"]:
+            raise RuntimeError("simulated HMM fit failure")
+        self._inner.fit(X)
+        return self
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+@pytest.fixture
+def flaky_hmm(monkeypatch):
+    _FlakyHMM.FAIL.update(on=False, fit_calls=0)
+    monkeypatch.setattr("regime.regime_engine.hmm.GaussianHMM", _FlakyHMM)
+    return _FlakyHMM.FAIL
+
+
+class TestRegimeEnginePerSymbolFailureIsolation:
+
+    @staticmethod
+    def _df(seed):
+        return _make_ohlcv(200, seed=seed, trend_per_bar=20, noise=50)
+
+    def test_one_symbols_failed_fit_does_not_disable_hmm_for_others(self, flaky_hmm):
+        # The §74 regression: this used to set engine.use_hmm=False
+        # globally, so BTCUSDT below would never have been fitted.
+        engine = RegimeEngine(use_hmm=True, hmm_retry_cooldown_s=3600)
+        flaky_hmm["on"] = True
+        engine.classify(self._df(1), symbol="AAAUSDT")
+        flaky_hmm["on"] = False
+        engine.classify(self._df(2), symbol="BTCUSDT")
+
+        assert "AAAUSDT" not in engine.models
+        assert "BTCUSDT" in engine.models
+
+    def test_use_hmm_switch_is_never_mutated_by_a_fit_failure(self, flaky_hmm):
+        engine = RegimeEngine(use_hmm=True, hmm_retry_cooldown_s=3600)
+        flaky_hmm["on"] = True
+        engine.classify(self._df(1), symbol="AAAUSDT")
+        assert engine.use_hmm is True
+
+    def test_failed_symbol_still_returns_valid_rule_based_result(self, flaky_hmm):
+        engine = RegimeEngine(use_hmm=True, hmm_retry_cooldown_s=3600)
+        rule_only = RegimeEngine(use_hmm=False)
+        df = self._df(1)
+        flaky_hmm["on"] = True
+        result = engine.classify(df, symbol="AAAUSDT")
+        expected = rule_only.classify(df, symbol="AAAUSDT")
+        assert result.regime == expected.regime
+        assert result.confidence == pytest.approx(expected.confidence)
+
+    def test_failed_symbol_is_not_refit_every_call_during_cooldown(self, flaky_hmm):
+        engine = RegimeEngine(use_hmm=True, hmm_retry_cooldown_s=3600)
+        flaky_hmm["on"] = True
+        for seed in (1, 2, 3):
+            engine.classify(self._df(seed), symbol="AAAUSDT")
+        assert flaky_hmm["fit_calls"] == 1
+
+    def test_failed_symbol_retries_after_cooldown_and_recovers(self, flaky_hmm, monkeypatch):
+        clock = {"t": 1000.0}
+        monkeypatch.setattr("regime.regime_engine.time.monotonic", lambda: clock["t"])
+        engine = RegimeEngine(use_hmm=True, hmm_retry_cooldown_s=60)
+
+        flaky_hmm["on"] = True
+        engine.classify(self._df(1), symbol="AAAUSDT")
+        assert "AAAUSDT" not in engine.models
+
+        flaky_hmm["on"] = False
+        clock["t"] += 30                      # still inside cooldown
+        engine.classify(self._df(1), symbol="AAAUSDT")
+        assert "AAAUSDT" not in engine.models
+
+        clock["t"] += 31                      # cooldown elapsed
+        engine.classify(self._df(1), symbol="AAAUSDT")
+        assert "AAAUSDT" in engine.models
+        assert "AAAUSDT" not in engine._hmm_failed
+
+    def test_failed_retry_restarts_the_cooldown(self, flaky_hmm, monkeypatch):
+        clock = {"t": 0.0}
+        monkeypatch.setattr("regime.regime_engine.time.monotonic", lambda: clock["t"])
+        engine = RegimeEngine(use_hmm=True, hmm_retry_cooldown_s=60)
+        flaky_hmm["on"] = True
+        engine.classify(self._df(1), symbol="AAAUSDT")
+        clock["t"] = 61
+        engine.classify(self._df(1), symbol="AAAUSDT")   # retry, fails again
+        assert flaky_hmm["fit_calls"] == 2
+        clock["t"] = 100                                   # < 61 + 60
+        engine.classify(self._df(1), symbol="AAAUSDT")
+        assert flaky_hmm["fit_calls"] == 2
+
+    def test_default_key_failure_does_not_affect_named_symbols(self, flaky_hmm):
+        # Legacy single-symbol path (symbol omitted) fails -> named
+        # symbols on the same shared engine instance keep their HMM.
+        engine = RegimeEngine(use_hmm=True, hmm_retry_cooldown_s=3600)
+        flaky_hmm["on"] = True
+        engine.classify(self._df(1))                      # no symbol=
+        flaky_hmm["on"] = False
+        engine.classify(self._df(2), symbol="BTCUSDT")
+        assert engine._DEFAULT_MODEL_KEY not in engine.models
+        assert "BTCUSDT" in engine.models
+
+    def test_healthy_path_unchanged_and_no_failure_state_recorded(self, flaky_hmm):
+        engine = RegimeEngine(use_hmm=True)
+        engine.classify(self._df(1), symbol="BTCUSDT")
+        engine.classify(self._df(2), symbol="ETHUSDT")
+        assert set(engine.models) == {"BTCUSDT", "ETHUSDT"}
+        assert engine._hmm_failed == {}
+
+    def test_cooldown_defaults_to_settings_value(self):
+        from config.settings import settings
+        engine = RegimeEngine(use_hmm=True)
+        assert engine.hmm_retry_cooldown_s == settings.REGIME_HMM_RETRY_COOLDOWN_S
