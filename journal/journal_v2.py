@@ -578,11 +578,17 @@ class TradeJournalV2:
         directly), that is returned as-is instead of the join — the
         explicit value is assumed more complete. Returns an EMPTY
         agent_participation list (never fabricated entries) for any
-        trade whose signal_id has no agent_decisions rows — today that
-        is every trade taken through the V16 multi-symbol path, since
-        execution/portfolio_signal_provider.py's pipeline doesn't run
-        the agent layer (see docs/architecture.md §29 "Scope boundary" —
-        an honest, pre-existing gap, not a bug in this method).
+        trade whose signal_id has no agent_decisions rows and that
+        carries no explicit agent_attribution — today that is a V16
+        multi-symbol trade taken WITHOUT CEO gating
+        (CEO_MULTI_SYMBOL_ENABLED=false, the default), since
+        execution/portfolio_signal_provider.py's plain pipeline doesn't
+        run the agent layer (see docs/architecture.md §29 "Scope
+        boundary" — an honest gap, not a bug in this method), plus
+        anything journaled before Step 7C (§35). CEO-gated trades are
+        NOT empty: their per-agent votes are persisted at decision time
+        (Step 7 / 7C) and as explicit attribution (W14-2A) — see
+        docs/architecture.md §76.
         """
         with self._conn() as c:
             trade = c.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
@@ -625,7 +631,10 @@ class TradeJournalV2:
 
         Rows with empty agent_participation are included, not filtered
         out — a future Phase 4C consumer needs to see that gap in the
-        data (today: every V16 multi-symbol trade), not have it hidden.
+        data (today: multi-symbol trades taken without CEO gating, and
+        anything journaled before Step 7C), not have it hidden.
+        CEO-gated trades carry their per-agent votes — §76 locks that
+        with tests/test_ceo_vote_persistence_lifecycle.py.
         """
         sql = "SELECT * FROM trades WHERE result IN ('WIN','LOSS')"
         args: tuple = ()

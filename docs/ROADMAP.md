@@ -60,6 +60,15 @@ PR, and `docs/architecture.md` section — see that file and
   listed under "Planned" in error); the remaining real gap — a naturally
   closed position was never released from the scheduler's PortfolioState,
   leaking a `max_positions` slot per close — is closed in §75.
+✅ Per-agent vote persistence / attribution for CEO-gated multi-symbol
+  trades — already shipped and wrongly left under "Planned": per-agent
+  `agent_decisions` rows with a shared `signal_id` (Phase 4C Step 7 / 7C,
+  PRs #48/#51, §35) plus explicit `trades.extra_data` attribution
+  (W14-2A, PR #54, §37) feed `get_ensemble_learning_dataset()`, the `learning/`
+  package and `get_agent_performance()`. Reproduced end to end against
+  `main` @ `98088ca`; §76 documents it and locks the open → close →
+  dataset flow with `tests/test_ceo_vote_persistence_lifecycle.py` (no
+  code change, no backfill needed — no data is missing).
 
 **Note on numbering:** the sequence 2A → 2B → 2C → 2E → 2F has no
 "Phase 2D" anywhere in commit messages, `CHANGELOG.md`,
@@ -78,8 +87,6 @@ Precisely scoped in `docs/architecture.md` §29/§30/§31/§32/§33's own
 "Next up" sections and `CLAUDE.md`'s "Current Priorities" — summarized
 here, not re-derived:
 
-- Per-agent attribution for CEO-gated multi-symbol trades (agent votes
-  still aren't persisted for that path).
 - Fee capture (no write path fetches Binance commission data today).
 - Fix `get_ensemble_learning_dataset()`'s N+1 read pattern — doesn't
   scale past ~1,000 trades (measured in Phase 4C Step 1's benchmark).
@@ -138,3 +145,38 @@ here, not re-derived:
   volatility structure drifts. Needs a proposed refit interval and an
   offline evaluation (regime stability / agreement with the rule-based
   classifier, fit cost vs. latency budget) before any code. See §74.
+- **P1 — dynamic per-agent weighting cannot see CEO-gated multi-symbol
+  performance (agent-key namespace mismatch). Found by §76's audit; not
+  fixed there; no live impact today because `DYNAMIC_AGENT_WEIGHTS_ENABLED`
+  defaults to `False`.** `CEOAgent._effective_weights()` looks agents up
+  in `get_agent_performance()` by `AgentReport.agent` display name
+  (`"SMC_ANALYST"`, `"FUTURES_ANALYST"`, …). The single-symbol path in
+  `main.py` writes `agent_decisions` under exactly those names, so it
+  matches. The CEO-gated multi-symbol path writes `CEOAgent.WEIGHTS` keys
+  (`"smc"`, `"futures"`, …) both as `agent_decisions.agent` and in the
+  explicit attribution, so no lookup ever hits and the blend silently
+  falls back to the static `WEIGHTS` for that path even when enabled.
+  Evidence: `audit_trader_and_keys.py` (attached to the §76 PR): the
+  display names and `get_agent_performance()` keys share no member, for
+  the explicit-attribution cohort and the join cohort alike. This is the
+  same identifier split §41 documented as "NOT fixed"; §76 records its
+  consequence for Phase 4B. Needs a decision (map keys ↔ display names at
+  lookup, or write one canonical identifier) plus a test that enabling
+  dynamic weights actually changes `weights_used` on the CEO-gated path,
+  before `DYNAMIC_AGENT_WEIGHTS_ENABLED` or Phase 4C Step 2 consume this
+  data live.
+- **P2 — learning-dataset cohorts: decide how to treat trades without
+  explicit attribution.** CEO-gated trades fall into three cohorts, all
+  visible in `get_ensemble_learning_dataset()`: (a) before Step 7C
+  (2026-08-10) or taken without CEO gating — empty `agent_participation`;
+  (b) Step 7C up to W14-2A (2026-08-14) — participation derived from the
+  `agent_decisions` join, which names the CEO `"CEO_AGENT"`, includes
+  `trader` (weight 0.0, never a vote) and uses `contribution =
+  round(score * weight, 2)`; (c) after W14-2A — explicit attribution, CEO
+  named `"ceo"`, WEIGHTS agents only. Evaluate whether the dataset should
+  mark (a) as unattributable and/or exclude (a)/(b) from agent statistics,
+  and whether `"CEO_AGENT"` and `"ceo"` should be unified in
+  `learning/agent_statistics.py` (today they are separate buckets). The
+  cohort boundaries are derived from code and the §35/§37 dates, not
+  measured on a production journal. Until decided: leave as is (§76
+  documents the cohorts; nothing is rewritten or backfilled).

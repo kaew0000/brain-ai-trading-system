@@ -263,6 +263,11 @@ class CEOGatedSignalProvider:
         # agent_attribution_from_ceo_decision() itself never raises and
         # returns [] for a malformed/None decision, so this can't turn a
         # real trade into a failure.
+        # Only CEOAgent.WEIGHTS agents (+ the CEO's own entry) are
+        # attributed — `trader` is journaled by _journal_ceo_decision()
+        # (weight 0.0) but casts no vote, so it is excluded here by
+        # design (journal/trade_attribution.py CEO_WEIGHTED_AGENT_KEYS,
+        # docs/architecture.md §76).
         if final_signal is not None and ceo_decision is not None:
             attribution = agent_attribution_from_ceo_decision(ceo_decision.to_dict())
             if attribution:
