@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## [Unreleased] — CEO-gated per-agent vote persistence: verified shipped, regression lock (V16 §76)
+
+Docs + tests only; no behavior change. ROADMAP listed "per-agent attribution for CEO-gated multi-symbol trades (agent votes
+still aren't persisted)" as Planned. Reproduced end to end on `main` @ `98088ca`: the votes are persisted at decision time
+(Step 7 / 7C, PRs #48/#51), as explicit trade attribution (W14-2A, PR #54), and reach the learning dataset intact after the
+close. Full detail, reproduction and audits in `docs/architecture.md` §76. Branch: `fix/ceo-vote-persistence`.
+
+### Added
+- `tests/test_ceo_vote_persistence_lifecycle.py`: 11 tests locking open -> close -> learning-dataset for CEO-gated trades
+  (pass on `main` by design; mutation-checked).
+
+### Docs / housekeeping
+- ROADMAP: item moved to Completed; new P1 (dynamic weighting cannot see CEO-gated performance — agent-key namespace
+  mismatch, `DYNAMIC_AGENT_WEIGHTS_ENABLED` is off by default) and P2 (learning-dataset cohorts, `CEO_AGENT` vs `ceo`).
+- `trader` absent from attribution while present in `agent_decisions` is by design (not a `WEIGHTS` key, casts no vote):
+  documented in §76, commented at `CEO_WEIGHTED_AGENT_KEYS` and the attribution call site.
+- Corrected stale claims: `CLAUDE.md` ("`agent_attribution_from_ceo_decision()` still isn't called anywhere"), docstrings of
+  `get_trade_attribution()`, `get_ensemble_learning_dataset()`, `learning/dataset_builder.py`.
+- No backfill: nothing is missing for CEO-gated trades since Step 7C; earlier trades cannot be reconstructed (see §76).
+
 ## [Unreleased] — Natural SL/TP close releases its PortfolioState slot (V16 §75)
 
 Bugfix. When a multi-symbol position was closed on the exchange by its own SL/TP, `monitor_open_trades()` journaled the

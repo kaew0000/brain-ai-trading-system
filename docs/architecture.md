@@ -7545,3 +7545,110 @@ This PR: 3385 passed (+16), 4 skipped, 45 deselected. `ruff check .
 --exclude dashboard_src --exclude dashboard` clean; vulture
 (`--min-confidence 80`) content-identical to `main` (31 lines each);
 `python -c "import main"` succeeds.
+
+## 76. CEO-Gated Per-Agent Vote Persistence — Verified Shipped, Regression Lock (2026-10-23)
+
+Docs + tests only; **no behavior change**. Branch: `fix/ceo-vote-persistence`. Follows §75 (PR #113).
+Closes ROADMAP.md "Planned" → *Per-agent attribution for CEO-gated multi-symbol trades (agent votes still
+aren't persisted for that path)*.
+
+### The roadmap item was already done
+
+Same pattern as §74 and §75: the item was listed under "Planned" after the work had merged. The votes are
+persisted three ways, all already on `main`:
+
+- **Decision time — Phase 4C Step 7 (PR #48) and Step 7C (PR #51), §35.**
+  `CEOGatedSignalProvider._journal_ceo_decision()` writes one `agent_decisions` row per sub-agent plus the
+  `CEO_AGENT` row, all sharing the cycle's `signal_id`, whether the cycle ends in a trade or a WAIT.
+- **Trade open — W14-2A (PR #54), §37.** `agent_attribution_from_ceo_decision()` builds the explicit list,
+  threaded onto the `ExecutionSignal`, then `ExecutionOrchestrator._record_trade_opened()` →
+  `TradeLifecycle.open_confirmed()` → `trades.extra_data.attribution.agent_attribution`.
+- **Reads — §41 (PR #58).** `get_trade_attribution()`, `get_ensemble_learning_dataset()` (§63),
+  `LearningDatasetBuilder` and `get_agent_performance()` read the explicit list when present and fall back to
+  the `signal_id` join otherwise.
+
+Why the docs disagreed: ROADMAP "Planned", `CLAUDE.md` ("`agent_attribution_from_ceo_decision()` still isn't
+called anywhere" — it is called in `ceo_gated_signal_provider.py` and `main.py`), and the docstrings of
+`get_trade_attribution()`, `get_ensemble_learning_dataset()` and `learning/dataset_builder.py` were written
+before Step 7C/W14-2A and never updated. All corrected in this PR.
+
+### Reproduction (against `main` @ `98088ca`, no code changes)
+
+Script: `repro_ceo_votes.py` (attached to the PR). Real: the 6-agent layer (`CEOAgentSymbolCache` →
+`CEOAgent.decide()`), `CEOGatedSignalProvider`, `ExecutionOrchestrator.execute()`, `TradeLifecycle.exit_confirmed()`,
+`TradeJournalV2` (temp SQLite), `get_ensemble_learning_dataset()`, `LearningDatasetBuilder`,
+`compute_agent_statistics()`. Controlled: the fixture market always yields WAIT (documented in
+`tests/test_ceo_multi_symbol_agent_attribution.py`), so the CEO action is re-labelled LONG; `agent_reports` and
+`weights_used` stay the real live-layer output.
+
+```
+agent_decisions for the trade's signal_id : CEO_AGENT, smc, futures, regime, risk, trader, journal, confidence_engine  (8 rows)
+trades.extra_data...agent_attribution      : smc, futures, regime, risk, journal, confidence_engine, ceo                 (7 entries, intact after the WIN close)
+get_ensemble_learning_dataset()            : 1 row, agent_participation = 7
+LearningDatasetBuilder / agent statistics  : row_count 1, 7 LearningRow entries; stats for all 7 agents
+```
+
+**Limits of this evidence:** the CEO action is forced, as above; the scheduler's `monitor_open_trades()` loop was
+not run (its close goes through the same `TradeLifecycle.exit_confirmed()`, `main.py`, which merges rather than
+overwrites attribution); no production journal was inspected.
+
+### Audit: `trader` is in `agent_decisions` (8) but not in the attribution (7) — by design
+
+`TraderAgent` is registered with `CEOAgent` but is not a `CEOAgent.WEIGHTS` key. `CEOAgent.decide()`'s weighted-vote
+loop iterates `weights.items()` (`WEIGHTS` or its dynamic blend) only, so `trader`'s report can never enter
+`long_score`/`short_score` or change `action` — it casts no vote. It reports open-position state (`NEUTRAL`/0 when
+flat, the position's direction at 100 when holding). `journal/trade_attribution.py::CEO_WEIGHTED_AGENT_KEYS`
+mirrors `WEIGHTS` exactly, by its own comment. This convention is already documented (§30 note 3, §53's
+`ml_extensions` discussion). The journal row is written with `weight=0.0`. Nothing is lost for learning: attribution
+exists to say which weighted votes drove a decision, and phase 4B's blend only ever iterates `WEIGHTS`. Done in this
+PR: comments at `CEO_WEIGHTED_AGENT_KEYS` and at the attribution call in `ceo_gated_signal_provider.py`, and a test
+that locks the behavior (`test_trader_is_a_journaled_row_but_not_an_attribution_entry_by_design`).
+
+### Audit finding (not fixed here): agent-key namespace vs dynamic weighting — ROADMAP P1
+
+`CEOAgent._effective_weights()` looks agents up in `get_agent_performance()` by `AgentReport.agent` display name
+(`"SMC_ANALYST"`, …). `main.py`'s single-symbol path writes `agent_decisions` under those names. The CEO-gated
+path writes `WEIGHTS` keys (`"smc"`, …) in both the journal rows and the explicit attribution. Run against both
+cohorts (`audit_trader_and_keys.py`): no display name is a key of `get_agent_performance()`, so with
+`DYNAMIC_AGENT_WEIGHTS_ENABLED=true` the blend would fall back to static `WEIGHTS` on this path. No live impact
+today (the flag defaults to `False`). §41 documented the identifier split as "NOT fixed"; this records its
+consequence for §28. Raised as P1, needs a decision and a test.
+
+### Cohorts and the backfill decision — ROADMAP P2
+
+| Cohort | Participation source | Notes |
+|---|---|---|
+| Before Step 7C (2026-08-10), or no CEO gating | none (empty list, never fabricated) | votes were never stored |
+| Step 7C up to W14-2A (2026-08-14) | `agent_decisions` join | CEO named `CEO_AGENT`, includes `trader` (0.0), `contribution = round(score*weight, 2)` |
+| After W14-2A | explicit attribution | CEO named `ceo`, `WEIGHTS` agents only |
+
+(The first two rows are derived from code and dates, not measured on a production journal.)
+
+**Backfill: none needed.** For CEO-gated trades the votes are persisted on every cycle since Step 7C — nothing is
+missing, so there is nothing to backfill. Trades from before Step 7C carry no votes anywhere (they were never
+recorded) and cannot be reconstructed; fabricating them would break `get_trade_attribution()`'s never-fabricate
+contract. Their rows keep an empty `agent_participation`, which `get_ensemble_learning_dataset()` already returns
+rather than hides. No NULL-marking or exclusion is added now; whether the dataset should mark them unattributable or
+exclude them from agent statistics (and unify `CEO_AGENT`/`ceo`, today separate buckets in
+`learning/agent_statistics.py`) is the ROADMAP P2 item.
+
+### Changes
+
+- `tests/test_ceo_vote_persistence_lifecycle.py` (new, 11 tests): live-layer WAIT cycle persists every vote;
+  confirmed trade has one row per agent under the trade's `signal_id`; explicit attribution content and weights;
+  `trader` convention; close does not clobber attribution; dataset row, `LearningDatasetBuilder`,
+  `compute_agent_statistics()` and `get_agent_performance()` see the votes; join fallback still sees them. They pass
+  on `main` by design. Mutation-checked: disabling the per-agent journal loop (4 fail), not threading the attribution
+  (6 fail), adding `trader` to the attribution keys (6 fail), making the close-side save overwrite instead of merge
+  (6 fail); sources restored afterwards.
+- Comments/docstrings only: `journal/trade_attribution.py`, `execution/ceo_gated_signal_provider.py`,
+  `journal/journal_v2.py`, `learning/dataset_builder.py`.
+- `CLAUDE.md` Priority 2 item 1 corrected; ROADMAP: item moved to Completed, P1 and P2 items added.
+
+### Verification
+
+Baseline `main` @ `98088ca` (re-measured): 3385 passed, 4 skipped, 45 deselected — equal to §75's figure. This PR:
+3396 passed (+11), 4 skipped, 45 deselected; `world/tests` 565 passed. `ruff check . --exclude dashboard_src
+--exclude dashboard` clean; `python -c "import main"` succeeds. vulture 2.16 prints nothing at `--min-confidence 80`
+on both `main` and the branch (§75 recorded 31 lines with its own tool version); at `--min-confidence 60` both give
+432 lines, content-identical ignoring line numbers.

@@ -45,7 +45,18 @@ logger = get_logger(__name__)
 # re-derived from the CEODecision dict (agent_reports may legitimately
 # be a subset if an agent didn't report this cycle), and not invented
 # independently of the real agent identifiers.
-CEO_WEIGHTED_AGENT_KEYS = ("smc", "futures", "regime", "risk", "journal", "confidence_engine")
+#
+# Deliberately EXCLUDES agents registered with CEOAgent under a key that
+# is not in WEIGHTS — today `trader` (an executor/position-state
+# reporter) and `ml_extensions`. CEOAgent.decide()'s weighted-vote loop
+# iterates WEIGHTS only, so such an agent's report can never enter
+# long_score/short_score or change `action`: it casts no vote, so there
+# is nothing to attribute (docs/architecture.md §30 note 3, §53, §76).
+# Its report is still journaled as an agent_decisions row (weight 0.0)
+# by ceo_gated_signal_provider.py, which is why that table can hold one
+# more agent than an attribution list. Adding a key here without adding
+# it to WEIGHTS would attribute weight that was never applied.
+CEO_WEIGHTED_AGENT_KEYS =("smc", "futures", "regime", "risk", "journal", "confidence_engine")
 
 
 def agent_attribution_from_ceo_decision(ceo_decision: dict | None) -> list[dict]:

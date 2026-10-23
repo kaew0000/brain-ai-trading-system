@@ -39,10 +39,13 @@ silently omitting requested-but-unavailable fields:
   fixed here (fixing it would mean touching ExecutionOrchestrator,
   also forbidden this phase).
 - `agent_participation` is real for legacy trades and for CEO-gated
-  multi-symbol trades' own CEO_AGENT-tagged decision row (Phase 4B
-  Step 3C), but empty for any multi-symbol trade taken with
-  CEO_MULTI_SYMBOL_ENABLED=false (the default) — see
-  docs/architecture.md §29/§31's own "Scope boundary" sections.
+  multi-symbol trades — every WEIGHTS agent's vote plus the CEO's own
+  entry (Phase 4C Step 7/7C per-agent rows, W14-2A explicit
+  attribution; docs/architecture.md §76) — but empty for any
+  multi-symbol trade taken with CEO_MULTI_SYMBOL_ENABLED=false (the
+  default) — see docs/architecture.md §29/§31's own "Scope boundary"
+  sections. Two attribution sources use different agent identifiers
+  (§41); see ROADMAP.md for the open cohort question.
 - `reason`/`source`/`duration_seconds`/`close_confidence` are real for
   any trade closed through execution/trade_lifecycle.py's
   TradeLifecycle (Phase 4B Step 3D) — None for anything closed before

@@ -250,9 +250,14 @@ multi-symbol path behind `CEO_MULTI_SYMBOL_ENABLED` (off by default).
 Phase 4B Step 3D unified every close path (SL/TP, replacement,
 reconciliation, emergency, exchange-reject) through one
 `TradeLifecycle` write path. What's still open, scoped precisely in
-§32/§33 "Next up" rather than re-described here: 1) per-agent
-attribution for CEO-confirmed multi-symbol trades (still not wired —
-`agent_attribution_from_ceo_decision()` still isn't called anywhere),
+§32/§33 "Next up" rather than re-described here: 1) ~~per-agent
+attribution for CEO-confirmed multi-symbol trades~~ — DONE: votes are
+persisted per agent at decision time (Step 7/7C, PRs #48/#51) and as
+explicit trade attribution (W14-2A, PR #54, §37);
+`agent_attribution_from_ceo_decision()` is called by
+`ceo_gated_signal_provider.py` and `main.py`; verified end to end and
+locked by tests in §76 (open follow-ups, unscheduled: agent-key
+namespace vs dynamic weighting, pre-W14-2A cohort — see ROADMAP.md),
 2) ~~passing `symbol=` to `RegimeEngine.classify()`~~ — DONE: call site
 wired in §31; failure-path isolation fixed in §74 (open follow-ups,
 both unscheduled: shared-`_scaler` consistency, periodic HMM refit —
