@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T13:19:29Z",
+  "updated_at": "2026-10-24T18:30:29Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -459,6 +459,17 @@
       "bundle_filename": "fix-dashboard-build-bootstrap.bundle",
       "status": "applied",
       "imported_at": "2026-10-24T13:19:29Z",
+      "pushed": true,
+      "reason": null,
+      "corrected_sha": null,
+      "correction_note": null
+    },
+    {
+      "sha": "87c16ac0bdfc30e61ff314c33cebc2712dbca1cb",
+      "branch": "fix/weighting-key-namespace",
+      "bundle_filename": "fix-weighting-key-namespace.bundle",
+      "status": "applied",
+      "imported_at": "2026-10-24T18:30:29Z",
       "pushed": true,
       "reason": null,
       "corrected_sha": null,
