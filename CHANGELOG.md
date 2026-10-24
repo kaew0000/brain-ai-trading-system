@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## [Unreleased] — Align CEO-gated attribution keys with the dynamic-weighting namespace (V16 §78)
+
+Bugfix, behind the existing flag. With `DYNAMIC_AGENT_WEIGHTS_ENABLED=true`, `CEOAgent._effective_weights()` looked agents up
+by display name (`SMC_ANALYST`) while CEO-gated trades persist under the `CEOAgent.WEIGHTS` key (`smc`), so the blend never
+saw CEO-gated performance and silently stayed on the static weights. Fixed with a read-side alias table merged at the lookup
+boundary. **Flag still off by default; flag-off behavior is byte-identical.** Full detail in `docs/architecture.md` §78.
+Branch: `fix/weighting-key-namespace`.
+
+### Fixed
+- `agents/ceo_agent.py` `_effective_weights()`: an agent's performance is looked up under every name it may be stored under and
+  merged (sample floor applied to the merged total). Unreachable when the flag is off.
+
+### Added
+- `journal/trade_attribution.py`: `WEIGHTS_KEY_ALIASES` (the single mapping table; canonical key first, legacy display name
+  second) and `aggregate_agent_performance()`. No renames; stored rows and `get_agent_performance()` output unchanged.
+- `tests/test_weighting_key_namespace.py`: 20 tests (11 fail on `main` with the flag forced on / by construction; 9 invariant
+  guards for flag-off and single-namespace behavior). Mutation-checked (6 mutations, all caught).
+
+### Docs
+- `docs/architecture.md` §78: reproduction, design, **the one-namespace rule**, flag state. ROADMAP: P1 moved to Completed
+  ("flag off by default pending human enable"); new needs-decision item for the daily-loss gate's local-vs-UTC day boundary
+  (found while baselining). `CLAUDE.md` Priority 2 line updated.
+
 ## [Unreleased] — Launchers auto-build the V16 dashboard when `dashboard_src/dist` is missing
 
 Launcher-only change; no Python/runtime behavior change. `dist/` is gitignored, so a fresh clone/zip had no V16 build and
