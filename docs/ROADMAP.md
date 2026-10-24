@@ -69,6 +69,13 @@ PR, and `docs/architecture.md` section — see that file and
   `main` @ `98088ca`; §76 documents it and locks the open → close →
   dataset flow with `tests/test_ceo_vote_persistence_lifecycle.py` (no
   code change, no backfill needed — no data is missing).
+✅ `get_ensemble_learning_dataset()` N+1 read pattern — already fixed at
+  V16 §63 (commit `a702c27`, 2026-09-12: one trades query + one
+  `agent_decisions` query regardless of `limit`) and wrongly left under
+  "Planned" afterwards. Re-measured on `main` @ `ec67c57`: constant SQL
+  statement count, 5,000 trades in ~0.3 s. This PR (§77) documents that
+  verified baseline and adds `tools/benchmark_ensemble_dataset.py` so a
+  future regression is measurable; no code behavior change.
 
 **Note on numbering:** the sequence 2A → 2B → 2C → 2E → 2F has no
 "Phase 2D" anywhere in commit messages, `CHANGELOG.md`,
@@ -88,8 +95,6 @@ Precisely scoped in `docs/architecture.md` §29/§30/§31/§32/§33's own
 here, not re-derived:
 
 - Fee capture (no write path fetches Binance commission data today).
-- Fix `get_ensemble_learning_dataset()`'s N+1 read pattern — doesn't
-  scale past ~1,000 trades (measured in Phase 4C Step 1's benchmark).
 - Multi-Agent Framework enhancements (extend `agents/` + `graph/` +
   `commander/`).
 - Quant Research Pipeline / Research-Optimization Framework (extend

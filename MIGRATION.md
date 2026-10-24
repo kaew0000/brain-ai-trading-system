@@ -1,30 +1,19 @@
-# MIGRATION — Strategy Intelligence Bundle
+# MIGRATION — close stale N+1 roadmap item; add dataset read benchmark (V16 §77)
 
 ## Do you need to do anything?
 
-No. Nothing in Brain Bot imports the new package, there is no new dependency (PyYAML is imported lazily, only when a YAML
-config file is loaded; it is already present transitively via `uvicorn[standard]`), no new `.env`/settings flag, no schema or
-database change. Merge and deploy as usual; trading behaviour is unchanged.
+No. No runtime code, setting, dependency, schema or data changed. Merge and deploy as usual.
 
-## Trying it (optional, from the repo root)
+## Optional: measure read scaling on your own hardware
 
-1. `pytest tests/test_bsi_*.py -q` — 101 offline tests.
-2. `python -m brain_strategy_intelligence demo` — end-to-end on SYNTHETIC data; output in `brain_strategy_intelligence_data/`
-   (gitignored).
-3. `python -m brain_strategy_intelligence init-kb` then `evaluate <id> --csv <your candles.csv> ...` for real-data evaluation.
-   Edit a copy of `config/strategy_intelligence.yaml` first: fee/slippage/funding values are assumptions.
+From the repo root, in the project's environment:
 
-Optional extras (not needed for offline use): `storage.backend: postgres` (install `psycopg[binary]`, `pgvector`; env
-`BSI_POSTGRES_DSN`); `llm.provider: anthropic` + `llm.model` + env `ANTHROPIC_API_KEY`.
+    python -m tools.benchmark_ensemble_dataset --check
 
-## Wiring into Brain Bot (NOT done in this phase)
-
-See `docs/strategy_intelligence/INTEGRATION.md` (file-by-file). Manual prerequisites: verify `RiskEngine` semantics for the
-risk-context mapping, verify journal columns for the trade mapping, supply real candles, and never wire the output into
-`CEOAgent.WEIGHTS` voting without governance approval.
+Prints latency and SQL statement count at 100 / 1,000 / 5,000 synthetic trades in a temporary database (never the live journal)
+and exits 1 if the read pattern regresses to N+1. Add `--with-reference` to also time the old per-trade shape (slow at 5,000).
 
 ## Rollback
 
-`git revert` the single commit (or delete `brain_strategy_intelligence/`, `config/strategy_intelligence.yaml`,
-`docs/strategy_intelligence/`, `tests/test_bsi_*.py`, `tests/_bsi_helpers.py`, and the one `.gitignore` line). Delete
-`brain_strategy_intelligence_data/` to remove any local databases/reports. Nothing persisted outside that directory.
+`git revert` the single commit (or delete `tools/benchmark_ensemble_dataset.py` and
+`tests/test_ensemble_dataset_benchmark.py`). Nothing persisted anywhere.

@@ -114,9 +114,10 @@ def _find_contradictions(candidates: list[Recommendation]) -> dict[str, str]:
     a same-category/same-symbol best-vs-worst disagreement with another
     candidate. O(n^2) over `candidates`, which is expected to be small
     (one learning cycle's worth of recommendations, typically well under
-    a few dozen) — not the ~1,000-row-plus scale that
-    get_ensemble_learning_dataset()'s own documented N+1 ceiling
-    (CHANGELOG.md, Phase 4C Step 1) applies to."""
+    a few dozen) — unrelated to the trade-row scale of
+    get_ensemble_learning_dataset(), whose read path is bulk-fetched (2
+    queries regardless of `limit`, §63) and whose measured scaling is
+    recorded in docs/architecture.md §77 (tools/benchmark_ensemble_dataset.py)."""
     contradictions: dict[str, str] = {}
     for i, a in enumerate(candidates):
         pol_a = _kind_polarity(a)

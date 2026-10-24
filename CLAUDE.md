@@ -263,9 +263,11 @@ wired in §31; failure-path isolation fixed in §74 (open follow-ups,
 both unscheduled: shared-`_scaler` consistency, periodic HMM refit —
 see ROADMAP.md),
 3) per-symbol sub-agent instance state, 4) fee capture,
-5) `get_ensemble_learning_dataset()`'s N+1 read pattern doesn't scale
-past ~1,000 trades (found while building Phase 4C Step 1's benchmark —
-architecture.md §33).
+5) ~~`get_ensemble_learning_dataset()`'s N+1 read pattern~~ — DONE:
+fixed in §63 (`a702c27`, 2 queries regardless of `limit`); this item was
+left open here in error. §77 documents the verified healthy baseline
+(5,000 trades in ~0.3 s, constant SQL statement count) and
+`tools/benchmark_ensemble_dataset.py` keeps it measurable.
 
 Phase 4C Step 1 DONE (architecture.md §33): new `learning/` package —
 Autonomous Learning Pipeline, Track A, READ ONLY (observation +
