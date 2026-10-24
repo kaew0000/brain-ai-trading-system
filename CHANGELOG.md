@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## [Unreleased] — `get_ensemble_learning_dataset()` N+1: verified already fixed (§63); benchmark added (V16 §77)
+
+Docs + benchmark tool + tests; no behavior change. ROADMAP/CLAUDE.md still listed the N+1 read pattern as open. Re-measured on
+`main` @ `ec67c57`: it was fixed at §63 (`a702c27`) — constant SQL statement count (7), ~0.04–0.06 ms/trade, 5,000 trades in
+~0.3 s. Measured table and tool usage in `docs/architecture.md` §77. Branch: `fix/learning-dataset-n-plus-1`.
+
+### Added
+- `tools/benchmark_ensemble_dataset.py`: measures dataset read scaling (time + SQL statement count); `--check` for regressions.
+- `tests/test_ensemble_dataset_benchmark.py`: 16 tests, including a mutation check that a re-introduced N+1 is caught.
+
+### Docs / housekeeping
+- ROADMAP: N+1 item moved from Planned to Completed (references §63 / `a702c27` and §77).
+- `CLAUDE.md` Current Priorities item 5 marked DONE; stale N+1 comment in `learning/application/recommendation_context.py`
+  rewritten (docstring only).
+
 ## [Unreleased] — CEO-gated per-agent vote persistence: verified shipped, regression lock (V16 §76)
 
 Docs + tests only; no behavior change. ROADMAP listed "per-agent attribution for CEO-gated multi-symbol trades (agent votes

@@ -7652,3 +7652,87 @@ Baseline `main` @ `98088ca` (re-measured): 3385 passed, 4 skipped, 45 deselected
 --exclude dashboard` clean; `python -c "import main"` succeeds. vulture 2.16 prints nothing at `--min-confidence 80`
 on both `main` and the branch (§75 recorded 31 lines with its own tool version); at `--min-confidence 60` both give
 432 lines, content-identical ignoring line numbers.
+
+## 77. `get_ensemble_learning_dataset()` read scaling — verified healthy baseline + benchmark (2026-10-24)
+
+**Fixed at §63 (`a702c27`); this section documents the verified healthy baseline.** No code behavior changes in this PR:
+docs, one comment, a benchmark tool and its tests.
+
+### Why this section exists (root cause of the stale item)
+
+`docs/ROADMAP.md` (Planned), `CLAUDE.md` (Current Priorities, item 5) and a comment in
+`learning/application/recommendation_context.py` all still described `get_ensemble_learning_dataset()` as having an N+1
+read pattern that "doesn't scale past ~1,000 trades". That was true when Phase 4C Step 1 (§33) measured it, and was fixed
+afterwards at §63 (`a702c27`, 2026-09-12): the function now issues one `trades` query plus one `agent_decisions` query
+(`signal_id IN (...)`) regardless of `limit`, and shapes rows through the shared `_shape_trade_attribution()` helper, locked
+by `tests/test_ensemble_dataset_bulk_fetch.py`. The roadmap item was never moved to Completed — the same class of stale
+"Planned" entry corrected in §74, §75 and §76. Before writing any fix this PR re-measured `main` @ `ec67c57`; the numbers
+below show there is nothing left to fix, so no before/after claim is made.
+
+### Measured baseline
+
+Environment: this sandbox (Linux container, Python 3.12.3, SQLite 3.45.1) — **not** the production VPS; absolute times will
+differ there, the *shape* (constant statements, linear time) is what matters. Synthetic journal: 3 symbols, 5
+`agent_decisions` rows per trade, every trade closed WIN/LOSS, `limit` = number of trades, best-of-3.
+
+Ad-hoc measurement on `main` @ `ec67c57` before any change (recorded verbatim; "reference" = the old per-trade shape,
+`get_trade_attribution()` once per row, for contrast):
+
+| trades | `get_ensemble_learning_dataset()` | SQL statements | reference per-trade loop |
+|---:|---:|---:|---:|
+| 100 | 4.9 ms | 7 | 71.5 ms |
+| 1,000 | 47.7 ms | 7 | 1,097.7 ms |
+| 5,000 | 269.2 ms | 7 | 11,607.6 ms |
+
+The committed tool (`tools/benchmark_ensemble_dataset.py`) on this branch, three independent runs (run 3 with
+`--with-reference`):
+
+| trades | run 1 ms | run 2 ms | run 3 ms | SQL statements | run 3 reference ms |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 4.27 | 6.53 | 4.69 | 7 | 68.0 |
+| 1,000 | 40.31 | 44.65 | 43.42 | 7 | 992.9 |
+| 5,000 | 290.83 | 298.50 | 285.67 | 7 | 11,259.9 |
+
+Reading it: the statement count is constant (7 including connection setup) from 100 to 5,000 trades — the direct,
+hardware-independent proof there is no per-trade query — and cost per trade is flat (~0.04–0.06 ms/trade). 5,000 trades
+read in ~0.3 s, well inside the "well under 1 s" target. The per-trade reference loop is ~40x slower at 5,000 trades and
+grows super-linearly, which is the shape this benchmark exists to catch if it ever returns.
+
+### The benchmark tool
+
+`tools/benchmark_ensemble_dataset.py` (run from the repo root):
+
+    python -m tools.benchmark_ensemble_dataset                      # table: 100 / 1,000 / 5,000
+    python -m tools.benchmark_ensemble_dataset --check              # exit 1 if scaling is unhealthy
+    python -m tools.benchmark_ensemble_dataset --json --with-reference
+
+It populates a throw-away DB through the journal's real public write API (`save_signal` / `save_trade` /
+`save_agent_decision` / `update_trade_result`), traces SQL statements with sqlite3's trace callback, and never touches the
+live journal. `--check` fails if (a) the statement count varies with size (exact, noise-free), (b) a read returns the wrong
+row count, or (c) per-trade cost at the largest size exceeds `--max-per-trade-ratio` (default 3.0x) the smallest's
+(deliberately loose — timing is noisy; (a) is the real lock). No benchmark script was previously committed to the
+repository (§33's numbers came from a one-off measurement), so `tools/` is the home for it.
+
+`tests/test_ensemble_dataset_benchmark.py` (16 tests) locks the tool itself: healthy curves pass; growing statement counts,
+super-linear cost and wrong row counts are each flagged; `sqlite3.connect` is always restored; the CLI/JSON output is sane;
+and a **mutation check** swaps in a deliberately N+1 implementation (one extra query per returned row) and asserts the
+benchmark flags it. Complements §63's `test_ensemble_dataset_bulk_fetch.py`, which locks the query count directly.
+
+### Notes / limits
+
+- One `?` placeholder per trade in the `agent_decisions` IN-list: the ceiling is the SQLite build's
+  `SQLITE_MAX_VARIABLE_NUMBER` (999 before SQLite 3.32.0). Probed here: an IN-list of 100,000 placeholders succeeds on 3.45.1.
+  Current callers use small limits (journal default 1,000; `learning/dataset_builder.py` passes its own `limit`), so this is not
+  a live concern; re-check if a caller ever needs a limit above ~32k on an older SQLite.
+- Measures the journal read only, not the `learning/` pipeline on top of it. SQLite only; synthetic data.
+- Out of scope, still open (own briefs): agent-key namespace vs dynamic weighting (§76 P1; behavioral), learning-dataset
+  cohorts (§76 P2).
+
+### Verification
+
+Baseline `main` @ `ec67c57`: 3393 passed, 3 failed, 4 skipped, 45 deselected in this sandbox — the 3 failures are
+`tests/test_dashboard_serving.py` (need `dashboard_src/dist`, which CI builds first); with it built they pass, which is §76's
+3396 figure. This PR: 3409 passed (+16, `tests/test_ensemble_dataset_benchmark.py`), same 3 `test_dashboard_serving` failures,
+4 skipped, 45 deselected (i.e. 3412 passed where `dashboard_src/dist` is built). `tests/test_ceo_vote_persistence_lifecycle.py`
+(§76) and `tests/test_ensemble_dataset_bulk_fetch.py` (§63) pass unchanged. `ruff check .` clean; `python -c "import main"`
+succeeds; vulture is identical to `main` at `--min-confidence 80` (empty) and at 60 (432 lines, identical ignoring line numbers).
