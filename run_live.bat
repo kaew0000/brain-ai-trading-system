@@ -31,6 +31,7 @@ set EXECUTION_MODE=live
 set BINANCE_TESTNET=false
 
 :loop
+call scripts\ensure_dashboard.bat
 python main.py
 if %ERRORLEVEL% EQU 0 (
     echo Bot exited cleanly.
