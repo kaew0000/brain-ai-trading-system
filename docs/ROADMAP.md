@@ -76,6 +76,13 @@ PR, and `docs/architecture.md` section — see that file and
   statement count, 5,000 trades in ~0.3 s. This PR (§77) documents that
   verified baseline and adds `tools/benchmark_ensemble_dataset.py` so a
   future regression is measurable; no code behavior change.
+✅ Agent-key namespace vs dynamic weighting (§76's P1) — `CEOAgent._effective_weights()` looked agents
+  up by display name (`"SMC_ANALYST"`) while CEO-gated trades persist under the `CEOAgent.WEIGHTS` key
+  (`"smc"`), so dynamic weighting never saw CEO-gated performance. Fixed in §78 with a read-side alias table
+  (`journal/trade_attribution.py::WEIGHTS_KEY_ALIASES`) merged at the lookup boundary — no renames, no
+  change to stored rows or to `get_agent_performance()`. Merged via branch `fix/weighting-key-namespace`
+  (PR number to be added at merge). **`DYNAMIC_AGENT_WEIGHTS_ENABLED` is still off by default, pending a
+  human enable** — nothing in §78 turns it on.
 
 **Note on numbering:** the sequence 2A → 2B → 2C → 2E → 2F has no
 "Phase 2D" anywhere in commit messages, `CHANGELOG.md`,
@@ -150,26 +157,6 @@ here, not re-derived:
   volatility structure drifts. Needs a proposed refit interval and an
   offline evaluation (regime stability / agreement with the rule-based
   classifier, fit cost vs. latency budget) before any code. See §74.
-- **P1 — dynamic per-agent weighting cannot see CEO-gated multi-symbol
-  performance (agent-key namespace mismatch). Found by §76's audit; not
-  fixed there; no live impact today because `DYNAMIC_AGENT_WEIGHTS_ENABLED`
-  defaults to `False`.** `CEOAgent._effective_weights()` looks agents up
-  in `get_agent_performance()` by `AgentReport.agent` display name
-  (`"SMC_ANALYST"`, `"FUTURES_ANALYST"`, …). The single-symbol path in
-  `main.py` writes `agent_decisions` under exactly those names, so it
-  matches. The CEO-gated multi-symbol path writes `CEOAgent.WEIGHTS` keys
-  (`"smc"`, `"futures"`, …) both as `agent_decisions.agent` and in the
-  explicit attribution, so no lookup ever hits and the blend silently
-  falls back to the static `WEIGHTS` for that path even when enabled.
-  Evidence: `audit_trader_and_keys.py` (attached to the §76 PR): the
-  display names and `get_agent_performance()` keys share no member, for
-  the explicit-attribution cohort and the join cohort alike. This is the
-  same identifier split §41 documented as "NOT fixed"; §76 records its
-  consequence for Phase 4B. Needs a decision (map keys ↔ display names at
-  lookup, or write one canonical identifier) plus a test that enabling
-  dynamic weights actually changes `weights_used` on the CEO-gated path,
-  before `DYNAMIC_AGENT_WEIGHTS_ENABLED` or Phase 4C Step 2 consume this
-  data live.
 - **P2 — learning-dataset cohorts: decide how to treat trades without
   explicit attribution.** CEO-gated trades fall into three cohorts, all
   visible in `get_ensemble_learning_dataset()`: (a) before Step 7C
@@ -185,3 +172,13 @@ here, not re-derived:
   cohort boundaries are derived from code and the §35/§37 dates, not
   measured on a production journal. Until decided: leave as is (§76
   documents the cohorts; nothing is rewritten or backfilled).
+- **Needs decision — live-readiness: daily-loss gate day boundary (local date vs UTC timestamps).**
+  `journal_v2.get_daily_stats()` defaults `day` to `date.today()` (the process's LOCAL date) but queries
+  `date(timestamp)` over timestamps that callers store in UTC. `RiskEngine.check_daily_loss()` reaches it via
+  `get_today_pnl(execution_lane="LIVE")`. Verified: `tests/test_journal_v2_risk_gate_lane_scoping.py::
+  test_today_pnl_live_filter_ignores_training_lane_swings` passes under `TZ=UTC` and fails under
+  `TZ=Asia/Bangkok` whenever the local date differs from the UTC date (00:00–07:00 Bangkok). Not verified:
+  the timezone of the live host, or `RiskEngine` end to end — by reading the code, a host in a non-UTC zone
+  would not count trades closed in that window towards "today". Needs a decision (use a UTC day boundary,
+  or a documented host-TZ requirement) and a test pinned to a non-UTC `TZ`; also makes the suite
+  time-of-day dependent for a developer in UTC+7. Found while baselining §78; not touched there.

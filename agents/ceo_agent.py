@@ -48,6 +48,9 @@ from telemetry.agent_telemetry import get_telemetry_registry
 from reasoning.reasoning_stream import get_reasoning_stream
 from utils.logger import get_logger
 from config.settings import settings
+# Module (not name) import: the §78 alias lookup is reached only through
+# _effective_weights() after its flag early-return, and tests can prove that.
+from journal import trade_attribution as _attribution
 from .base_agent import BaseAgent, AgentReport
 from .decision_context import CEODecisionContext
 
@@ -193,6 +196,11 @@ class CEOAgent(BaseAgent):
         decision cycle. Renormalizes after blending so the long/short
         scoring and the >=40 action threshold keep meaning the same thing
         they did before Phase 4B, regardless of whether blending is active.
+
+        V16 §78: an agent's performance is looked up under every name it may
+        be stored under (WEIGHTS key and legacy display name), merged — see
+        journal/trade_attribution.py's WEIGHTS_KEY_ALIASES. Flag-off
+        behavior is unchanged: the first line below still returns WEIGHTS.
         """
         if not settings.DYNAMIC_AGENT_WEIGHTS_ENABLED or self._journal is None:
             return self.WEIGHTS
@@ -208,7 +216,15 @@ class CEOAgent(BaseAgent):
         blended: dict[str, float] = {}
         for key, static_w in self.WEIGHTS.items():
             rep  = reports.get(key)
-            perf = perf_by_agent.get(rep.agent) if rep is not None else None
+            # V16 §78: performance is stored under the WEIGHTS key for
+            # CEO-gated trades ("smc") and under the display name for older
+            # single-symbol trades ("SMC_ANALYST") — look the agent up under
+            # both (journal/trade_attribution.py's WEIGHTS_KEY_ALIASES) and
+            # merge, plus the live report's own name as before. Before this,
+            # only rep.agent was tried, so CEO-gated performance was never
+            # seen. Behind the flag's early-return above, as ever.
+            perf = (_attribution.aggregate_agent_performance(perf_by_agent, key, extra_names=(rep.agent,))
+                    if rep is not None else None)
             if perf is None or perf.get("total_trades", 0) < min_n:
                 blended[key] = static_w
                 continue

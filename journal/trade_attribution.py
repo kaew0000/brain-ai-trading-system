@@ -58,6 +58,70 @@ logger = get_logger(__name__)
 # it to WEIGHTS would attribute weight that was never applied.
 CEO_WEIGHTED_AGENT_KEYS =("smc", "futures", "regime", "risk", "journal", "confidence_engine")
 
+# V16 §78 — THE agent-key namespace rule (docs/architecture.md §78). Do not
+# add a third namespace.
+#   canonical : the CEOAgent.WEIGHTS key ("smc"). It is what every CEO-gated
+#               multi-symbol trade writes — agent_decisions.agent (Step 7C)
+#               and the explicit attribution (W14-2A) — so it is what new
+#               writes use. Never rename it: the journal already holds rows
+#               under it, and renaming would orphan them.
+#   legacy    : the agent's display name (AgentReport.agent, "SMC_ANALYST").
+#               main.py's single-symbol loop wrote agent_decisions under it,
+#               and CEOAgent._effective_weights() used to look agents up by it.
+#               Kept as a READ alias only, so historical rows still count.
+# Maps each WEIGHTS key to every name its performance may be stored under,
+# canonical first. Consulted ONLY at the dynamic-weighting lookup boundary
+# (aggregate_agent_performance() below). Storage and the output of
+# journal_v2.get_agent_performance() are untouched. Not WEIGHTS keys, so not
+# listed: CEO_AGENT / ceo (the CEO's own aggregate) and trader / ml_extensions
+# (registered with CEOAgent, cast no vote). Pinned to CEOAgent.WEIGHTS and to
+# the real agents' names by tests/test_weighting_key_namespace.py.
+WEIGHTS_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "smc":               ("smc", "SMC_ANALYST"),
+    "futures":           ("futures", "FUTURES_ANALYST"),
+    "regime":            ("regime", "REGIME_ANALYST"),
+    "risk":              ("risk", "RISK_MANAGER"),
+    "journal":           ("journal", "JOURNAL_ANALYST"),
+    "confidence_engine": ("confidence_engine", "CONFIDENCE_ENGINE"),
+}
+
+
+def aggregate_agent_performance(
+    perf_by_agent: dict[str, dict],
+    weights_key: str,
+    extra_names: tuple[str, ...] = (),
+) -> dict | None:
+    """One performance row for a CEOAgent.WEIGHTS key, merged across every
+    name it may be stored under (WEIGHTS_KEY_ALIASES[key] plus `extra_names`,
+    e.g. the live report's own display name). `perf_by_agent` is keyed by
+    agent name, as CEOAgent._get_agent_performance_cached() builds it from
+    journal_v2.get_agent_performance().
+
+    Returns None if no alias has a row. Returns the single matching row
+    unchanged (same object) when only one alias has one — so a journal that
+    only ever used one namespace behaves exactly as before §78. When several
+    match, counts are summed and win_rate is recomputed from the merged
+    counts (round(wins/total, 4), as get_agent_performance() itself does).
+    A trade is attributed under exactly one name, so nothing is counted
+    twice. Pure: no I/O, never raises on a well-formed dict.
+    """
+    names = tuple(dict.fromkeys((*WEIGHTS_KEY_ALIASES.get(weights_key, (weights_key,)), *extra_names)))
+    rows = [perf_by_agent[n] for n in names if n in perf_by_agent]
+    if not rows:
+        return None
+    if len(rows) == 1:
+        return rows[0]
+    total = sum(int(r.get("total_trades", 0)) for r in rows)
+    wins = sum(int(r.get("wins", 0)) for r in rows)
+    return {
+        "agent":        weights_key,
+        "total_trades": total,
+        "wins":         wins,
+        "losses":       sum(int(r.get("losses", 0)) for r in rows),
+        "win_rate":     round(wins / total, 4) if total else 0.0,
+        "total_pnl":    round(sum(float(r.get("total_pnl", 0.0)) for r in rows), 2),
+    }
+
 
 def agent_attribution_from_ceo_decision(ceo_decision: dict | None) -> list[dict]:
     """Extract a clean per-agent participation list from a

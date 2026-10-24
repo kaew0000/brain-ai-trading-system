@@ -256,8 +256,10 @@ persisted per agent at decision time (Step 7/7C, PRs #48/#51) and as
 explicit trade attribution (W14-2A, PR #54, §37);
 `agent_attribution_from_ceo_decision()` is called by
 `ceo_gated_signal_provider.py` and `main.py`; verified end to end and
-locked by tests in §76 (open follow-ups, unscheduled: agent-key
-namespace vs dynamic weighting, pre-W14-2A cohort — see ROADMAP.md),
+locked by tests in §76; agent-key namespace vs dynamic weighting fixed
+in §78 (read-side `WEIGHTS_KEY_ALIASES`; `DYNAMIC_AGENT_WEIGHTS_ENABLED`
+still off by default, pending a human enable) (open follow-up,
+unscheduled: pre-W14-2A cohort — see ROADMAP.md),
 2) ~~passing `symbol=` to `RegimeEngine.classify()`~~ — DONE: call site
 wired in §31; failure-path isolation fixed in §74 (open follow-ups,
 both unscheduled: shared-`_scaler` consistency, periodic HMM refit —

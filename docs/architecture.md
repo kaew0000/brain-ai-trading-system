@@ -7736,3 +7736,110 @@ Baseline `main` @ `ec67c57`: 3393 passed, 3 failed, 4 skipped, 45 deselected in 
 4 skipped, 45 deselected (i.e. 3412 passed where `dashboard_src/dist` is built). `tests/test_ceo_vote_persistence_lifecycle.py`
 (§76) and `tests/test_ensemble_dataset_bulk_fetch.py` (§63) pass unchanged. `ruff check .` clean; `python -c "import main"`
 succeeds; vulture is identical to `main` at `--min-confidence 80` (empty) and at 60 (432 lines, identical ignoring line numbers).
+
+## 78. Agent-Key Namespace vs Dynamic Weighting — Read-Side Alias Table (2026-10-25)
+
+Bugfix, behind an existing flag that stays **off**. Branch: `fix/weighting-key-namespace`. Follows §77 (PR #115).
+Closes the P1 raised in §76 (ROADMAP): dynamic per-agent weighting (§28) could not see CEO-gated multi-symbol performance.
+
+### One correction to the brief
+
+The brief described weighting as reading the `CEOAgent.WEIGHTS` keys. It does the opposite:
+`CEOAgent._effective_weights()` looked agents up in `get_agent_performance()` by `AgentReport.agent` — the **display
+name** (`"SMC_ANALYST"`). CEO-gated trades persist the **`WEIGHTS` key** (`"smc"`): `agent_decisions.agent` (Step 7C, §35)
+and the explicit attribution (W14-2A, §37). Same symptom, opposite direction — which is why the fix is a two-name lookup,
+not a one-name rename.
+
+### Reproduction (`main` @ `a8ee7f8`, no code changes)
+
+Script `repro_weighting_keys.py` (attached to the PR). The §76 lifecycle path (real 6-agent layer, `CEOGatedSignalProvider`,
+`ExecutionOrchestrator`, `TradeLifecycle` close, `TradeJournalV2`), five closed LONG WINs, `DYNAMIC_AGENT_WEIGHTS_ENABLED`
+forced **on** and `DYNAMIC_WEIGHT_MIN_SAMPLES=5` so the sample floor is not what blocks it. As in §76 the CEO action is
+re-labelled LONG; `agent_reports`/`weights_used` are the live layer's output.
+
+```
+                      compute_agent_statistics / get_agent_performance keys     lookups that hit   weights
+A) explicit (W14-2A)  ceo, confidence_engine, futures, journal, regime, risk, smc   NONE             == static WEIGHTS
+B) join (Step 7C)     CEO_AGENT, confidence_engine, futures, ..., smc, trader       NONE             == static WEIGHTS
+C) control            B with agent_decisions.agent renamed to display names         CONFIDENCE_ENGINE,
+   (synthetic)        (how main.py's single-symbol loop writes them)                SMC_ANALYST      moved: smc 0.25 -> 0.2712,
+                                                                                                     futures 0.20 -> 0.1887,
+                                                                                                     confidence_engine 0.15 -> 0.1627
+weighting lookup names (AgentReport.agent): SMC_ANALYST, FUTURES_ANALYST, REGIME_ANALYST, RISK_MANAGER,
+                                            JOURNAL_ANALYST, CONFIDENCE_ENGINE      (get_agent_performance() only lists
+                                            agents whose vote matched the traded direction: smc, confidence_engine)
+```
+
+The control proves the blend itself works; only the key names differ. Control rows are synthetic (renamed), labelled as such.
+Limits: action forced to LONG; no production journal inspected.
+
+### Design decision
+
+**Chosen: a read-side alias table at the weighting lookup boundary; no renames.** Rejected alternatives and why:
+
+- *Rename stored keys to display names (or the reverse).* The journal already holds `agent_decisions` rows and explicit
+  attributions under the `WEIGHTS` keys (CEO-gated, since Step 7C / W14-2A) and under display names (older single-symbol
+  rows). Any rename orphans one of them, including paper-trade history the live-readiness run will build on.
+- *Normalise inside `journal_v2.get_agent_performance()`.* Its output is also read by `knowledge_engine/agent_knowledge.py`;
+  changing it would change behavior with the flag **off**, which is not allowed.
+
+**Mechanism** (`journal/trade_attribution.py`):
+
+- `WEIGHTS_KEY_ALIASES: dict[str, tuple[str, ...]]` — each `WEIGHTS` key → the names its performance may be stored under,
+  canonical key first, legacy display name second. The single mapping table.
+- `aggregate_agent_performance(perf_by_agent, key, extra_names=())` — one row per key, merged across those names (plus the live
+  report's own `AgentReport.agent`, preserving the old lookup). One matching row is returned **unchanged**, so a journal that
+  only ever used one namespace gives exactly the pre-§78 result. Several matches: counts are summed and `win_rate` is recomputed
+  from the merged counts. A trade is attributed under one name, so nothing is counted twice.
+- `CEOAgent._effective_weights()` calls it after the flag early-return, and applies `DYNAMIC_WEIGHT_MIN_SAMPLES` to the
+  **merged** total (3 CEO-gated + 3 legacy trades clear a floor of 5; neither does alone).
+
+### The key-namespace rule (future agents: do not create a third namespace)
+
+1. **Canonical = the `CEOAgent.WEIGHTS` key** (`smc`, `futures`, `regime`, `risk`, `journal`, `confidence_engine`). New
+   attribution and journal writes use it. It is never renamed.
+2. **The display name (`AgentReport.agent`, e.g. `SMC_ANALYST`) is a legacy read alias only**, kept so historical rows count.
+   Nothing new should write under it.
+3. **Every name an agent may be stored under is listed in `WEIGHTS_KEY_ALIASES`** and nowhere else. A new weighted agent adds
+   its key to `CEOAgent.WEIGHTS`, `CEO_WEIGHTED_AGENT_KEYS` and `WEIGHTS_KEY_ALIASES` together; `tests/test_weighting_key_
+   namespace.py::TestNamespaceGuard` fails if they diverge, if a name maps to two keys, or if an alias stops matching the real
+   agent's name.
+4. Not `WEIGHTS` keys, so outside the table: `CEO_AGENT`/`ceo` (the CEO's own aggregate; two spellings across cohorts is the
+   ROADMAP P2 item, §76) and `trader`/`ml_extensions` (registered with `CEOAgent`, cast no vote — §30 note 3, §53, §76).
+
+### Flag state
+
+`DYNAMIC_AGENT_WEIGHTS_ENABLED` stays `False` by default; this PR does not enable it, and enabling it is a separate, human
+decision. With it off, `_effective_weights()` still returns `CEOAgent.WEIGHTS` (the same object) on its first line, the journal
+is not queried, and the alias code is not reached — asserted by tests, including that a poisoned helper is never called.
+With it on and only a single namespace present, the result equals an independent copy of the pre-§78 formula to 1e-12.
+Before enabling: the live effect is only as good as the data behind it (`DYNAMIC_WEIGHT_MIN_SAMPLES`, default 20, paper-trade
+accumulation), and the P2 cohort question (§76) is still open.
+
+### Changes
+
+- `journal/trade_attribution.py`: `WEIGHTS_KEY_ALIASES`, `aggregate_agent_performance()` (additive).
+- `agents/ceo_agent.py`: `_effective_weights()` lookup (flag-gated); module import of `journal.trade_attribution`.
+- No change to stored rows, schema, `get_agent_performance()`, `learning/`, or any default.
+
+### Tests
+
+`tests/test_weighting_key_namespace.py` (20): the §76 lifecycle through both attribution cohorts with the flag forced on; alias
+merge (canonical rows, legacy rows, split namespaces merged before the floor, merged total still below the floor, no leakage
+between agents, non-`WEIGHTS` agents ignored); flag-off zero change; flag-on single-namespace equals the old formula; namespace
+guard and helper unit cases. **11 fail on `main`** (6 prove the mismatch; 5 are new-API guards), 9 are invariant guards that
+pass on both. Mutation-checked: reverting the lookup (6 fail), removing the flag early-return (2), dropping an alias (2),
+merge returning one row (2), merged `win_rate` not recomputed (2), one name under two keys (2); sources restored.
+
+### Verification
+
+Baseline `main` @ `a8ee7f8` under `TZ=UTC`, `dashboard_src/dist` built: 3412 passed, 4 skipped, 45 deselected (= §77). This PR:
+**3432 passed** (+20), 4 skipped, 45 deselected; `world/tests` 565 passed. `ruff check . --exclude dashboard_src --exclude
+dashboard` clean; `python -c "import main"` succeeds; vulture identical to `main` at `--min-confidence 80` (empty) and `60`
+(432 lines, identical ignoring line numbers).
+
+**Environment note.** `main` also shows 1 failure when the suite runs with a non-UTC local date
+(`TZ=Asia/Bangkok`, 00:00–07:00 Bangkok): `test_journal_v2_risk_gate_lane_scoping.py::test_today_pnl_live_filter_ignores_
+training_lane_swings` (11/11 under `TZ=UTC`). Cause: `get_daily_stats()` uses the local `date.today()` against UTC-stamped
+trades. Pre-existing and unrelated to §78, so not touched; recorded in ROADMAP as a live-readiness needs-decision item because
+`RiskEngine.check_daily_loss()` uses the same method.
