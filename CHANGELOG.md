@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## [Unreleased] — Launchers auto-build the V16 dashboard when `dashboard_src/dist` is missing
+
+Launcher-only change; no Python/runtime behavior change. `dist/` is gitignored, so a fresh clone/zip had no V16 build and
+`api/app.py::serve_dashboard()` fell back to the legacy V13 fake-data demo, which sent no API key (flood of 401
+`UNAUTHORIZED` log lines). Branch: `fix/dashboard-build-bootstrap`.
+
+### Added
+- `scripts/ensure_dashboard.bat`: one-time `npm ci && npm run build` if `dashboard_src/dist/index.html` is absent; warns
+  (non-fatal) if Node.js is not installed.
+
+### Changed
+- `run.bat`, `run_live.bat`, `run_paper.bat`, `run_testnet.bat` call the script before `python main.py`; paper/testnet
+  banners say V16.
+
+### Operator note
+- Set `JWT_SECRET` and `API_KEYS` in `.env` (see `.env.example`) so the dashboard key survives restarts.
 ## [Unreleased] — `get_ensemble_learning_dataset()` N+1: verified already fixed (§63); benchmark added (V16 §77)
 
 Docs + benchmark tool + tests; no behavior change. ROADMAP/CLAUDE.md still listed the N+1 read pattern as open. Re-measured on

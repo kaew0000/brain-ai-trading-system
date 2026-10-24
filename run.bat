@@ -24,6 +24,7 @@ if %ERRORLEVEL% EQU 2 (
 cd /d "%~dp0"
 
 :loop
+call scripts\ensure_dashboard.bat
 python main.py
 if %ERRORLEVEL% EQU 0 (
     echo Bot exited cleanly.
