@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-24T18:30:29Z",
+  "updated_at": "2026-10-25T07:53:42Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -470,6 +470,17 @@
       "bundle_filename": "fix-weighting-key-namespace.bundle",
       "status": "applied",
       "imported_at": "2026-10-24T18:30:29Z",
+      "pushed": true,
+      "reason": null,
+      "corrected_sha": null,
+      "correction_note": null
+    },
+    {
+      "sha": "781fce7dd0bba8f0bcb1b5ced725e46d842f5c5c",
+      "branch": "feature/world-iso-projection",
+      "bundle_filename": "feature-world-iso-projection.bundle",
+      "status": "applied",
+      "imported_at": "2026-10-25T07:53:42Z",
       "pushed": true,
       "reason": null,
       "corrected_sha": null,
