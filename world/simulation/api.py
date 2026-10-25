@@ -47,6 +47,11 @@ def step() -> SimulationState:
     return _engine.step(force=True)
 
 
+def set_history_window(window: int | None) -> None:
+    """Resize the shared engine's timeline history (ticks retained)."""
+    _engine.set_history_window(window)
+
+
 def pause() -> None:
     _engine.pause()
 

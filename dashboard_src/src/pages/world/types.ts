@@ -109,3 +109,47 @@ export interface WorldEnvelope<T> {
   ok: boolean
   data: T
 }
+
+// ── Live monitoring (V16 §82) ───────────────────────────────────────────
+// Wire shapes of GET /api/world/state (world.runtime WorldState.to_dict())
+// and GET /api/world/ticker. Only the fields the System Pulse reads.
+
+export interface WorldPortfolioSummary {
+  dailyPnl: number | null
+  floatingPnl: number | null
+  drawdown: number | null
+  winRate: number | null
+  avgRr: number | null
+}
+
+export interface WorldStateSnapshot {
+  engineStatus: string
+  capturedAt: string
+  sequence: number
+  missions: { missionId: string; status: string; title?: string }[]
+  portfolioSummary: WorldPortfolioSummary | null
+  notifications: { id: string; timestamp: string; message: string; severity: string; read: boolean }[]
+  events: { id: string; timestamp: string; type: string; district: string; severity: string; agent: string; message: string }[]
+  telemetry: { name: string; value: number; unit: string; district: string }[]
+  orders: { symbol: string; state: string | null }[]
+  reconciliation: {
+    lastRun: string | null
+    lastResult: string | null
+    eventCount: number | null
+    suppressedRepeatCount: number | null
+  } | null
+}
+
+export type TickerStatus = 'ok' | 'degraded' | 'stalled' | 'stopped' | 'disabled'
+
+export interface TickerHealth {
+  status: TickerStatus
+  running: boolean
+  intervalSeconds?: number
+  tickCount?: number
+  failureCount?: number
+  consecutiveFailures?: number
+  lastTickAt?: string | null
+  lastTickAgeSeconds?: number | null
+  lastError?: string | null
+}

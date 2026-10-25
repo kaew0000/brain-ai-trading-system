@@ -1,22 +1,29 @@
-# MIGRATION — Dashboard auth hardening (V16 §81)
+# MIGRATION — World live monitoring (V16 §82)
 
-## Do you need to do anything?
-Rebuild the dashboard so the frontend fixes take effect; no config, schema, dependency or data change.
+## Required
+1. Rebuild the dashboard and restart the backend (a new thread starts with it):
 
-    cd dashboard_src && npm ci && npm run build
+       cd dashboard_src && npm ci && npm run build
 
-then restart the backend (the launchers auto-build when `dashboard_src/dist` is missing). Hard-refresh the browser
-(Ctrl+F5) so the old `WorldPage-*.js` / `index-*.js` bundles are not served from cache.
+   then Ctrl+F5 in the browser.
+
+## New settings (optional; defaults shown, add to `.env` only to change)
+    WORLD_SIM_TICK_INTERVAL_SECONDS=2.0   # 0 = legacy: one tick per LOOP_INTERVAL on the scheduler
+    WORLD_TIMELINE_HISTORY_WINDOW=900     # ticks kept for Timeline replay (30 min at 2 s)
+
+Lower tick interval = smoother movement and more frame requests; raise it on a slow machine.
 
 ## Behaviour changes
-- `/api/world/*` and `/api/workspace/*` REST calls from the dashboard now carry the Bearer token.
-- Dashboard polling starts after the first sign-in attempt settles instead of immediately.
-- A malformed (non-ASCII / non-string) API key now gets 401, previously 500.
+- World simulation ticks every 2 s on its own thread instead of once per trading cycle. Tick numbers no longer match
+  trading cycles 1:1. Timeline replay now covers ~30 minutes (was ~8 hours at 60 s ticks); raise
+  `WORLD_TIMELINE_HISTORY_WINDOW` for longer (about 4 KB of memory per tick).
+- Office tab shows a System Pulse strip and the scene updates live.
+- New read-only endpoint `GET /api/world/ticker`.
 
-## Credentials
-Nothing changes. If you ever pasted `API_KEYS` / `JWT_SECRET` values into a shared place, rotate them:
-`python -c "import secrets;print(secrets.token_hex(32))"` for `JWT_SECRET`,
-`python -c "import secrets;print(secrets.token_urlsafe(32))"` for a key in `API_KEYS`, then restart.
+## Checking it works
+`GET /api/world/ticker` should report `"status":"ok"`; the backend log shows `WorldSimulationTicker started (interval=2.0s)`.
+If it shows `disabled`, the interval is 0 or the ticker failed to start (see the log line starting
+`WorldSimulationTicker failed to start`): the old scheduled tick is then used.
 
 ## Rollback
-`git revert` the single commit. Nothing persisted.
+Set `WORLD_SIM_TICK_INTERVAL_SECONDS=0` for the old tick behaviour without reverting code, or `git revert` the commit.

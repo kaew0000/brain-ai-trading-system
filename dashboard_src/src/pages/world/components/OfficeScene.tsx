@@ -15,7 +15,8 @@
 import Phaser from 'phaser'
 import { useEffect, useRef } from 'react'
 import type { RenderFrame } from '../types'
-import { assetDisplayName, BEHAVIOR_COLORS, isIsometric, isoDepth, isoDiamondPoints } from '../sceneMapping'
+import { assetDisplayName, BEHAVIOR_COLORS, characterTweenOffset, frameSignature, isIsometric, isoDepth, isoDiamondPoints } from '../sceneMapping'
+import { WORLD_CONFIG } from '../../../game/config/world.config'
 import { CHARACTER_TO_ROLE, DISTRICT_TO_BUILDING, resolvePropAssetId } from '../assetMapping'
 import { getBuilding, getDecoration, getIsoNPC, getIsoProp, getManifest, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
 import type { IsoManifest } from '../isoAssets'
@@ -31,6 +32,11 @@ const ISO_FLOOR_EDGE = 0x475569
 class OfficeCanvasScene extends Phaser.Scene {
   private frame: RenderFrame | null = null
   private layer?: Phaser.GameObjects.Container
+  // Live view (V16 §82): last drawn frame identity (skip no-op redraws), the room it
+  // belonged to, and each character's sprite so a redraw can start from where it is now.
+  private lastSignature: string | null = null
+  private lastDrawnRoomId: string | null = null
+  private characterSprites = new Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Sprite>()
 
   constructor() {
     super('OfficeCanvasScene')
@@ -50,8 +56,23 @@ class OfficeCanvasScene extends Phaser.Scene {
 
   /** Called by the React wrapper whenever a new RenderFrame arrives. */
   setFrame(frame: RenderFrame): void {
+    const signature = frameSignature(frame)
+    const unchanged = this.frame !== null && signature === this.lastSignature
     this.frame = frame
+    this.lastSignature = signature
+    if (unchanged) return // same picture: keep the current sprites (and any glide in progress)
     if (this.layer) this.draw(frame)
+  }
+
+  /** Slides display objects from (their position + dx, + dy) back to where they were created. */
+  private glide(objects: (Phaser.GameObjects.GameObject & { x: number; y: number })[], dx: number, dy: number): void {
+    for (const obj of objects) {
+      const toX = obj.x
+      const toY = obj.y
+      obj.x = toX + dx
+      obj.y = toY + dy
+      this.tweens.add({ targets: obj, x: toX, y: toY, duration: WORLD_CONFIG.characterTweenMs, ease: 'Linear' })
+    }
   }
 
   /** Draws one isometric prop (manifest-driven size/anchor/depth). Returns false when no iso art
@@ -68,6 +89,15 @@ class OfficeCanvasScene extends Phaser.Scene {
   }
 
   private draw(frame: RenderFrame): void {
+    // Remember where each character is displayed right now (mid-glide included) so the
+    // redraw can slide from there instead of snapping. Only within the same room.
+    const previousPositions = new Map<string, { x: number; y: number }>()
+    if (this.lastDrawnRoomId === frame.roomId) {
+      this.characterSprites.forEach((sprite, id) => previousPositions.set(id, { x: sprite.x, y: sprite.y }))
+    }
+    this.tweens.killAll() // tweens target objects destroyed by removeAll() below
+    this.characterSprites.clear()
+    this.lastDrawnRoomId = frame.roomId
     this.layer?.removeAll(true)
     if (!this.layer) return
 
@@ -159,6 +189,13 @@ class OfficeCanvasScene extends Phaser.Scene {
         }).setOrigin(0.5, 1)
         if (iso) label.setDepth(isoDepth(cmd.layer, cmd.screenY) + 0.05)
         this.layer.add(label)
+        this.characterSprites.set(cmd.entityId, sprite)
+        const offset = characterTweenOffset(
+          previousPositions.get(cmd.entityId),
+          { x: cmd.screenX, y: cmd.screenY },
+          WORLD_CONFIG.characterSnapDistancePx,
+        )
+        if (offset) this.glide([ring, sprite, label], offset.dx, offset.dy)
       }
     }
     if (iso) this.layer.sort('depth')

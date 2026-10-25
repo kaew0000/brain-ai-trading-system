@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## [Unreleased] — World live monitoring (V16 §82)
+
+Makes the Office World usable for watching the running system. Branch: `feature/world-live-monitoring`.
+
+### Added
+- `world/simulation/ticker.py`: dedicated simulation clock thread (default 2 s) with backoff recovery and health reporting;
+  `GET /api/world/ticker`.
+- Settings `WORLD_SIM_TICK_INTERVAL_SECONDS` (2.0; 0 = legacy scheduled tick) and `WORLD_TIMELINE_HISTORY_WINDOW` (900).
+- Dashboard: live frame refresh on every world tick, NPC glide between frames, `SystemPulse` strip with real system values.
+- `set_history_window` on Timeline / SimulationEngine / simulation api.
+
+### Changed
+- The World simulation no longer ticks on the trading scheduler thread (fallback kept).
+- `OfficeScene` no longer redraws identical frames.
+
+### Notes
+- Real-data export into the World is unchanged (once per `LOOP_INTERVAL`).
+- Tests: 21 backend (`tests/test_world_ticker.py`) and 31 frontend tests added.
+
 ## [Unreleased] — Dashboard auth hardening (V16 §81)
 
 Fixes the 401 bursts and the empty Office World scene seen with `API_AUTH_ENABLED=true`. No new routes, settings or

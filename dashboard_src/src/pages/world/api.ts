@@ -15,8 +15,10 @@ import type {
   RenderFrame,
   RoomActivity,
   SimulationState,
+  TickerHealth,
   TimelineStatus,
   WorldEnvelope,
+  WorldStateSnapshot,
 } from './types'
 
 export { wsWorld }
@@ -43,6 +45,8 @@ async function post<T>(path: string): Promise<T> {
 
 export const worldApi = {
   getSimulationState: () => get<SimulationState>('/api/world/simulation'),
+  getWorldState: () => get<WorldStateSnapshot>('/api/world/state'),
+  getTicker: () => get<TickerHealth>('/api/world/ticker'),
   listRooms: () => get<RoomActivity[]>('/api/world/rooms'),
   getRoom: (roomId: string) => get<RoomActivity>(`/api/world/rooms/${roomId}`),
   getCharacter: (agentId: string) => get<CharacterActivity>(`/api/world/characters/${agentId}`),

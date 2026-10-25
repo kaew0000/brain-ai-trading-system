@@ -124,6 +124,10 @@ class SimulationEngine:
 
     # -- public API ----------------------------------------------------
 
+    def set_history_window(self, window: int | None) -> None:
+        """Resize the timeline's rolling history (see Timeline.set_history_window)."""
+        self._timeline.set_history_window(window)
+
     def step(self, force: bool = False) -> SimulationState:
         """Advance the simulation by exactly one tick and return the new
         `SimulationState` (also recorded into the timeline)."""

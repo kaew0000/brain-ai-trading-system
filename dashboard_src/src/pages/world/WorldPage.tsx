@@ -6,9 +6,11 @@
 // renderer's own already-public APIs.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { worldApi, wsWorld } from './api'
-import type { RenderFrame, RoomActivity, SimulationState } from './types'
+import type { RoomActivity, SimulationState } from './types'
 import { deriveWsStatus, WS_STATUS_CLASSNAME, WS_STATUS_LABEL } from './wsStatus'
 import OfficeScene from './components/OfficeScene'
+import SystemPulse from './components/SystemPulse'
+import { useLiveFrame } from './useLiveFrame'
 import RoomList from './components/RoomList'
 import Inspector from './components/Inspector'
 import TimelinePanel from './components/TimelinePanel'
@@ -30,10 +32,11 @@ export default function WorldPage() {
   const [rooms, setRooms] = useState<RoomActivity[]>([])
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null)
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
-  const [frame, setFrame] = useState<RenderFrame | null>(null)
   const [tab, setTab] = useState<TabId>('scene')
   const [wsStatus, setWsStatus] = useState<'LIVE' | 'RECONNECTING' | 'DISCONNECTED'>('DISCONNECTED')
   const hasEverConnectedRef = useRef(false)
+  // V16 §82: the selected room's frame, refreshed on every world tick (WS) with a slow poll fallback.
+  const frame = useLiveFrame(selectedRoomId, wsStatus)
 
   // Initial hydration via REST — matches the same "REST for initial
   // hydration, WebSocket for realtime" split the rest of this dashboard
@@ -83,11 +86,6 @@ export default function WorldPage() {
     return () => clearInterval(id)
   }, [])
 
-  useEffect(() => {
-    if (!selectedRoomId) return
-    worldApi.getRoomFrame(selectedRoomId).then(setFrame).catch(() => setFrame(null))
-  }, [selectedRoomId])
-
   const characterIdsInFrame = useMemo(
     () =>
       (frame?.commands ?? [])
@@ -135,6 +133,8 @@ export default function WorldPage() {
           </button>
         ))}
       </nav>
+
+      {tab === 'scene' && <SystemPulse />}
 
       {tab === 'scene' && (
         <div className="grid grid-cols-[240px,1fr,280px] gap-4">

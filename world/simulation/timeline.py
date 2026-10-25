@@ -24,12 +24,26 @@ class Timeline:
         "live" position); if paused, the cursor stays where it was so a
         paused review isn't yanked forward by new ticks arriving."""
         self._records.append(state)
+        self._trim()
+        if self._playing:
+            self._cursor = len(self._records) - 1
+
+    def _trim(self) -> None:
+        """Drop the oldest records beyond `history_window`, keeping the
+        cursor pointing at the same state (clamped to -1)."""
         if self._history_window is not None and len(self._records) > self._history_window:
             overflow = len(self._records) - self._history_window
             self._records = self._records[overflow:]
             self._cursor = max(-1, self._cursor - overflow)
-        if self._playing:
-            self._cursor = len(self._records) - 1
+
+    def set_history_window(self, window: int | None) -> None:
+        """Change the rolling-window size after construction (e.g. when the
+        tick rate is configured). `None` means unbounded, matching the
+        constructor; otherwise it must be >= 1. Trims immediately."""
+        if window is not None and window < 1:
+            raise ValueError(f"history_window must be >= 1 or None, got {window}")
+        self._history_window = window
+        self._trim()
 
     def play(self) -> None:
         """Start/restart playback from the beginning of retained history."""

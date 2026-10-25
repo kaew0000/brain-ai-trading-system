@@ -174,6 +174,20 @@ class Settings(BaseSettings):
     # ── Main Loop ─────────────────────────────────────────
     LOOP_INTERVAL: int = Field(default=60)
 
+    # ── World simulation clock (V16 §82) ──────────────────────────────
+    # Seconds between World simulation ticks, run on the dedicated
+    # world.simulation.ticker thread (independent of the trading loop, so a
+    # slow trading cycle no longer freezes the Office World). Real-data
+    # ingestion into the World still happens once per LOOP_INTERVAL; this
+    # only controls the animation clock. Set to 0 to restore the legacy
+    # behaviour (one tick per LOOP_INTERVAL via the scheduler).
+    WORLD_SIM_TICK_INTERVAL_SECONDS: float = Field(default=2.0, alias="WORLD_SIM_TICK_INTERVAL_SECONDS", ge=0)
+    # Simulation ticks retained for Timeline replay when the dedicated ticker
+    # is enabled (rolling window). 900 ticks = 30 min at the 2 s default
+    # (~4 KB of state per tick). The legacy 60 s scheduler keeps the
+    # engine's own default of 500.
+    WORLD_TIMELINE_HISTORY_WINDOW: int = Field(default=900, alias="WORLD_TIMELINE_HISTORY_WINDOW", ge=1)
+
     # ── Journal ───────────────────────────────────────────
     JOURNAL_DB_PATH: str = Field(default="brain_bot_journal.db")
     DATABASE_PATH: str = Field(default="brain_bot_v13.db")

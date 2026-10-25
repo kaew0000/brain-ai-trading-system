@@ -4,7 +4,7 @@
 // (the Phaser canvas component) so this logic is unit-testable in jsdom
 // without needing a real WebGL/Canvas context.
 
-import type { CharacterActivity, RoomActivity } from './types'
+import type { CharacterActivity, RenderFrame, RoomActivity } from './types'
 
 export const BEHAVIOR_COLORS: Record<CharacterActivity['behavior'], number> = {
   idle: 0x64748b, // slate
@@ -80,4 +80,45 @@ export function isoDiamondPoints(cx: number, cy: number, halfWidth: number, rati
 
 export function isIsometric(frame: { viewport: { projection?: string } } | null | undefined): boolean {
   return frame?.viewport?.projection === 'isometric'
+}
+
+// ── Live view helpers (V16 §82) ─────────────────────────────────────────
+
+/**
+ * Cheap identity of what a RenderFrame would draw. Two frames with the same
+ * signature render identically, so the scene can skip a redraw (the world
+ * ticks every couple of seconds but most ticks leave a given room unchanged).
+ * Positions are quantised to 0.1 px to ignore float noise.
+ */
+export function frameSignature(frame: RenderFrame): string {
+  const parts = frame.commands.map((c) => {
+    const anim = typeof c.metadata?.animationState === 'string' ? c.metadata.animationState : ''
+    return `${c.layer}|${c.entityId}|${c.assetId ?? ''}|${Math.round(c.screenX * 10)}|${Math.round(c.screenY * 10)}|${anim}`
+  })
+  return `${frame.roomId}#${frame.viewport.projection ?? 'orthographic'}#${parts.join(';')}`
+}
+
+export interface Point2D {
+  x: number
+  y: number
+}
+
+/**
+ * Offset to start a redrawn character at so it glides from where it was
+ * displayed to where it now belongs. Returns the (dx, dy) to ADD to the new
+ * position, or null when there is nothing worth animating: no previous
+ * position, a sub-pixel change, or a jump bigger than `snapDistancePx`
+ * (teleport / layout change: slide would look wrong, so snap).
+ */
+export function characterTweenOffset(
+  previous: Point2D | undefined,
+  next: Point2D,
+  snapDistancePx: number,
+): { dx: number; dy: number } | null {
+  if (!previous) return null
+  const dx = previous.x - next.x
+  const dy = previous.y - next.y
+  const dist = Math.hypot(dx, dy)
+  if (dist < 0.5 || dist > snapDistancePx) return null
+  return { dx, dy }
 }

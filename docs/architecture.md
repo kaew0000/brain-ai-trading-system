@@ -7898,3 +7898,37 @@ with a 1.5 s fallback so nothing can block forever). The two world fetch layers 
 
 **Safety.** No public API, route, schema or setting changed. Valid keys and tokens behave exactly as before; only malformed
 keys change (500 -> 401). Polling starts at most ~1.5 s later in the worst case and normally immediately after sign-in settles.
+
+## 82. World Live Monitoring (2026-10-25)
+
+**Gap.** With the auth fix (§81) the Office World loaded, but it still could not be used to watch the system: the scene was
+fetched once per room selection (never refreshed), the simulation advanced once per trading cycle (`LOOP_INTERVAL`, 60 s) on
+the main scheduler thread (a slow cycle froze it), NPCs moved 0.2 logical units per tick, the scene redrew from scratch every
+time (no glide), and no real numbers were shown next to the picture. Verified in `main.py`, `world/simulation/*`,
+`world/frontend/renderer`, `api/world_ws.py`, `OfficeScene.tsx`, `WorldPage.tsx`.
+
+**Change.**
+- `world/simulation/ticker.py` — `WorldSimulationTicker`: daemon thread that calls `world.simulation.api.step()` every
+  `WORLD_SIM_TICK_INTERVAL_SECONDS` (default 2.0). Failures are counted, logged (rate-limited) and retried with capped
+  exponential backoff; the first success resets it. `health()` reports `ok | degraded | stalled | stopped` and is served at
+  `GET /api/world/ticker` (`disabled` when the legacy scheduled tick is in use). It intentionally does not write to the shared
+  `system_health` heartbeat registry: that feeds `heartbeat_age_s` (min over all beats) and a 2 s beat would hide a dead trading loop.
+- `main.py` starts the ticker (`_start_world_ticker`) and keeps the old scheduled tick only as a fallback (setting `<= 0`, or a
+  start failure). Stopped on shutdown. Real-data export into the World is unchanged (once per `LOOP_INTERVAL`).
+- `Timeline.set_history_window` / `SimulationEngine.set_history_window` / `simulation.api.set_history_window`:
+  `WORLD_TIMELINE_HISTORY_WINDOW` (default 900 ticks = 30 min at 2 s) is applied when the ticker is enabled. Memory is bounded
+  (~4 KB of state per tick).
+- Dashboard: `useLiveFrame` refetches the selected room's frame on every `/ws/world` `simulation`/`init` message (slow poll
+  fallback while the socket is not LIVE; one request in flight; stale responses dropped). `OfficeScene` skips redraws of an
+  identical frame (`frameSignature`) and glides each character from its currently displayed position to the new one
+  (`characterTweenOffset`; jumps above `characterSnapDistancePx` snap). `SystemPulse` shows real values from `/api/world/state`.
+
+**What the System Pulse shows (and does not).** Engine status, age of the last real-data snapshot (flagged STALE past
+`pulseStaleSeconds`), today's P&L / win rate / avg R:R / drawdown, active orders, reconciliation, active missions, unread alerts,
+CPU/RAM, recent events and the world clock's own health. Missing values render as a dash, never zero. Known data limits, by
+design of the existing export: P&L, win rate and avg R:R come from the journal across ALL execution lanes (live + paper-training),
+and open exchange positions / floating P&L are not exported to the World (no verified read-only accessor), so they are not shown.
+
+**Safety.** Additive; no route/schema removed. `WORLD_SIM_TICK_INTERVAL_SECONDS=0` restores the previous behaviour exactly.
+The Office scene follows the Timeline cursor by design: pausing or seeking in the Timeline tab freezes the scene on that
+historical state until resumed.
