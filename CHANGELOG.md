@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## [Unreleased] — Dashboard auth hardening (V16 §81)
+
+Fixes the 401 bursts and the empty Office World scene seen with `API_AUTH_ENABLED=true`. No new routes, settings or
+dependencies. Branch: `feature/dashboard-auth-hardening`.
+
+### Fixed
+- `pages/world/api.ts` and `pages/world/workspaceApi.ts` now send the Bearer token (they used bare `fetch()` and always got 401).
+- Startup race: `usePoll` and the world REST layers wait for the first sign-in attempt (`whenAuthSettled()`) before their first
+  request, removing the guaranteed 401 per endpoint on every page load.
+- `WorldPage` no longer leaves an unhandled promise rejection when initial room hydration fails.
+- `api/auth.py`: a non-ASCII or non-string API key now returns 401 instead of HTTP 500 (`hmac.compare_digest` on `str`).
+
+### Added
+- `getAuthHeaders()` / `whenAuthSettled()` in `lib/api.ts`; `usePoll` is exported for testing.
+- Tests: `TestMalformedApiKeyInput` (pytest), `api.authSettled.test.ts`, `usePoll.test.tsx`, Bearer-header cases in the world tests.
+
+### Changed
+- World/workspace fetch calls now pass `{ headers }`; existing assertions in `world.test.ts` / `workspace.test.ts` updated.
+
 ## [Unreleased] — World: isometric art pipeline (V16 §80, Phase W-ISO-2)
 
 Track B only (`world/` + `dashboard_src/`). Adds real isometric art (generated, no third-party assets) and dedicated

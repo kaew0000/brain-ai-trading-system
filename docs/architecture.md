@@ -7878,3 +7878,23 @@ Depth for props comes from manifest footprint data (`isoPropDepthOffset`). `meet
 
 **Safety.** Read-only Track B. Orthographic output unchanged apart from the meeting ring colour. No room placements changed.
 
+
+## 81. Dashboard Auth Hardening (2026-10-25)
+
+**Gap.** With `API_AUTH_ENABLED=true` (the default) the dashboard logged bursts of 401s and the Office World page rendered an
+empty scene. Verified in `api/app.py` (`_auth_middleware`), `lib/api.ts`, `hooks/useData.ts`, `pages/world/api.ts`,
+`pages/world/workspaceApi.ts`, `WorldPage.tsx`, `api/auth.py`.
+
+**Root causes.** (1) `pages/world/api.ts` and `workspaceApi.ts` used bare `fetch()` with no `Authorization` header, so every
+`/api/world/*` and `/api/workspace/*` REST call was rejected even when signed in. (2) React runs child effects before the
+parent's, so `usePoll` and WorldPage's one-shot hydration fired before `Layout`'s `restoreSession()` finished: one guaranteed
+401 per endpoint per page load, and WorldPage never retried. (3) `_lookup_api_key` passed `str` operands to
+`hmac.compare_digest`, which raises `TypeError` on non-ASCII input, so a malformed key produced HTTP 500 instead of 401.
+
+**Change.** `lib/api.ts` exports `getAuthHeaders()` and `whenAuthSettled()` (resolves once the first login/restore attempt ends,
+with a 1.5 s fallback so nothing can block forever). The two world fetch layers attach the Bearer token and await it; `usePoll`
+(now exported) starts polling only after it. `WorldPage` catches the hydration failure. `_lookup_api_key` compares UTF-8 bytes
+(`surrogatepass`) and treats non-string keys as invalid.
+
+**Safety.** No public API, route, schema or setting changed. Valid keys and tokens behave exactly as before; only malformed
+keys change (500 -> 401). Polling starts at most ~1.5 s later in the worst case and normally immediately after sign-in settles.

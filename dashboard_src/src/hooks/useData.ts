@@ -40,7 +40,7 @@
  */
 
 import { useEffect, useCallback, useRef } from 'react'
-import { api, wsEvents, wsDecision, wsAgents, wsMissions, wsML } from '@/lib/api'
+import { api, whenAuthSettled, wsEvents, wsDecision, wsAgents, wsMissions, wsML } from '@/lib/api'
 import {
   useDecision, useHealth, useMissions, useAgents,
   useMarket, useJournal, useML, useCommander, useUI, useEventLog,
@@ -50,12 +50,24 @@ import type { BusEvent } from '@/types/api'
 
 // ── Core polling primitive ────────────────────────────────────────────────────
 
-function usePoll(fn: () => Promise<void>, ms = 5000, stop = false) {
+export function usePoll(fn: () => Promise<void>, ms = 5000, stop = false) {
   useEffect(() => {
     if (stop) return
-    fn()
-    const id = setInterval(fn, ms)
-    return () => clearInterval(id)
+    let cancelled = false
+    let id: ReturnType<typeof setInterval> | null = null
+    // Wait for the initial sign-in attempt (Layout's restoreSession() /
+    // boot-token login) before the first request. Child effects run before
+    // the parent's, so without this every endpoint's first poll went out
+    // with no token and logged a guaranteed 401 on each page load.
+    whenAuthSettled().then(() => {
+      if (cancelled) return
+      fn()
+      id = setInterval(fn, ms)
+    })
+    return () => {
+      cancelled = true
+      if (id !== null) clearInterval(id)
+    }
   }, [fn, ms, stop])
 }
 

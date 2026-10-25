@@ -554,3 +554,50 @@ class TestLifecycleCommandAuth:
         from commander.control_state import get_control_state
         assert get_control_state().lifecycle_state() != "STOPPING"
 
+
+
+class TestMalformedApiKeyInput:
+    """A malformed API key must be a clean 401, never a 500.
+
+    Regression: hmac.compare_digest() raises TypeError on str operands with
+    non-ASCII characters, so a key such as a pasted non-ASCII placeholder
+    crashed POST /api/auth/token (and the X-API-Key path) with HTTP 500.
+    """
+
+    @pytest.mark.parametrize("bad_key", [
+        "วาง_KEY_ที่นี่",   # non-ASCII (Thai) placeholder text
+        "clé-é-ü",             # latin-1 range characters
+        123,                   # non-string JSON value
+        ["test-operator-key"], # wrong JSON type
+        None,
+        "",
+    ])
+    def test_token_endpoint_rejects_malformed_key_with_401(self, auth_client, bad_key):
+        r = auth_client.post("/api/auth/token", json={"api_key": bad_key})
+        assert r.status_code == 401
+
+    def test_lone_surrogate_json_escape_is_rejected_with_401(self, auth_client):
+        # Sent as raw JSON: the test client cannot UTF-8 encode a lone
+        # surrogate itself, but a real client can send the \ud800 escape.
+        r = auth_client.post(
+            "/api/auth/token",
+            content=b'{"api_key": "\\ud800"}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 401
+
+    def test_x_api_key_header_with_non_ascii_is_rejected_with_401(self, auth_client):
+        r = auth_client.get("/api/config", headers={"X-API-Key": "clé-é".encode("latin-1")})
+        assert r.status_code == 401
+
+    def test_valid_key_still_authenticates_after_the_fix(self, auth_client):
+        r = auth_client.post("/api/auth/token", json={"api_key": "test-operator-key"})
+        assert r.status_code == 200
+        assert r.json()["data"]["role"] == "OPERATOR"
+
+    def test_configured_non_ascii_key_still_matches_itself(self, auth_client):
+        from config.settings import settings
+        settings.API_KEYS = {**settings.API_KEYS, "κλειδί-é": "viewer"}  # restored by the fixture's teardown
+        r = auth_client.post("/api/auth/token", json={"api_key": "κλειδί-é"})
+        assert r.status_code == 200
+        assert r.json()["data"]["role"] == "VIEWER"
