@@ -12,6 +12,10 @@ import {
   assetDisplayName,
   behaviorColorHex,
   behaviorLabel,
+  isIsometric,
+  isoDepth,
+  isoDiamondPoints,
+  ISO_FLOOR_DEPTH,
 } from '../sceneMapping'
 import { worldApi } from '../api'
 
@@ -121,5 +125,25 @@ describe('worldApi', () => {
     mockOk([])
     await worldApi.search('a b')
     expect(fetchMock).toHaveBeenCalledWith('/api/world/search?q=a%20b')
+  })
+})
+
+describe('isometric helpers (Phase W-ISO-1)', () => {
+  it('keeps floors beneath everything and sorts by screenY', () => {
+    expect(isoDepth('floor', 999)).toBe(ISO_FLOOR_DEPTH)
+    expect(isoDepth('furniture', 100)).toBeLessThan(isoDepth('furniture', 200))
+    expect(isoDepth('furniture', 150)).toBeLessThan(isoDepth('characters', 150)) // tie -> character in front
+    expect(isoDepth('characters', 100)).toBeLessThan(isoDepth('furniture', 101)) // behind a desk row -> occluded
+  })
+
+  it('builds a 2:1 diamond', () => {
+    expect(isoDiamondPoints(100, 50, 40, 0.5)).toEqual([[100, 30], [140, 50], [100, 70], [60, 50]])
+  })
+
+  it('detects isometric frames and defaults to legacy', () => {
+    expect(isIsometric(null)).toBe(false)
+    expect(isIsometric({ viewport: {} })).toBe(false)
+    expect(isIsometric({ viewport: { projection: 'orthographic' } })).toBe(false)
+    expect(isIsometric({ viewport: { projection: 'isometric' } })).toBe(true)
   })
 })

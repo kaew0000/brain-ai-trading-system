@@ -188,6 +188,13 @@ scene graph) only needs to satisfy the same `Renderer`/`CharacterRenderer`/
 `DistrictRenderer` ABCs — `scene_builder.build_scene`, `AssetLocator`,
 and `SpriteMapper` are all engine-agnostic and reusable as-is.
 
+## Isometric projection (Phase W-ISO-1)
+
+Opt-in, off by default. Set `WORLD_RENDER_PROJECTION=isometric` (or `"projection": "isometric"` in the renderer config JSON; env
+wins). Math lives only in `world/frontend/viewport/viewport.py` (`world_to_screen` / `screen_to_world`); the frame reports it in
+`viewport.projection` and `viewport.isoTileRatio`. The browser draws a diamond floor and depth-sorts by `screenY`. Existing
+top-down art is re-projected unchanged; real isometric sprites are a separate asset task.
+
 ## Testing
 
 `world/tests/test_renderer_*.py` (8 files, ~80 tests): unit coverage

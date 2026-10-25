@@ -50,3 +50,34 @@ export function assetDisplayName(assetId: string | undefined): string {
   const parts = assetId.split('.')
   return parts[parts.length - 1].replace(/-/g, ' ')
 }
+
+// ---- Phase W-ISO-1: isometric presentation helpers (pure, jsdom-testable) ----
+
+/** Depth for a draw command. Floors always sit beneath everything; furniture and
+ * characters share one depth axis (their screenY) so a character standing
+ * "behind" a desk is correctly occluded. A tiny bias makes characters win
+ * exact ties against furniture on the same row. */
+export const ISO_FLOOR_DEPTH = -1_000_000
+export const ISO_CHARACTER_TIE_BIAS = 0.1
+
+export function isoDepth(layer: string, screenY: number): number {
+  if (layer === 'floor') return ISO_FLOOR_DEPTH
+  return layer === 'characters' ? screenY + ISO_CHARACTER_TIE_BIAS : screenY
+}
+
+/** Four corners of the isometric floor diamond centred on (cx, cy). halfWidth is
+ * the horizontal half-diagonal in px; the vertical half-diagonal is
+ * halfWidth * ratio (0.5 = classic 2:1). Order: top, right, bottom, left. */
+export function isoDiamondPoints(cx: number, cy: number, halfWidth: number, ratio: number): Array<[number, number]> {
+  const halfHeight = halfWidth * ratio
+  return [
+    [cx, cy - halfHeight],
+    [cx + halfWidth, cy],
+    [cx, cy + halfHeight],
+    [cx - halfWidth, cy],
+  ]
+}
+
+export function isIsometric(frame: { viewport: { projection?: string } } | null | undefined): boolean {
+  return frame?.viewport?.projection === 'isometric'
+}

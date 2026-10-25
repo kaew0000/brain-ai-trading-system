@@ -40,6 +40,12 @@ map should shrink back to the identity mapping and nothing in
 import json
 import os
 
+from world.frontend.viewport.viewport import (
+    DEFAULT_ISO_TILE_RATIO,
+    PROJECTION_ORTHOGRAPHIC,
+    SUPPORTED_PROJECTIONS,
+)
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))  # world/frontend/renderer
 _FRONTEND_DIR = os.path.dirname(_THIS_DIR)  # world/frontend
 _DEFAULT_CONFIG_PATH = os.path.join(_FRONTEND_DIR, "samples", "renderer_config.sample.json")
@@ -59,6 +65,13 @@ DEFAULT_VIEWPORT_WIDTH = 1280
 DEFAULT_VIEWPORT_HEIGHT = 720
 DEFAULT_VIEWPORT_SCALE = 32.0
 DEFAULT_INITIAL_SCENE_ID = "world-gateway"
+
+#: Phase W-ISO-1: projection is opt-in. Default keeps the original
+#: top-down output byte-for-byte. Override per-process with the
+#: `WORLD_RENDER_PROJECTION` env var (no tracked-file edit needed) or
+#: set `"projection"` in the renderer config JSON; env wins.
+DEFAULT_PROJECTION = PROJECTION_ORTHOGRAPHIC
+PROJECTION_ENV_VAR = "WORLD_RENDER_PROJECTION"
 
 #: See module docstring. `world.simulation.models.CHARACTER_BEHAVIORS`
 #: is the input domain; every value here must be one of the five keys
@@ -86,12 +99,24 @@ class RendererConfig:
     """Plain value object mirroring `renderer_config.schema.json`."""
 
     def __init__(self, engine: str, viewport_width: int, viewport_height: int,
-                 viewport_scale: float, initial_scene_id: str | None) -> None:
+                 viewport_scale: float, initial_scene_id: str | None,
+                 projection: str = DEFAULT_PROJECTION,
+                 iso_tile_ratio: float = DEFAULT_ISO_TILE_RATIO) -> None:
         self.engine = engine
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
         self.viewport_scale = viewport_scale
         self.initial_scene_id = initial_scene_id
+        self.projection = projection
+        self.iso_tile_ratio = iso_tile_ratio
+
+
+def _resolve_projection(file_value: str | None) -> str:
+    """Env var beats file value beats default; anything not in
+    `SUPPORTED_PROJECTIONS` falls back to the default rather than
+    crashing the World tab over a typo."""
+    candidate = os.environ.get(PROJECTION_ENV_VAR) or file_value or DEFAULT_PROJECTION
+    return candidate if candidate in SUPPORTED_PROJECTIONS else DEFAULT_PROJECTION
 
 
 def load_renderer_config(path: str = _DEFAULT_CONFIG_PATH) -> RendererConfig:
@@ -110,6 +135,7 @@ def load_renderer_config(path: str = _DEFAULT_CONFIG_PATH) -> RendererConfig:
             viewport_height=DEFAULT_VIEWPORT_HEIGHT,
             viewport_scale=DEFAULT_VIEWPORT_SCALE,
             initial_scene_id=DEFAULT_INITIAL_SCENE_ID,
+            projection=_resolve_projection(None),
         )
     with open(path) as f:
         raw = json.load(f)
@@ -120,4 +146,6 @@ def load_renderer_config(path: str = _DEFAULT_CONFIG_PATH) -> RendererConfig:
         viewport_height=viewport.get("height", DEFAULT_VIEWPORT_HEIGHT),
         viewport_scale=viewport.get("scale", DEFAULT_VIEWPORT_SCALE),
         initial_scene_id=raw.get("initialSceneId", DEFAULT_INITIAL_SCENE_ID),
+        projection=_resolve_projection(raw.get("projection")),
+        iso_tile_ratio=raw.get("isoTileRatio", DEFAULT_ISO_TILE_RATIO),
     )

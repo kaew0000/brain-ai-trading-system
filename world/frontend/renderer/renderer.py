@@ -89,6 +89,8 @@ class SceneGraphRenderer(Renderer):
             width=config.viewport_width,
             height=config.viewport_height,
             scale=config.viewport_scale,
+            projection=config.projection,
+            iso_tile_ratio=config.iso_tile_ratio,
         )
         self._asset_locator = AssetLocator()
         self._sprite_mapper = SpriteMapper()
@@ -202,6 +204,8 @@ class SceneGraphRenderer(Renderer):
             viewport={
                 "width": self._viewport.width, "height": self._viewport.height,
                 "scale": self._viewport.scale,
+                "projection": self._viewport.projection,
+                "isoTileRatio": self._viewport.iso_tile_ratio,
             },
             commands=tuple(commands),
         )

@@ -18,6 +18,16 @@
         "scale": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
+    "projection": {
+      "type": "string",
+      "description": "Phase W-ISO-1. Optional; defaults to orthographic (original top-down output). isometric = 2:1 dimetric office view.",
+      "enum": ["orthographic", "isometric"]
+    },
+    "isoTileRatio": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Isometric half-tile height / half-tile width. Default 0.5 (2:1)."
+    },
     "initialSceneId": {
       "type": "string",
       "description": "district id to load as the first scene, e.g. world-gateway (Reception)."

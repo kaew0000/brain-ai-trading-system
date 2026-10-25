@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## [Unreleased] — World: opt-in isometric office projection (V16 §79, Phase W-ISO-1)
+
+Track B only (`world/` + `dashboard_src/src/pages/world/`). Adds an isometric (2:1 dimetric) view of the existing Office World
+so agents sit in a diamond-floor office with correct front/back occlusion. **Off by default; with no opt-in every projected
+coordinate and the frame's viewport math is identical to before.** Zero Track A files touched (no `agents/`, `execution/`,
+`risk/`, `portfolio/`, `main.py`, `api/`, `config/`). Branch: `feature/world-iso-projection`.
+
+### Added
+- `world/frontend/viewport/viewport.py`: `ViewportState.projection` / `iso_tile_ratio`, isometric branch in `world_to_screen`
+  and exact inverse in `screen_to_world`; unknown projection or ratio <= 0 raises `ValueError`.
+- `world/frontend/renderer/render_config.py`: optional `projection` + `isoTileRatio` (schema updated, both optional). Switch on
+  with env `WORLD_RENDER_PROJECTION=isometric` (no tracked-file edit) or the config JSON; env wins; invalid values fall back
+  to `orthographic`.
+- `RenderFrame.viewport` now also carries `projection` and `isoTileRatio` (additive keys).
+- Frontend: `isoDepth` / `isoDiamondPoints` / `isIsometric` (pure, unit-tested); `OfficeScene.tsx` draws a diamond floor and
+  depth-sorts furniture + characters by `screenY` only when the frame is isometric.
+- Tests: `world/tests/test_viewport_isometric.py` (9), 3 vitest cases in `world.test.ts`.
+
+### Not included (deliberate)
+- No new art. Existing top-down PNGs are re-projected as-is; true isometric sprites/GLBs are a separate asset task.
+- No order/execution/risk control from the World UI; it remains read-only per `SEPARATION_POLICY`.
+
 ## [Unreleased] — Align CEO-gated attribution keys with the dynamic-weighting namespace (V16 §78)
 
 Bugfix, behind the existing flag. With `DYNAMIC_AGENT_WEIGHTS_ENABLED=true`, `CEOAgent._effective_weights()` looked agents up
