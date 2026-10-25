@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## [Unreleased] — World: isometric art pipeline (V16 §80, Phase W-ISO-2)
+
+Track B only (`world/` + `dashboard_src/`). Adds real isometric art (generated, no third-party assets) and dedicated
+`meeting` / `resting` / seated-`working` character sprites. **Isometric art is only used when the projection is isometric
+(opt-in from W-ISO-1); orthographic props and NPC sheets are untouched.** Zero Track A files touched. Branch:
+`feature/world-iso-assets`.
+
+### Added
+- `world/scripts/generate_iso_assets.py` + `world/data/assets/iso_assets.json`: deterministic generator (Pillow) for 9 iso props
+  (desk, chair, monitor, meeting table, server rack, plant, low/full partition, sofa) and 16 character pose strips
+  (stand, walk x2, seated working, seated meeting, resting, celebration, emergency). `--check` fails if outputs are stale.
+- `manifest.json` `iso` block: per-asset size, anchor (footprint base centre), footprint, height; behaviour -> pose map.
+- Backend catalog: `sprite.<id>.meeting|resting|working-seated` for all 16 characters (+48 entries), `furniture.partition-low`,
+  `furniture.partition-full`, `furniture.sofa` (catalogued only; no room placement yet, so room output is unchanged).
+- Frontend: `pages/world/isoAssets.ts` (pure helpers, vitest-covered), `AssetRegistry` iso loaders (`getIsoProp`, `getIsoNPC`),
+  `OfficeScene.tsx` draws iso props / pose frames in isometric mode with legacy fallback for anything unmapped.
+- `dashboard_src/public/third-party-licenses/ISO_ASSETS.md`.
+
+### Changed
+- `render_config.BEHAVIOR_TO_ANIMATION_STATE` is now the identity mapping (`meeting -> meeting`, `resting -> resting`);
+  `STANDARD_ANIMATION_STATES` gains `meeting`, `resting`; `character_assets.schema.json` allows the 3 new optional states.
+- Visible side effect (both projections): the behaviour ring for a meeting is now purple (`meeting`) instead of green (`working`).
+- Tests updated: `test_renderer_sprite_mapper.py`, `test_renderer_asset_locator.py`; new `test_iso_assets.py`, `isoAssets.test.ts`.
+
+### Not included (deliberate)
+- No 3D renderer, no copied DeskRPG code/art. No new camera / wall-fade / kanban / feed (separate prompts P3-P6).
+
 ## [Unreleased] — World: opt-in isometric office projection (V16 §79, Phase W-ISO-1)
 
 Track B only (`world/` + `dashboard_src/src/pages/world/`). Adds an isometric (2:1 dimetric) view of the existing Office World

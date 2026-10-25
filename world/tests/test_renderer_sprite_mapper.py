@@ -10,27 +10,30 @@ from world.simulation.models import CHARACTER_BEHAVIORS
 
 def test_every_character_behavior_has_a_fallback_mapping():
     """The seven Phase W7 behaviour labels must all resolve to one of
-    the five real animation states — this is the gap this phase found
-    and had to resolve; this test pins that resolution."""
+    real animation states — pins the W8 gap resolution (now identity
+    after W-ISO-2 shipped meeting/resting sprites)."""
     for behavior in CHARACTER_BEHAVIORS:
         assert behavior in BEHAVIOR_TO_ANIMATION_STATE
 
 
 def test_fallback_targets_are_real_animation_states():
-    real_states = {"idle", "walking", "working", "celebration", "emergency"}
+    real_states = {"idle", "walking", "working", "celebration", "emergency", "meeting", "resting"}
     for target in BEHAVIOR_TO_ANIMATION_STATE.values():
         assert target in real_states
 
 
-def test_meeting_and_resting_fall_back_as_documented():
+def test_meeting_and_resting_have_dedicated_states():
+    """W-ISO-2: the W8 fallbacks (meeting->working, resting->idle) are gone."""
     mapper = SpriteMapper()
-    assert mapper.animation_state_for("meeting") == "working"
-    assert mapper.animation_state_for("resting") == "idle"
+    assert mapper.animation_state_for("meeting") == "meeting"
+    assert mapper.animation_state_for("resting") == "resting"
+    assert mapper.asset_id_for("bastion", "meeting") == "sprite.bastion.meeting"
+    assert mapper.asset_id_for("bastion", "resting") == "sprite.bastion.resting"
 
 
 def test_identity_mapped_states_are_unchanged():
     mapper = SpriteMapper()
-    for state in ("idle", "walking", "working", "celebration", "emergency"):
+    for state in ("idle", "walking", "working", "celebration", "emergency", "meeting", "resting"):
         assert mapper.animation_state_for(state) == state
 
 

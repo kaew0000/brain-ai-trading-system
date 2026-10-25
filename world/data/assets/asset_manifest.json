@@ -2041,5 +2041,1073 @@
       "unity",
       "react"
     ]
+  },
+  {
+    "id": "sprite.bastion.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "bastion",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.bastion.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "bastion",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.bastion.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "bastion",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "chameleon",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "chameleon",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chameleon.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "chameleon",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "chronos",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "chronos",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.chronos.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "chronos",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "crucible",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "crucible",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.crucible.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "crucible",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "echo",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "echo",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.echo.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "echo",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "forge",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "forge",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.forge.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "forge",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "gardener",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "gardener",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.gardener.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "gardener",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "herald",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "herald",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.herald.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "herald",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.mandelbrot.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "mandelbrot",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "oracle",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "oracle",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.oracle.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "oracle",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "phoenix",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "phoenix",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.phoenix.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "phoenix",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "primus",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "primus",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.primus.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "primus",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "scribe",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "scribe",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.scribe.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "scribe",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "sentinel",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "sentinel",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.sentinel.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "sentinel",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "watcher",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "watcher",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.watcher.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "watcher",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.meeting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "webweaver",
+      "meeting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.resting",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "webweaver",
+      "resting",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "sprite.webweaver.working-seated",
+    "category": "character-sprite",
+    "source": "custom",
+    "tags": [
+      "character",
+      "webweaver",
+      "working-seated",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.partition-low",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "partition-low",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.partition-full",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "partition-full",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.sofa",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "sofa",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
   }
 ]

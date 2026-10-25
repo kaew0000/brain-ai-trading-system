@@ -17,10 +17,13 @@ import { useEffect, useRef } from 'react'
 import type { RenderFrame } from '../types'
 import { assetDisplayName, BEHAVIOR_COLORS, isIsometric, isoDepth, isoDiamondPoints } from '../sceneMapping'
 import { CHARACTER_TO_ROLE, DISTRICT_TO_BUILDING, resolvePropAssetId } from '../assetMapping'
-import { getBuilding, getDecoration, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
+import { getBuilding, getDecoration, getIsoNPC, getIsoProp, getManifest, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
+import type { IsoManifest } from '../isoAssets'
+import { hasIsoCharacter, isoPoseFrame, isoPoseName, isoPropDepthOffset, isoPropOrigin, resolveIsoProp } from '../isoAssets'
 
 const FURNITURE_SIZE = 32 // px — matches the footprint the old 28x28 rectangle occupied
 const CHARACTER_DISPLAY_HEIGHT = 40 // px — matches the visual weight of the old 14px-radius circle
+const ISO_CHARACTER_DISPLAY_HEIGHT = 56 // px — iso pose frames are taller (64x96) than the legacy 140x160 sheets at 40px
 const ISO_FLOOR_HALF_WIDTH = 320 // px — half of the 640px floor image footprint; diamond keeps the same width
 const ISO_FLOOR_FILL = 0x1e293b
 const ISO_FLOOR_EDGE = 0x475569
@@ -51,11 +54,25 @@ class OfficeCanvasScene extends Phaser.Scene {
     if (this.layer) this.draw(frame)
   }
 
+  /** Draws one isometric prop (manifest-driven size/anchor/depth). Returns false when no iso art
+   * is loaded for this asset id, so the caller falls back to the legacy prop path. */
+  private drawIsoProp(cmd: RenderFrame['commands'][number], isoManifest: IsoManifest): boolean {
+    const resolved = resolveIsoProp(isoManifest, cmd.assetId)
+    const textureKey = resolved ? getIsoProp(this, resolved.key) : null
+    if (!resolved || !textureKey || !this.layer) return false
+    const [ox, oy] = isoPropOrigin(resolved.entry)
+    const img = this.add.image(cmd.screenX, cmd.screenY, textureKey).setOrigin(ox, oy)
+    img.setDepth(isoDepth(cmd.layer, cmd.screenY) + isoPropDepthOffset(isoManifest, resolved.entry))
+    this.layer.add(img)
+    return true
+  }
+
   private draw(frame: RenderFrame): void {
     this.layer?.removeAll(true)
     if (!this.layer) return
 
     const iso = isIsometric(frame)
+    const isoManifest = iso ? getManifest()?.iso ?? null : null
     const ratio = frame.viewport.isoTileRatio ?? 0.5
     // Depth-sorting (end of draw()) is iso-only; the legacy top-down path keeps
     // plain list-order compositing untouched.
@@ -80,6 +97,8 @@ class OfficeCanvasScene extends Phaser.Scene {
         const bg = this.add.image(cmd.screenX, cmd.screenY, textureKey)
         bg.setDisplaySize(640, 360)
         this.layer.add(bg)
+      } else if (cmd.layer === 'furniture' && iso && isoManifest && this.drawIsoProp(cmd, isoManifest)) {
+        // drawn by drawIsoProp (isometric art); nothing else to do
       } else if (cmd.layer === 'furniture') {
         const resolved = resolvePropAssetId(cmd.assetId)
         const textureKey = resolved
@@ -99,20 +118,30 @@ class OfficeCanvasScene extends Phaser.Scene {
       } else if (cmd.layer === 'characters') {
         const behavior = (cmd.metadata?.animationState as string) ?? 'idle'
         const role = CHARACTER_TO_ROLE[cmd.entityId] ?? cmd.entityId
-        const textureKey = getNPC(this, role)
-        const isSpritesheet = textureKey.startsWith('npc_ss__')
+        const isoSheet = isoManifest && hasIsoCharacter(isoManifest, cmd.entityId) ? getIsoNPC(this, cmd.entityId) : null
+        const textureKey = isoSheet ?? getNPC(this, role)
+        const isSpritesheet = textureKey.startsWith('npc_ss__') || isoSheet !== null
+        // Isometric sheets are pose strips (frame = pose); legacy sheets are 4 directions.
+        // `working` is drawn seated in iso: the character sits at a chair/desk instead of standing.
+        const frameIndex = isoSheet && isoManifest
+          ? isoPoseFrame(isoManifest.character, isoPoseName(isoManifest.character, behavior, true))
+          : getNPCFrame('F')
         const sprite = isSpritesheet
-          ? this.add.sprite(cmd.screenX, cmd.screenY, textureKey, getNPCFrame('F'))
+          ? this.add.sprite(cmd.screenX, cmd.screenY, textureKey, frameIndex)
           : this.add.image(cmd.screenX, cmd.screenY, textureKey)
+        if (isoSheet && isoManifest) sprite.setOrigin(isoManifest.character.anchor[0], isoManifest.character.anchor[1])
         // Native NPC frames are 140x160 (see world.config.ts); scale to
         // a consistent on-screen height regardless of source size,
         // whether that's a real sprite sheet frame or a fallback square.
-        const scale = CHARACTER_DISPLAY_HEIGHT / sprite.height
+        const scale = (isoSheet ? ISO_CHARACTER_DISPLAY_HEIGHT : CHARACTER_DISPLAY_HEIGHT) / sprite.height
         sprite.setScale(scale)
+        // Anchored sprites hang from the feet; legacy sprites are centred, so offsets differ.
+        const footY = isoSheet ? cmd.screenY : cmd.screenY + sprite.displayHeight / 2
+        const topY = isoSheet ? cmd.screenY - sprite.displayHeight * (isoManifest?.character.anchor[1] ?? 1) : cmd.screenY - sprite.displayHeight / 2
         // Behavior still drives an at-a-glance color cue — a thin ring
         // under the sprite, same semantic as the old solid-color circle.
         const ring = this.add.ellipse(
-          cmd.screenX, cmd.screenY + (sprite.displayHeight / 2) - 2,
+          cmd.screenX, footY - 2,
           sprite.displayWidth * 0.8, 8,
           BEHAVIOR_COLORS[behavior as keyof typeof BEHAVIOR_COLORS] ?? BEHAVIOR_COLORS.idle,
           0.6,
@@ -124,7 +153,7 @@ class OfficeCanvasScene extends Phaser.Scene {
         }
         this.layer.add(ring)
         this.layer.add(sprite)
-        const label = this.add.text(cmd.screenX, cmd.screenY - sprite.displayHeight / 2 - 12, cmd.entityId, {
+        const label = this.add.text(cmd.screenX, topY - 12, cmd.entityId, {
           fontSize: '11px',
           color: '#e2e8f0',
         }).setOrigin(0.5, 1)

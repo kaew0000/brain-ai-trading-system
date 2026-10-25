@@ -12,11 +12,12 @@ def test_character_sprite_resolves_to_manifest_entry():
     assert entry["category"] == "character-sprite"
 
 
-def test_character_sprite_uses_fallback_for_unsupported_behavior():
+def test_character_sprite_resolves_dedicated_meeting_and_resting_sprites():
+    """W-ISO-2 replaced the W8 fallbacks (meeting->working, resting->idle)."""
     locator = AssetLocator()
-    meeting_entry = locator.character_sprite("bastion", "meeting")
-    working_entry = locator.character_sprite("bastion", "working")
-    assert meeting_entry == working_entry
+    assert locator.character_sprite("bastion", "meeting")["id"] == "sprite.bastion.meeting"
+    assert locator.character_sprite("bastion", "resting")["id"] == "sprite.bastion.resting"
+    assert locator.character_sprite("bastion", "meeting") != locator.character_sprite("bastion", "working")
 
 
 def test_character_sprite_returns_none_for_unknown_character():

@@ -5,12 +5,12 @@ concrete asset pipeline exists to drive it."""
 
 from abc import ABC, abstractmethod
 
-#: The five standard animation states, per `world/WORLD.md` §4 and
-#: every `world/characters/definitions/*.json` `spriteMeta.animations`
-#: block. Kept here as the single source of truth for valid state
-#: names so `AnimationController` implementations don't each redefine
-#: their own list.
-STANDARD_ANIMATION_STATES = ("idle", "walking", "working", "celebration", "emergency")
+#: The standard animation states: the five from `world/WORLD.md` §4 plus
+#: `meeting` and `resting` (Phase W-ISO-2 shipped dedicated sprites for
+#: both). Kept here as the single source of truth for valid state names
+#: so `AnimationController` implementations don't each redefine their
+#: own list.
+STANDARD_ANIMATION_STATES = ("idle", "walking", "working", "celebration", "emergency", "meeting", "resting")
 
 
 class AnimationController(ABC):
