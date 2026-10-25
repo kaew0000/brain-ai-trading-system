@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-25T08:09:23Z",
+  "updated_at": "2026-10-25T08:11:38Z",
   "records": [
     {
       "sha": "d8c7aaf13f0f240d2fe8a86b0d3e48258b6b4683",
@@ -488,12 +488,12 @@
     },
     {
       "sha": "d5efa2912cd9c3dc3cf38e8d8d0f397584d051c7",
-      "branch": "main",
-      "bundle_filename": "brain-ai-trading-system-main-d5efa29.bundle",
-      "status": "failed",
-      "imported_at": "2026-10-25T08:09:23Z",
-      "pushed": false,
-      "reason": "fetch failed: fatal: refusing to fetch into branch 'refs/heads/main' checked out at '/data/data/com.termux/files/home/brain-ai-trading-system'",
+      "branch": "sync/main-d5efa29",
+      "bundle_filename": "brain-ai-trading-system-sync-d5efa29.bundle",
+      "status": "applied",
+      "imported_at": "2026-10-25T08:11:38Z",
+      "pushed": true,
+      "reason": null,
       "corrected_sha": null,
       "correction_note": null
     }
