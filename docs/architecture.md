@@ -7843,3 +7843,27 @@ dashboard` clean; `python -c "import main"` succeeds; vulture identical to `main
 training_lane_swings` (11/11 under `TZ=UTC`). Cause: `get_daily_stats()` uses the local `date.today()` against UTC-stamped
 trades. Pre-existing and unrelated to §78, so not touched; recorded in ROADMAP as a live-readiness needs-decision item because
 `RiskEngine.check_daily_loss()` uses the same method.
+
+
+## 79. World: Opt-in Isometric Projection (2026-10-25, Phase W-ISO-1)
+
+**Track:** B (visualization). **Flag:** `WORLD_RENDER_PROJECTION` (default unset = `orthographic`, i.e. unchanged output).
+
+**Gap found by inspection.** `world/` already ships W1-W12 (renderer, simulation, interaction, workspace) and a Phaser page, but
+`world_to_screen` (`world/frontend/viewport/viewport.py`) is a uniform top-down scale, and `OfficeScene.tsx` composites in list
+order. There was no way to present the office as an isometric scene, and no depth ordering to make one correct.
+
+**Design.** Projection lives in exactly one place (`viewport.py`, shared by `character_renderer` and `room_renderer`, which
+already call it): `screen_x = (dx - dy) * scale`, `screen_y = (dx + dy) * scale * ratio`, ratio default 0.5. `screen_to_world` is
+its exact inverse. The projection name rides on `RenderFrame.viewport` so the browser needs no second config. Depth rule
+(frontend, iso only): floors beneath everything; furniture and characters share one axis (`screenY`), characters win exact ties.
+
+**Compatibility.** `ViewportState` new fields have defaults; `RenderCommand` shape unchanged; frame gains two additive viewport
+keys; scene cache key unchanged (projection is process-constant, so a cached frame is never served across projections).
+Existing 565 world tests unmodified and green; the legacy draw path is untouched when `projection != isometric`.
+
+**Gates.** world 574 passed (`-m ""`), backend 3432 passed / 4 skipped, vitest 111, `tsc --noEmit`, `npm run build`, ruff
+(canonical command) clean, content-normalized vulture diff vs `main` empty, `import main` OK.
+
+**Follow-ups (not in this PR).** Real isometric art; W13 event-to-district mapping (ROADMAP) so live events land in the right room.
+

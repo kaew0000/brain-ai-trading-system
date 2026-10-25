@@ -62,7 +62,7 @@ export interface RenderFrame {
   roomId: string
   sequence: number
   camera: { x: number; y: number; zoom: number; focusMode: string }
-  viewport: { width: number; height: number; scale: number }
+  viewport: { width: number; height: number; scale: number; projection?: 'orthographic' | 'isometric'; isoTileRatio?: number }
   commands: RenderCommand[]
 }
 

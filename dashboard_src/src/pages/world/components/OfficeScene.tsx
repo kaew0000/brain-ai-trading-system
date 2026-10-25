@@ -15,12 +15,15 @@
 import Phaser from 'phaser'
 import { useEffect, useRef } from 'react'
 import type { RenderFrame } from '../types'
-import { assetDisplayName, BEHAVIOR_COLORS } from '../sceneMapping'
+import { assetDisplayName, BEHAVIOR_COLORS, isIsometric, isoDepth, isoDiamondPoints } from '../sceneMapping'
 import { CHARACTER_TO_ROLE, DISTRICT_TO_BUILDING, resolvePropAssetId } from '../assetMapping'
 import { getBuilding, getDecoration, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
 
 const FURNITURE_SIZE = 32 // px — matches the footprint the old 28x28 rectangle occupied
 const CHARACTER_DISPLAY_HEIGHT = 40 // px — matches the visual weight of the old 14px-radius circle
+const ISO_FLOOR_HALF_WIDTH = 320 // px — half of the 640px floor image footprint; diamond keeps the same width
+const ISO_FLOOR_FILL = 0x1e293b
+const ISO_FLOOR_EDGE = 0x475569
 
 class OfficeCanvasScene extends Phaser.Scene {
   private frame: RenderFrame | null = null
@@ -52,8 +55,26 @@ class OfficeCanvasScene extends Phaser.Scene {
     this.layer?.removeAll(true)
     if (!this.layer) return
 
+    const iso = isIsometric(frame)
+    const ratio = frame.viewport.isoTileRatio ?? 0.5
+    // Depth-sorting (end of draw()) is iso-only; the legacy top-down path keeps
+    // plain list-order compositing untouched.
+
     for (const cmd of frame.commands) {
-      if (cmd.layer === 'floor') {
+      if (iso && cmd.layer === 'floor') {
+        const g = this.add.graphics()
+        const pts = isoDiamondPoints(cmd.screenX, cmd.screenY, ISO_FLOOR_HALF_WIDTH, ratio)
+        g.fillStyle(ISO_FLOOR_FILL, 1)
+        g.lineStyle(2, ISO_FLOOR_EDGE, 1)
+        g.beginPath()
+        g.moveTo(pts[0][0], pts[0][1])
+        for (const [px, py] of pts.slice(1)) g.lineTo(px, py)
+        g.closePath()
+        g.fillPath()
+        g.strokePath()
+        g.setDepth(isoDepth(cmd.layer, cmd.screenY))
+        this.layer.add(g)
+      } else if (cmd.layer === 'floor') {
         const buildingKey = DISTRICT_TO_BUILDING[frame.roomId]
         const textureKey = getBuilding(this, buildingKey ?? frame.roomId)
         const bg = this.add.image(cmd.screenX, cmd.screenY, textureKey)
@@ -68,6 +89,7 @@ class OfficeCanvasScene extends Phaser.Scene {
           : getProp(this, assetDisplayName(cmd.assetId) || 'unknown') // no mapping -> AssetRegistry's own fallback
         const img = this.add.image(cmd.screenX, cmd.screenY, textureKey)
         img.setDisplaySize(FURNITURE_SIZE, FURNITURE_SIZE)
+        if (iso) img.setDepth(isoDepth(cmd.layer, cmd.screenY))
         this.layer.add(img)
         const label = this.add.text(cmd.screenX, cmd.screenY + FURNITURE_SIZE / 2 + 2, assetDisplayName(cmd.assetId), {
           fontSize: '9px',
@@ -95,15 +117,22 @@ class OfficeCanvasScene extends Phaser.Scene {
           BEHAVIOR_COLORS[behavior as keyof typeof BEHAVIOR_COLORS] ?? BEHAVIOR_COLORS.idle,
           0.6,
         )
+        if (iso) {
+          const d = isoDepth(cmd.layer, cmd.screenY)
+          ring.setDepth(d - 0.05)
+          sprite.setDepth(d)
+        }
         this.layer.add(ring)
         this.layer.add(sprite)
         const label = this.add.text(cmd.screenX, cmd.screenY - sprite.displayHeight / 2 - 12, cmd.entityId, {
           fontSize: '11px',
           color: '#e2e8f0',
         }).setOrigin(0.5, 1)
+        if (iso) label.setDepth(isoDepth(cmd.layer, cmd.screenY) + 0.05)
         this.layer.add(label)
       }
     }
+    if (iso) this.layer.sort('depth')
   }
 }
 

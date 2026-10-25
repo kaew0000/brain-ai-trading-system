@@ -174,3 +174,7 @@
     Track-B-visualization-quality improvements, not corrections to
     anything W11 shipped. Would also close Phase W12's own two honesty
     gaps (`OperationsSummary.mode`/`account_equity`).
+16. **W-ISO-1** — Opt-in isometric projection of the existing Office World (`viewport.py` projection mode, frame metadata,
+    iso floor + depth sorting in `OfficeScene.tsx`). Off by default, read-only, Track B only. **Done.** Follow-up: isometric
+    art assets (asset-pipeline task), then W13.
+
