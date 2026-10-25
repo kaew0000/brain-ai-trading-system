@@ -119,12 +119,29 @@ _bootstrap_ephemeral_api_key()
 
 # ── API key lookup ──────────────────────────────────────────────────────
 
+def _key_bytes(key: str) -> bytes:
+    """UTF-8 bytes of a key, for hmac.compare_digest.
+
+    compare_digest() raises TypeError for str operands containing
+    non-ASCII characters, which surfaced as an HTTP 500 (instead of 401)
+    for any presented key with such a character -- e.g. a pasted
+    placeholder or a header value decoded as latin-1. "surrogatepass"
+    keeps distinct inputs distinct (a lone surrogate from a JSON "\\ud800"
+    escape would otherwise raise, and "replace" would let it collide with
+    a literal "?").
+    """
+    return key.encode("utf-8", "surrogatepass")
+
+
 def _lookup_api_key(raw_key: str) -> Role | None:
-    if not raw_key:
+    # Body/header input is untrusted: a non-string api_key (e.g. a JSON
+    # number) is simply "not a valid key", never a server error.
+    if not isinstance(raw_key, str) or not raw_key:
         return None
+    raw_bytes = _key_bytes(raw_key)
     for configured_key, role_name in settings.API_KEYS.items():
         # Constant-time compare to avoid leaking key material via timing.
-        if hmac.compare_digest(configured_key, raw_key):
+        if hmac.compare_digest(_key_bytes(configured_key), raw_bytes):
             try:
                 return Role.from_str(role_name)
             except ValueError:

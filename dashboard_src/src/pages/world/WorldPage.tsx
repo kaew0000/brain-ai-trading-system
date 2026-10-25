@@ -39,10 +39,17 @@ export default function WorldPage() {
   // hydration, WebSocket for realtime" split the rest of this dashboard
   // already uses (src/lib/api.ts's ManagedWS channels).
   useEffect(() => {
-    worldApi.listRooms().then((list) => {
-      setRooms(list)
-      if (list.length > 0) setSelectedRoomId((prev) => prev ?? list[0].roomId)
-    })
+    worldApi
+      .listRooms()
+      .then((list) => {
+        setRooms(list)
+        if (list.length > 0) setSelectedRoomId((prev) => prev ?? list[0].roomId)
+      })
+      .catch((err) => {
+        // Not fatal: /ws/world's init message also supplies the room list.
+        // Previously this was an unhandled promise rejection.
+        console.warn('world: initial room hydration failed', err)
+      })
   }, [])
 
   // Realtime: /ws/world pushes the current SimulationState whenever its

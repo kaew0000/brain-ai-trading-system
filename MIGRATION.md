@@ -1,19 +1,22 @@
-# MIGRATION — close stale N+1 roadmap item; add dataset read benchmark (V16 §77)
+# MIGRATION — Dashboard auth hardening (V16 §81)
 
 ## Do you need to do anything?
+Rebuild the dashboard so the frontend fixes take effect; no config, schema, dependency or data change.
 
-No. No runtime code, setting, dependency, schema or data changed. Merge and deploy as usual.
+    cd dashboard_src && npm ci && npm run build
 
-## Optional: measure read scaling on your own hardware
+then restart the backend (the launchers auto-build when `dashboard_src/dist` is missing). Hard-refresh the browser
+(Ctrl+F5) so the old `WorldPage-*.js` / `index-*.js` bundles are not served from cache.
 
-From the repo root, in the project's environment:
+## Behaviour changes
+- `/api/world/*` and `/api/workspace/*` REST calls from the dashboard now carry the Bearer token.
+- Dashboard polling starts after the first sign-in attempt settles instead of immediately.
+- A malformed (non-ASCII / non-string) API key now gets 401, previously 500.
 
-    python -m tools.benchmark_ensemble_dataset --check
-
-Prints latency and SQL statement count at 100 / 1,000 / 5,000 synthetic trades in a temporary database (never the live journal)
-and exits 1 if the read pattern regresses to N+1. Add `--with-reference` to also time the old per-trade shape (slow at 5,000).
+## Credentials
+Nothing changes. If you ever pasted `API_KEYS` / `JWT_SECRET` values into a shared place, rotate them:
+`python -c "import secrets;print(secrets.token_hex(32))"` for `JWT_SECRET`,
+`python -c "import secrets;print(secrets.token_urlsafe(32))"` for a key in `API_KEYS`, then restart.
 
 ## Rollback
-
-`git revert` the single commit (or delete `tools/benchmark_ensemble_dataset.py` and
-`tests/test_ensemble_dataset_benchmark.py`). Nothing persisted anywhere.
+`git revert` the single commit. Nothing persisted.

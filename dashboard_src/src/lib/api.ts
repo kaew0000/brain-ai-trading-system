@@ -45,6 +45,53 @@ function authHeaders(): Record<string, string> {
   return _authToken ? { Authorization: `Bearer ${_authToken}` } : {}
 }
 
+/** Current Authorization header ({} when not signed in). Exported so that
+ *  fetch layers outside this module (pages/world/api.ts, workspaceApi.ts)
+ *  attach the same Bearer token as get()/post() below instead of issuing
+ *  bare fetch() calls that the backend's auth middleware always rejects
+ *  with 401 when API_AUTH_ENABLED=true. */
+export function getAuthHeaders(): Record<string, string> {
+  return authHeaders()
+}
+
+// ── Startup auth settling ───────────────────────────────────────────────────
+//
+// Root cause this fixes: on every page load React runs child effects
+// BEFORE the parent's, so the polling hooks (hooks/useData.ts) and
+// WorldPage's one-shot REST hydration fired their first request while
+// Layout's restoreSession()/boot-token login was still in flight — the
+// token wasn't set yet, so each endpoint's first request was a guaranteed
+// 401 (and WorldPage's one-shot call, which never retries, stayed failed).
+// whenAuthSettled() resolves once the first login()/restoreSession()
+// attempt has finished (successfully or not), so callers can wait for it.
+//
+// The fallback timer only matters when nothing ever calls
+// restoreSession()/login() (e.g. a component rendered without Layout): it
+// guarantees callers are never blocked indefinitely.
+const AUTH_SETTLE_FALLBACK_MS = 1_500
+let _authSettled = false
+let _authSettledPromise: Promise<void> | null = null
+let _resolveAuthSettled: (() => void) | null = null
+
+function _markAuthSettled(): void {
+  if (_authSettled) return
+  _authSettled = true
+  _resolveAuthSettled?.()
+}
+
+/** Resolves once the initial sign-in attempt (boot-token login or cookie
+ *  session restore) has completed, whatever its outcome. Never rejects. */
+export function whenAuthSettled(): Promise<void> {
+  if (_authSettled) return Promise.resolve()
+  if (!_authSettledPromise) {
+    _authSettledPromise = new Promise<void>(resolve => {
+      _resolveAuthSettled = resolve
+      setTimeout(_markAuthSettled, AUTH_SETTLE_FALLBACK_MS)
+    })
+  }
+  return _authSettledPromise
+}
+
 /** Exchanges an API key for a session Bearer token via the existing
  *  POST /api/auth/token (api/app.py — already implemented, not a new
  *  auth system). Throws with the backend's own error message on
@@ -78,6 +125,8 @@ async function login(apiKey: string): Promise<{ role: string; expiresAt: number 
   } catch (err) {
     clearTimeout(tid)
     throw err
+  } finally {
+    _markAuthSettled()
   }
 }
 
@@ -145,6 +194,8 @@ async function restoreSession(): Promise<boolean> {
   } catch {
     clearTimeout(tid)
     return false // network error on a silent background restore — fail closed to "not logged in", never surface as a hard error
+  } finally {
+    _markAuthSettled()
   }
 }
 

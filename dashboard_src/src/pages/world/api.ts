@@ -5,7 +5,7 @@
 // src/lib/api.ts, to keep this page's backend surface self-contained and
 // easy to review as one Track-B-facing unit.
 
-import { wsWorld } from '@/lib/api'
+import { getAuthHeaders, whenAuthSettled, wsWorld } from '@/lib/api'
 import type {
   CharacterActivity,
   CommandResult,
@@ -21,15 +21,21 @@ import type {
 
 export { wsWorld }
 
+// Auth: every /api/world/* route requires a Bearer token when
+// API_AUTH_ENABLED=true (the default). These helpers previously issued bare
+// fetch() calls, so they always got 401 -- see lib/api.ts's getAuthHeaders()
+// and whenAuthSettled() for the shared token and the startup-ordering fix.
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path)
+  await whenAuthSettled()
+  const res = await fetch(path, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`)
   const envelope = (await res.json()) as WorldEnvelope<T>
   return envelope.data
 }
 
 async function post<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: 'POST' })
+  await whenAuthSettled()
+  const res = await fetch(path, { method: 'POST', headers: getAuthHeaders() })
   if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`)
   const envelope = (await res.json()) as WorldEnvelope<T>
   return envelope.data

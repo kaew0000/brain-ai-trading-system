@@ -19,6 +19,18 @@ import {
 } from '../sceneMapping'
 import { worldApi } from '../api'
 
+// Auth plumbing is mocked so these tests exercise only this layer: the
+// startup wait (whenAuthSettled) resolves immediately instead of via its
+// real fallback timer, and getAuthHeaders is controllable per test.
+const { authHeadersMock } = vi.hoisted(() => ({
+  authHeadersMock: vi.fn((): Record<string, string> => ({})),
+}))
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api')>()
+  return { ...actual, getAuthHeaders: authHeadersMock, whenAuthSettled: () => Promise.resolve() }
+})
+
+
 describe('sceneMapping', () => {
   it('has a color for every character behavior', () => {
     const behaviors = ['idle', 'walking', 'working', 'meeting', 'emergency', 'celebration', 'resting'] as const
@@ -65,6 +77,8 @@ describe('worldApi', () => {
 
   beforeEach(() => {
     fetchMock.mockReset()
+    authHeadersMock.mockReset()
+    authHeadersMock.mockReturnValue({})
     vi.stubGlobal('fetch', fetchMock)
   })
 
@@ -82,26 +96,26 @@ describe('worldApi', () => {
   it('listRooms calls GET /api/world/rooms', async () => {
     mockOk([{ roomId: 'ceo-tower', activity: 'quiet', occupantCount: 1 }])
     const rooms = await worldApi.listRooms()
-    expect(fetchMock).toHaveBeenCalledWith('/api/world/rooms')
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/rooms', { headers: {} })
     expect(rooms).toHaveLength(1)
   })
 
   it('getRoom calls GET /api/world/rooms/:id', async () => {
     mockOk({ roomId: 'ceo-tower', activity: 'quiet', occupantCount: 0 })
     await worldApi.getRoom('ceo-tower')
-    expect(fetchMock).toHaveBeenCalledWith('/api/world/rooms/ceo-tower')
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/rooms/ceo-tower', { headers: {} })
   })
 
   it('select posts to /api/world/select/:kind/:id', async () => {
     mockOk({ kind: 'room', targetId: 'ceo-tower' })
     await worldApi.select('room', 'ceo-tower')
-    expect(fetchMock).toHaveBeenCalledWith('/api/world/select/room/ceo-tower', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/select/room/ceo-tower', { method: 'POST', headers: {} })
   })
 
   it('timelineSeek posts with a tick query param', async () => {
     mockOk({ tick: { tickNumber: 5 } })
     await worldApi.timelineSeek(5)
-    expect(fetchMock).toHaveBeenCalledWith('/api/world/timeline/seek?tick=5', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/timeline/seek?tick=5', { method: 'POST', headers: {} })
   })
 
   it('throws a descriptive error on a non-ok response', async () => {
@@ -112,19 +126,36 @@ describe('worldApi', () => {
   it('getNotifications includes category when provided', async () => {
     mockOk([])
     await worldApi.getNotifications('alert')
-    expect(fetchMock).toHaveBeenCalledWith('/api/world/notifications?category=alert')
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/notifications?category=alert', { headers: {} })
   })
 
   it('getNotifications omits category when not provided', async () => {
     mockOk([])
     await worldApi.getNotifications()
-    expect(fetchMock).toHaveBeenCalledWith('/api/world/notifications')
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/notifications', { headers: {} })
   })
 
   it('search encodes the query', async () => {
     mockOk([])
     await worldApi.search('a b')
-    expect(fetchMock).toHaveBeenCalledWith('/api/world/search?q=a%20b')
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/search?q=a%20b', { headers: {} })
+  })
+
+  it('GET attaches the Bearer token (regression: bare fetch always got 401)', async () => {
+    authHeadersMock.mockReturnValue({ Authorization: 'Bearer tok-123' })
+    mockOk([])
+    await worldApi.listRooms()
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/rooms', { headers: { Authorization: 'Bearer tok-123' } })
+  })
+
+  it('POST attaches the Bearer token', async () => {
+    authHeadersMock.mockReturnValue({ Authorization: 'Bearer tok-123' })
+    mockOk({ kind: 'room', targetId: 'ceo-tower' })
+    await worldApi.select('room', 'ceo-tower')
+    expect(fetchMock).toHaveBeenCalledWith('/api/world/select/room/ceo-tower', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer tok-123' },
+    })
   })
 })
 

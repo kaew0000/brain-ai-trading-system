@@ -2,22 +2,26 @@
 // Phase W12 — thin fetch layer over /api/workspace/*, mirroring api.ts's
 // own get/post helpers.
 
+import { getAuthHeaders, whenAuthSettled } from '@/lib/api'
+
 interface WorkspaceEnvelope<T> {
   ok: boolean
   data: T
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path)
+  await whenAuthSettled()
+  const res = await fetch(path, { headers: getAuthHeaders() })
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`)
   const envelope = (await res.json()) as WorkspaceEnvelope<T>
   return envelope.data
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
+  await whenAuthSettled()
   const res = await fetch(path, {
     method: 'POST',
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...getAuthHeaders() },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`)
