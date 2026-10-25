@@ -35,6 +35,20 @@ export const WORLD_CONFIG = {
   // Performance
   spritePoolSize: 256,
   useTextureCache: true,
+
+  // Live view (V16 §82)
+  /** NPC glide duration between two frames. Kept below the default 2 s world tick so a step finishes before the next. */
+  characterTweenMs: 1800,
+  /** A jump larger than this (px) is a teleport / re-layout: snap instead of sliding across the room. */
+  characterSnapDistancePx: 240,
+  /** Frame refetch period while /ws/world is not LIVE (when LIVE, frames refetch on each simulation tick message). */
+  frameFallbackPollMs: 5000,
+  /** System Pulse refresh period. */
+  pulsePollMs: 5000,
+  /** A real-data snapshot older than this many seconds is flagged STALE in the System Pulse. */
+  pulseStaleSeconds: 180,
+  /** Recent events listed in the System Pulse. */
+  pulseRecentEvents: 5,
 } as const;
 
 export type WorldConfig = typeof WORLD_CONFIG;

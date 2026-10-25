@@ -141,6 +141,15 @@ describe('worldApi', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/world/search?q=a%20b', { headers: {} })
   })
 
+  it('getWorldState / getTicker call the read-only world endpoints', async () => {
+    mockOk({})
+    await worldApi.getWorldState()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/world/state', { headers: {} })
+    mockOk({ status: 'ok', running: true })
+    await worldApi.getTicker()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/world/ticker', { headers: {} })
+  })
+
   it('GET attaches the Bearer token (regression: bare fetch always got 401)', async () => {
     authHeadersMock.mockReturnValue({ Authorization: 'Bearer tok-123' })
     mockOk([])

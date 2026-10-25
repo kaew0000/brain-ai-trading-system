@@ -31,6 +31,7 @@ from world.frontend.renderer import api as renderer_api
 from world.interaction import api as interaction_api
 from world.runtime import api as runtime_api
 from world.simulation import api as simulation_api
+from world.simulation import ticker as ticker_module
 
 router = APIRouter(prefix="/api/world", tags=["world"])
 
@@ -74,6 +75,13 @@ async def get_character(agent_id: str):
     if character is None:
         raise HTTPException(status_code=404, detail=f"Unknown character: {agent_id!r}")
     return _ok(character.to_dict())
+
+
+@router.get("/ticker")
+async def get_ticker_health():
+    """Health of the dedicated simulation clock (V16 §82): status is one of
+    ok | degraded | stalled | stopped | disabled. Read-only."""
+    return _ok(ticker_module.get_ticker_health())
 
 
 @router.get("/events")

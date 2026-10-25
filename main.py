@@ -103,6 +103,33 @@ def _initialize_world_runtime() -> bool:
         return False
 
 
+def _start_world_ticker():
+    """V16 §82 — start the dedicated World simulation clock thread.
+
+    Returns the running WorldSimulationTicker, or None when it is disabled
+    (WORLD_SIM_TICK_INTERVAL_SECONDS <= 0) or failed to start, in which case
+    the caller keeps the legacy once-per-LOOP_INTERVAL scheduled tick. Same
+    guarded, non-fatal pattern as every other World hook in this file: a
+    World failure must never affect the trading loop.
+    """
+    interval = float(settings.WORLD_SIM_TICK_INTERVAL_SECONDS)
+    if interval <= 0:
+        logger.info("World ticker disabled (WORLD_SIM_TICK_INTERVAL_SECONDS<=0) — using the scheduled tick")
+        return None
+    try:
+        from world.simulation import api as _world_simulation_api
+        from world.simulation.ticker import WorldSimulationTicker, set_ticker
+
+        _world_simulation_api.set_history_window(int(settings.WORLD_TIMELINE_HISTORY_WINDOW))
+        ticker = WorldSimulationTicker(interval_seconds=interval)
+        ticker.start()
+        set_ticker(ticker)
+        return ticker
+    except Exception as exc:
+        logger.error(f"WorldSimulationTicker failed to start (non-fatal, using scheduled tick): {exc}")
+        return None
+
+
 def _tick_world_simulation() -> None:
     """Phase W10 — advance the Phase W7 SimulationEngine by one tick per
     trading cycle. Read-only from the trading engine's perspective (only
@@ -2333,7 +2360,11 @@ def main() -> None:
     # same cadence as run_trading_cycle above (LOOP_INTERVAL). Additive;
     # see _tick_world_simulation()'s own docstring for why this can never
     # affect the trading loop even if World is broken.
-    schedule.every(settings.LOOP_INTERVAL).seconds.do(_tick_world_simulation)
+    # V16 §82: the tick now runs on its own thread (see _start_world_ticker());
+    # the scheduled job below is only the fallback when that is disabled.
+    components["world_ticker"] = _start_world_ticker()
+    if components["world_ticker"] is None:
+        schedule.every(settings.LOOP_INTERVAL).seconds.do(_tick_world_simulation)
     # Phase W11 — export one Track A -> World snapshot per trading
     # cycle, same cadence as the two ticks above. Additive; see
     # _run_world_runtime_manager()'s own docstring for why this can
@@ -2376,6 +2407,13 @@ def main() -> None:
     # just above, scoped to this phase's own new service only.
     if components.get("training_lane_runner") is not None:
         components["training_lane_runner"].stop()
+    # V16 §82 — stop the World simulation clock thread (daemon, so this is
+    # tidiness rather than correctness; non-fatal either way).
+    if components.get("world_ticker") is not None:
+        try:
+            components["world_ticker"].stop()
+        except Exception as exc:
+            logger.debug(f"World ticker stop skipped: {exc}")
     logger.info("Bot stopped. Final report:")
     daily_report(components)
 
