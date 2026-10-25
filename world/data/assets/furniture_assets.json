@@ -198,5 +198,38 @@
     },
     "interactable": false,
     "defaultInteractions": []
+  },
+  {
+    "id": "furniture.partition-low",
+    "name": "Partition (low)",
+    "manifestId": "furniture.partition-low",
+    "footprint": {
+      "width": 3.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.partition-full",
+    "name": "Partition (full height)",
+    "manifestId": "furniture.partition-full",
+    "footprint": {
+      "width": 3.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.sofa",
+    "name": "Sofa",
+    "manifestId": "furniture.sofa",
+    "footprint": {
+      "width": 2.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
   }
 ]

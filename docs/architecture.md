@@ -7867,3 +7867,14 @@ Existing 565 world tests unmodified and green; the legacy draw path is untouched
 
 **Follow-ups (not in this PR).** Real isometric art; W13 event-to-district mapping (ROADMAP) so live events land in the right room.
 
+## 80. World: Isometric Art Pipeline (2026-10-25, Phase W-ISO-2)
+
+**Gap.** W-ISO-1 re-projected top-down PNGs; the frontend NPC sheets only held four facing frames, so behaviour never changed a
+sprite, and `BEHAVIOR_TO_ANIMATION_STATE` still mapped `meeting -> working`, `resting -> idle` (documented W8 gap).
+
+**Change.** `world/data/assets/iso_assets.json` is the single spec; `world/scripts/generate_iso_assets.py` renders the PNGs, the
+`iso` manifest block and additive backend catalog entries. Frontend uses them only when `projection === 'isometric'`.
+Depth for props comes from manifest footprint data (`isoPropDepthOffset`). `meeting`/`resting` now resolve to real sprites.
+
+**Safety.** Read-only Track B. Orthographic output unchanged apart from the meeting ring colour. No room placements changed.
+

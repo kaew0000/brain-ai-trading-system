@@ -7,7 +7,10 @@
       "walking": "sprite.bastion.walking",
       "working": "sprite.bastion.working",
       "celebration": "sprite.bastion.celebration",
-      "emergency": "sprite.bastion.emergency"
+      "emergency": "sprite.bastion.emergency",
+      "meeting": "sprite.bastion.meeting",
+      "resting": "sprite.bastion.resting",
+      "working-seated": "sprite.bastion.working-seated"
     }
   },
   {
@@ -18,7 +21,10 @@
       "walking": "sprite.chameleon.walking",
       "working": "sprite.chameleon.working",
       "celebration": "sprite.chameleon.celebration",
-      "emergency": "sprite.chameleon.emergency"
+      "emergency": "sprite.chameleon.emergency",
+      "meeting": "sprite.chameleon.meeting",
+      "resting": "sprite.chameleon.resting",
+      "working-seated": "sprite.chameleon.working-seated"
     }
   },
   {
@@ -29,7 +35,10 @@
       "walking": "sprite.chronos.walking",
       "working": "sprite.chronos.working",
       "celebration": "sprite.chronos.celebration",
-      "emergency": "sprite.chronos.emergency"
+      "emergency": "sprite.chronos.emergency",
+      "meeting": "sprite.chronos.meeting",
+      "resting": "sprite.chronos.resting",
+      "working-seated": "sprite.chronos.working-seated"
     }
   },
   {
@@ -40,7 +49,10 @@
       "walking": "sprite.crucible.walking",
       "working": "sprite.crucible.working",
       "celebration": "sprite.crucible.celebration",
-      "emergency": "sprite.crucible.emergency"
+      "emergency": "sprite.crucible.emergency",
+      "meeting": "sprite.crucible.meeting",
+      "resting": "sprite.crucible.resting",
+      "working-seated": "sprite.crucible.working-seated"
     }
   },
   {
@@ -51,7 +63,10 @@
       "walking": "sprite.echo.walking",
       "working": "sprite.echo.working",
       "celebration": "sprite.echo.celebration",
-      "emergency": "sprite.echo.emergency"
+      "emergency": "sprite.echo.emergency",
+      "meeting": "sprite.echo.meeting",
+      "resting": "sprite.echo.resting",
+      "working-seated": "sprite.echo.working-seated"
     }
   },
   {
@@ -62,7 +77,10 @@
       "walking": "sprite.forge.walking",
       "working": "sprite.forge.working",
       "celebration": "sprite.forge.celebration",
-      "emergency": "sprite.forge.emergency"
+      "emergency": "sprite.forge.emergency",
+      "meeting": "sprite.forge.meeting",
+      "resting": "sprite.forge.resting",
+      "working-seated": "sprite.forge.working-seated"
     }
   },
   {
@@ -73,7 +91,10 @@
       "walking": "sprite.gardener.walking",
       "working": "sprite.gardener.working",
       "celebration": "sprite.gardener.celebration",
-      "emergency": "sprite.gardener.emergency"
+      "emergency": "sprite.gardener.emergency",
+      "meeting": "sprite.gardener.meeting",
+      "resting": "sprite.gardener.resting",
+      "working-seated": "sprite.gardener.working-seated"
     }
   },
   {
@@ -84,7 +105,10 @@
       "walking": "sprite.herald.walking",
       "working": "sprite.herald.working",
       "celebration": "sprite.herald.celebration",
-      "emergency": "sprite.herald.emergency"
+      "emergency": "sprite.herald.emergency",
+      "meeting": "sprite.herald.meeting",
+      "resting": "sprite.herald.resting",
+      "working-seated": "sprite.herald.working-seated"
     }
   },
   {
@@ -95,7 +119,10 @@
       "walking": "sprite.mandelbrot.walking",
       "working": "sprite.mandelbrot.working",
       "celebration": "sprite.mandelbrot.celebration",
-      "emergency": "sprite.mandelbrot.emergency"
+      "emergency": "sprite.mandelbrot.emergency",
+      "meeting": "sprite.mandelbrot.meeting",
+      "resting": "sprite.mandelbrot.resting",
+      "working-seated": "sprite.mandelbrot.working-seated"
     }
   },
   {
@@ -106,7 +133,10 @@
       "walking": "sprite.oracle.walking",
       "working": "sprite.oracle.working",
       "celebration": "sprite.oracle.celebration",
-      "emergency": "sprite.oracle.emergency"
+      "emergency": "sprite.oracle.emergency",
+      "meeting": "sprite.oracle.meeting",
+      "resting": "sprite.oracle.resting",
+      "working-seated": "sprite.oracle.working-seated"
     }
   },
   {
@@ -117,7 +147,10 @@
       "walking": "sprite.phoenix.walking",
       "working": "sprite.phoenix.working",
       "celebration": "sprite.phoenix.celebration",
-      "emergency": "sprite.phoenix.emergency"
+      "emergency": "sprite.phoenix.emergency",
+      "meeting": "sprite.phoenix.meeting",
+      "resting": "sprite.phoenix.resting",
+      "working-seated": "sprite.phoenix.working-seated"
     }
   },
   {
@@ -128,7 +161,10 @@
       "walking": "sprite.primus.walking",
       "working": "sprite.primus.working",
       "celebration": "sprite.primus.celebration",
-      "emergency": "sprite.primus.emergency"
+      "emergency": "sprite.primus.emergency",
+      "meeting": "sprite.primus.meeting",
+      "resting": "sprite.primus.resting",
+      "working-seated": "sprite.primus.working-seated"
     }
   },
   {
@@ -139,7 +175,10 @@
       "walking": "sprite.scribe.walking",
       "working": "sprite.scribe.working",
       "celebration": "sprite.scribe.celebration",
-      "emergency": "sprite.scribe.emergency"
+      "emergency": "sprite.scribe.emergency",
+      "meeting": "sprite.scribe.meeting",
+      "resting": "sprite.scribe.resting",
+      "working-seated": "sprite.scribe.working-seated"
     }
   },
   {
@@ -150,7 +189,10 @@
       "walking": "sprite.sentinel.walking",
       "working": "sprite.sentinel.working",
       "celebration": "sprite.sentinel.celebration",
-      "emergency": "sprite.sentinel.emergency"
+      "emergency": "sprite.sentinel.emergency",
+      "meeting": "sprite.sentinel.meeting",
+      "resting": "sprite.sentinel.resting",
+      "working-seated": "sprite.sentinel.working-seated"
     }
   },
   {
@@ -161,7 +203,10 @@
       "walking": "sprite.watcher.walking",
       "working": "sprite.watcher.working",
       "celebration": "sprite.watcher.celebration",
-      "emergency": "sprite.watcher.emergency"
+      "emergency": "sprite.watcher.emergency",
+      "meeting": "sprite.watcher.meeting",
+      "resting": "sprite.watcher.resting",
+      "working-seated": "sprite.watcher.working-seated"
     }
   },
   {
@@ -172,7 +217,10 @@
       "walking": "sprite.webweaver.walking",
       "working": "sprite.webweaver.working",
       "celebration": "sprite.webweaver.celebration",
-      "emergency": "sprite.webweaver.emergency"
+      "emergency": "sprite.webweaver.emergency",
+      "meeting": "sprite.webweaver.meeting",
+      "resting": "sprite.webweaver.resting",
+      "working-seated": "sprite.webweaver.working-seated"
     }
   }
 ]

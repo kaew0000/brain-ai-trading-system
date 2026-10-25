@@ -39,6 +39,15 @@
           },
           "emergency": {
             "type": "string"
+          },
+          "meeting": {
+            "type": "string"
+          },
+          "resting": {
+            "type": "string"
+          },
+          "working-seated": {
+            "type": "string"
           }
         }
       }

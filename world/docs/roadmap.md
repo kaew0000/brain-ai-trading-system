@@ -177,4 +177,6 @@
 16. **W-ISO-1** — Opt-in isometric projection of the existing Office World (`viewport.py` projection mode, frame metadata,
     iso floor + depth sorting in `OfficeScene.tsx`). Off by default, read-only, Track B only. **Done.** Follow-up: isometric
     art assets (asset-pipeline task), then W13.
-
+17. **W-ISO-2** — Isometric art pipeline: deterministic generator, iso props + per-character pose sheets, dedicated
+    `meeting`/`resting`/seated-`working` sprites (W8 fallbacks removed). Off unless the projection is isometric. **Done.**
+    Follow-up: place partitions/sofa in rooms and use partitions as occluders (meeting camera / wall fade).

@@ -89,3 +89,11 @@ renderer). This phase was built now, ahead of W4/W5, because it is
 metadata-only and has no dependency on either — Krush confirmed proceeding
 under the existing W6 label rather than renumbering. W4 and W5 remain
 outstanding and are unaffected by this work.
+
+## W-ISO-2 addendum: isometric art
+
+Binary art now exists for the isometric projection (generated, not downloaded). See
+`world/docs/RENDERER.md` "Isometric art" and `world/scripts/generate_iso_assets.py`.
+Manifest totals: 128 character sprites (16 x {idle, walking, working, celebration, emergency,
+meeting, resting, working-seated}), 18 furniture entries (adds `partition-low`, `partition-full`,
+`sofa`), 8 decorations. New entries use `source: "custom"`.

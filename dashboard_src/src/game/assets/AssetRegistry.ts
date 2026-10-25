@@ -7,6 +7,7 @@
 
 import Phaser from 'phaser';
 import { WORLD_CONFIG } from '../config/world.config';
+import type { IsoManifest } from '../../pages/world/isoAssets';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -23,6 +24,8 @@ export interface WorldManifest {
   npc: Record<string, string>;
   ui: Record<string, string>;
   decorations: Record<string, string>;
+  /** Phase W-ISO-2: isometric art (optional so older manifests keep loading). */
+  iso?: IsoManifest;
 }
 
 // NPC role resolution: callers pass an already-resolved role name (see
@@ -98,6 +101,25 @@ export function registerAssets(scene: Phaser.Scene): void {
       const key = makeKey(cat, name);
       if (!_registeredKeys.has(key)) {
         scene.load.image(key, path);
+        _registeredKeys.add(key);
+      }
+    }
+  }
+
+  // Phase W-ISO-2: isometric props + per-character pose strips (additive; absent -> no-op).
+  if (_manifest.iso) {
+    for (const [name, entry] of Object.entries(_manifest.iso.props)) {
+      const key = makeKey('isoprop', name);
+      if (!_registeredKeys.has(key)) {
+        scene.load.image(key, entry.path);
+        _registeredKeys.add(key);
+      }
+    }
+    const { frameWidth, frameHeight } = _manifest.iso.character;
+    for (const [name, path] of Object.entries(_manifest.iso.npc)) {
+      const key = `iso_npc__${name}`;
+      if (!_registeredKeys.has(key)) {
+        scene.load.spritesheet(key, path, { frameWidth, frameHeight });
         _registeredKeys.add(key);
       }
     }
@@ -203,6 +225,18 @@ export function getDecoration(
  */
 export function getNPCFrame(direction: 'F' | 'B' | 'L' | 'R'): number {
   return WORLD_CONFIG.npcDirections[direction] ?? 0;
+}
+
+/** Texture key of an isometric prop, or null when it is not loaded (caller falls back to the legacy art). */
+export function getIsoProp(scene: Phaser.Scene, name: string): string | null {
+  const key = makeKey('isoprop', name);
+  return _registeredKeys.has(key) && scene.textures.exists(key) ? key : null;
+}
+
+/** Texture key of a character's isometric pose strip, or null when it is not loaded. */
+export function getIsoNPC(scene: Phaser.Scene, characterId: string): string | null {
+  const key = `iso_npc__${characterId}`;
+  return _registeredKeys.has(key) && scene.textures.exists(key) ? key : null;
 }
 
 /** Return the raw manifest (after loadManifest resolves). */

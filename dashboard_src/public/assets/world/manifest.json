@@ -187,5 +187,197 @@
     "tree_palm_a": "/assets/world/decorations/tree_palm_a.png",
     "tree_palm_b": "/assets/world/decorations/tree_palm_b.png",
     "utility_box": "/assets/world/decorations/utility_box.png"
+  },
+  "iso": {
+    "version": "1.0.0",
+    "tile": {
+      "width": 64,
+      "height": 32
+    },
+    "character": {
+      "frameWidth": 64,
+      "frameHeight": 96,
+      "anchor": [
+        0.5,
+        0.92
+      ],
+      "poses": [
+        "stand",
+        "walk_a",
+        "walk_b",
+        "working_seated",
+        "meeting_seated",
+        "resting",
+        "celebration",
+        "emergency"
+      ],
+      "behaviorPose": {
+        "idle": "stand",
+        "walking": "walk_a",
+        "working": "stand",
+        "meeting": "meeting_seated",
+        "resting": "resting",
+        "celebration": "celebration",
+        "emergency": "emergency"
+      },
+      "seatedWorkingPose": "working_seated"
+    },
+    "props": {
+      "desk": {
+        "path": "/assets/world/iso/props/desk.png",
+        "width": 108,
+        "height": 82,
+        "anchor": [
+          0.5,
+          0.6341
+        ],
+        "footprint": [
+          2,
+          1
+        ],
+        "heightPx": 22
+      },
+      "chair": {
+        "path": "/assets/world/iso/props/chair.png",
+        "width": 76,
+        "height": 74,
+        "anchor": [
+          0.5,
+          0.7027
+        ],
+        "footprint": [
+          1,
+          1
+        ],
+        "heightPx": 30
+      },
+      "monitor": {
+        "path": "/assets/world/iso/props/monitor.png",
+        "width": 76,
+        "height": 74,
+        "anchor": [
+          0.5,
+          0.7027
+        ],
+        "footprint": [
+          1,
+          1
+        ],
+        "heightPx": 30
+      },
+      "meeting_table": {
+        "path": "/assets/world/iso/props/meeting_table.png",
+        "width": 172,
+        "height": 112,
+        "anchor": [
+          0.5,
+          0.5893
+        ],
+        "footprint": [
+          3,
+          2
+        ],
+        "heightPx": 20
+      },
+      "server_rack": {
+        "path": "/assets/world/iso/props/server_rack.png",
+        "width": 76,
+        "height": 108,
+        "anchor": [
+          0.5,
+          0.7963
+        ],
+        "footprint": [
+          1,
+          1
+        ],
+        "heightPx": 64
+      },
+      "plant": {
+        "path": "/assets/world/iso/props/plant.png",
+        "width": 76,
+        "height": 88,
+        "anchor": [
+          0.5,
+          0.75
+        ],
+        "footprint": [
+          1,
+          1
+        ],
+        "heightPx": 44
+      },
+      "partition_low": {
+        "path": "/assets/world/iso/props/partition_low.png",
+        "width": 140,
+        "height": 104,
+        "anchor": [
+          0.5,
+          0.6346
+        ],
+        "footprint": [
+          3,
+          1
+        ],
+        "heightPx": 28
+      },
+      "partition_full": {
+        "path": "/assets/world/iso/props/partition_full.png",
+        "width": 140,
+        "height": 148,
+        "anchor": [
+          0.5,
+          0.7432
+        ],
+        "footprint": [
+          3,
+          1
+        ],
+        "heightPx": 72
+      },
+      "sofa": {
+        "path": "/assets/world/iso/props/sofa.png",
+        "width": 108,
+        "height": 86,
+        "anchor": [
+          0.5,
+          0.6512
+        ],
+        "footprint": [
+          2,
+          1
+        ],
+        "heightPx": 26
+      }
+    },
+    "npc": {
+      "bastion": "/assets/world/iso/npc/bastion.png",
+      "chameleon": "/assets/world/iso/npc/chameleon.png",
+      "chronos": "/assets/world/iso/npc/chronos.png",
+      "crucible": "/assets/world/iso/npc/crucible.png",
+      "echo": "/assets/world/iso/npc/echo.png",
+      "forge": "/assets/world/iso/npc/forge.png",
+      "gardener": "/assets/world/iso/npc/gardener.png",
+      "herald": "/assets/world/iso/npc/herald.png",
+      "mandelbrot": "/assets/world/iso/npc/mandelbrot.png",
+      "oracle": "/assets/world/iso/npc/oracle.png",
+      "phoenix": "/assets/world/iso/npc/phoenix.png",
+      "primus": "/assets/world/iso/npc/primus.png",
+      "scribe": "/assets/world/iso/npc/scribe.png",
+      "sentinel": "/assets/world/iso/npc/sentinel.png",
+      "watcher": "/assets/world/iso/npc/watcher.png",
+      "webweaver": "/assets/world/iso/npc/webweaver.png"
+    },
+    "assetIds": {
+      "furniture.desk": "desk",
+      "furniture.chair": "chair",
+      "furniture.monitor": "monitor",
+      "furniture.meeting-table": "meeting_table",
+      "furniture.server-rack": "server_rack",
+      "decoration.potted-plant-decorative": "plant",
+      "furniture.partition-low": "partition_low",
+      "furniture.partition-full": "partition_full",
+      "furniture.sofa": "sofa"
+    }
   }
 }
