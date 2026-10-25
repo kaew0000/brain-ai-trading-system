@@ -28,7 +28,10 @@ import os
 import sys
 from typing import Any
 
-from PIL import Image, ImageDraw
+try:  # Pillow is only needed to draw; importing this module (paths, constants) must not require it.
+    from PIL import Image, ImageDraw
+except ImportError:  # pragma: no cover - exercised only where Pillow is absent
+    Image = ImageDraw = None  # type: ignore[assignment]
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 WORLD_ROOT = os.path.dirname(_HERE)
@@ -266,6 +269,8 @@ def _png_bytes(img: Image.Image) -> bytes:
 
 def build_outputs(spec: dict[str, Any] | None = None) -> dict[str, bytes]:
     """Return ``{absolute_path: bytes}`` for every file this generator owns."""
+    if Image is None:
+        raise RuntimeError("Pillow is required to generate isometric assets: pip install pillow")
     spec = spec or _load(SPEC_PATH)
     out: dict[str, bytes] = {}
     iso_block: dict[str, Any] = {

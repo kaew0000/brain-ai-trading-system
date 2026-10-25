@@ -7,7 +7,9 @@ spec, and that the backend catalog covers every state a behaviour can map to.
 import json
 import os
 
-from PIL import Image
+import struct
+
+import pytest
 
 from world.frontend.renderer.render_config import BEHAVIOR_TO_ANIMATION_STATE
 from world.scripts import generate_iso_assets as gen
@@ -19,7 +21,16 @@ def _load(path):
         return json.load(f)
 
 
+def _png_size(path):
+    """Read width/height from the PNG IHDR chunk (no Pillow needed)."""
+    with open(path, "rb") as f:
+        head = f.read(24)
+    assert head[:8] == b"\x89PNG\r\n\x1a\n"
+    return struct.unpack(">II", head[16:24])
+
+
 def test_generated_files_are_up_to_date():
+    pytest.importorskip("PIL")
     """Re-running the generator must be a no-op on a clean checkout."""
     stale = [
         p for p, data in gen.build_outputs().items()
@@ -29,18 +40,18 @@ def test_generated_files_are_up_to_date():
 
 
 def test_generator_is_deterministic():
+    pytest.importorskip("PIL")
     assert gen.build_outputs() == gen.build_outputs()
 
 
 def test_png_sizes_match_manifest_iso_block():
     iso = _load(gen.FRONTEND_MANIFEST)["iso"]
     for key, e in iso["props"].items():
-        with Image.open(os.path.join(gen.ISO_DIR, "props", f"{key}.png")) as im:
-            assert im.size == (e["width"], e["height"])
+        assert _png_size(os.path.join(gen.ISO_DIR, "props", f"{key}.png")) == (e["width"], e["height"])
     cfg = iso["character"]
     for cid in iso["npc"]:
-        with Image.open(os.path.join(gen.ISO_DIR, "npc", f"{cid}.png")) as im:
-            assert im.size == (cfg["frameWidth"] * len(cfg["poses"]), cfg["frameHeight"])
+        expected = (cfg["frameWidth"] * len(cfg["poses"]), cfg["frameHeight"])
+        assert _png_size(os.path.join(gen.ISO_DIR, "npc", f"{cid}.png")) == expected
 
 
 def test_every_behavior_resolves_to_a_character_sprite_and_an_iso_pose():
