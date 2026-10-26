@@ -1,29 +1,26 @@
-# MIGRATION — World live monitoring (V16 §82)
+# MIGRATION — World chat & meetings (V16 §83)
 
 ## Required
-1. Rebuild the dashboard and restart the backend (a new thread starts with it):
+Rebuild the dashboard and restart the backend, then Ctrl+F5:
 
-       cd dashboard_src && npm ci && npm run build
+    cd dashboard_src && npm ci && npm run build
 
-   then Ctrl+F5 in the browser.
+Log in first (open `/?token=<API key>` or use the login form): without a session every `/api/*` call returns 401.
 
-## New settings (optional; defaults shown, add to `.env` only to change)
-    WORLD_SIM_TICK_INTERVAL_SECONDS=2.0   # 0 = legacy: one tick per LOOP_INTERVAL on the scheduler
-    WORLD_TIMELINE_HISTORY_WINDOW=900     # ticks kept for Timeline replay (30 min at 2 s)
-
-Lower tick interval = smoother movement and more frame requests; raise it on a slow machine.
+## New settings (optional; defaults shown)
+    WORLD_CHAT_ENABLED=true
+    WORLD_CHAT_STORE_PATH=world/data/runtime/chat.json
+    WORLD_CHAT_MAX_MESSAGES_PER_CHANNEL=500
+    WORLD_CHAT_MAX_TEXT_CHARS=2000
+    WORLD_MEETING_TURN_INTERVAL_SECONDS=3.0
+    WORLD_MEETING_MIN_TURNS=5
+    WORLD_MEETING_MAX_TURNS=50
+    WORLD_MEETING_DEFAULT_TURNS=20
 
 ## Behaviour changes
-- World simulation ticks every 2 s on its own thread instead of once per trading cycle. Tick numbers no longer match
-  trading cycles 1:1. Timeline replay now covers ~30 minutes (was ~8 hours at 60 s ticks); raise
-  `WORLD_TIMELINE_HISTORY_WINDOW` for longer (about 4 KB of memory per tick).
-- Office tab shows a System Pulse strip and the scene updates live.
-- New read-only endpoint `GET /api/world/ticker`.
-
-## Checking it works
-`GET /api/world/ticker` should report `"status":"ok"`; the backend log shows `WorldSimulationTicker started (interval=2.0s)`.
-If it shows `disabled`, the interval is 0 or the ticker failed to start (see the log line starting
-`WorldSimulationTicker failed to start`): the old scheduled tick is then used.
+- New World tab `Studio` (default). Other tabs are unchanged.
+- New endpoints under `/api/world/chat/*`; `GET /api/world/chat/health` reports store/meeting/driver state.
+- A meeting that was live when the process stopped is restored as `stopped`.
 
 ## Rollback
-Set `WORLD_SIM_TICK_INTERVAL_SECONDS=0` for the old tick behaviour without reverting code, or `git revert` the commit.
+`WORLD_CHAT_ENABLED=false` (endpoints answer 503) or `git revert` the commit. Delete `world/data/runtime/chat.json` to clear history.

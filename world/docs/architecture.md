@@ -4,7 +4,8 @@ See the root [WORLD.md](../WORLD.md) for the full Phase W1 report. This file
 mirrors the key points for readers browsing `docs/` directly.
 
 Brain AI Command World is a one-directional, read-only reflection of engine
-state:
+state (V16 §83 amendment: World also owns a small chat store, `world/chat/`, which
+never reads from or writes to the trading engine; see `docs/architecture.md` §83):
 
 ```
 Trading Engine -> DataSource -> Reader -> Adapter -> world/data/runtime/*.json -> StateBuilder -> WorldState -> renderer -> UI panels

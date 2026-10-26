@@ -17,10 +17,12 @@ import TimelinePanel from './components/TimelinePanel'
 import NotificationsPanel from './components/NotificationsPanel'
 import SettingsPanel from './components/SettingsPanel'
 import WorkspacePanel from './components/WorkspacePanel'
+import StudioView from './components/StudioView'
 
-type TabId = 'scene' | 'timeline' | 'alerts' | 'settings' | 'workspace'
+type TabId = 'studio' | 'scene' | 'timeline' | 'alerts' | 'settings' | 'workspace'
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: 'studio', label: 'Studio' },
   { id: 'scene', label: 'Office' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'alerts', label: 'Alerts' },
@@ -32,7 +34,7 @@ export default function WorldPage() {
   const [rooms, setRooms] = useState<RoomActivity[]>([])
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null)
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
-  const [tab, setTab] = useState<TabId>('scene')
+  const [tab, setTab] = useState<TabId>('studio')
   const [wsStatus, setWsStatus] = useState<'LIVE' | 'RECONNECTING' | 'DISCONNECTED'>('DISCONNECTED')
   const hasEverConnectedRef = useRef(false)
   // V16 §82: the selected room's frame, refreshed on every world tick (WS) with a slow poll fallback.
@@ -133,6 +135,8 @@ export default function WorldPage() {
           </button>
         ))}
       </nav>
+
+      {tab === 'studio' && <StudioView frame={frame} wsStatus={wsStatus} />}
 
       {tab === 'scene' && <SystemPulse />}
 

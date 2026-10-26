@@ -7932,3 +7932,27 @@ and open exchange positions / floating P&L are not exported to the World (no ver
 **Safety.** Additive; no route/schema removed. `WORLD_SIM_TICK_INTERVAL_SECONDS=0` restores the previous behaviour exactly.
 The Office scene follows the Timeline cursor by design: pausing or seeking in the Timeline tab freezes the scene on that
 historical state until resumed.
+
+## 83. World Chat & Meetings (2026-10-26)
+
+**Gap.** The Office World could be watched (§82) but not talked to: no chat route, no store for messages or meeting state, and no
+LLM infrastructure to power agent conversation. Verified in `api/world_api.py`, `api/workspace_api.py`, `world/docs/architecture.md`,
+and a repo-wide search for LLM clients (only `brain_strategy_intelligence` research providers exist).
+
+**Change.**
+- `world/chat/store.py` — `ChatStore`: per-channel bounded deques (`WORLD_CHAT_MAX_MESSAGES_PER_CHANNEL`), thread-safe, atomically
+  persisted (tmp file + `os.replace`), corrupt file -> start empty, a meeting that was live at shutdown is restored as `stopped`.
+- `world/chat/responder.py` — deterministic replies composed from `AgentPanelState` (status, last decision, current task,
+  heartbeat, latency); a missing field is said to be "unavailable", never invented. `@[Label]`/`@label` mentions.
+- `world/chat/meeting.py` — state machine `running <-> paused -> finished | stopped`; round-robin turns; one meeting at a time.
+- `world/chat/api.py` + `api/world_chat_api.py` — `/api/world/chat/{roster,messages,meeting,meeting/start|next|pause|resume|stop,health}`.
+  Auto meetings are paced by one asyncio task (cancelled on pause/stop/finish/app shutdown; a crash stops the meeting).
+  Hybrid meetings pause when the user speaks.
+- Dashboard `Studio` tab: roster, scene, and Chat / Meeting / Kanban (missions by bucket) / Results (latest decisions) panels.
+
+**Safety.** The only new write path in World is the chat store. `world/chat` and `api/world_chat_api.py` import nothing from
+`agents/ execution/ portfolio/ risk/ journal/ learning/ strategy/ exchange/ futures/ decision/ governance/` (enforced by
+`tests/test_world_chat.py::test_boundary_no_trading_imports`). Auth is the existing prefix-generic middleware (VIEWER).
+`WORLD_CHAT_ENABLED=false` disables it (503). This amends the earlier "read-only World" statement: the trading engine is still
+never written to by World; only its own chat data is.
+
