@@ -1,36 +1,31 @@
-# PATCH NOTES — World live monitoring (V16 §82)
+# PATCH NOTES — World chat & meetings (V16 §83)
 
-Branch: `feature/world-live-monitoring`
-Base: `main` @ `9913aea` (PR #120 merged)
-Commit: `feat(world): World live monitoring (V16 §82)` (exactly one)
+Branch: `feat/world-chat-meeting-s83`
+Base: `main` @ `7506ac7` (PR #121 merged)
+Commit: `feat(world): World chat and meetings (V16 §83)` (exactly one)
 
 ## Root cause (verified in code)
-1. The selected room's frame was fetched once per room selection (`WorldPage.tsx`); `/ws/world` only refreshed the room list.
-2. The simulation ticked once per `LOOP_INTERVAL` (60 s) via `schedule` on the main thread: slow cycles froze it, and
-   `STEP_DISTANCE_PER_TICK=0.2` meant NPCs barely moved.
-3. `OfficeScene.draw()` cleared and rebuilt every sprite per frame: no glide, so any movement would have teleported.
-4. No real system numbers were visible in the World UI (the data existed in `/api/world/state` but nothing rendered it).
+1. The World was a read-only viewer by design (`world/docs/architecture.md`): no route accepted chat, and no store existed for
+   messages or meeting state.
+2. There is no LLM/agent-conversation infrastructure in the repo (only `brain_strategy_intelligence` research providers), so
+   NPC replies had to be derived from real state or not exist.
+3. Separate from this feature: the 401s seen in the browser console hit every endpoint (not only `/api/world/*`), i.e. the
+   session had no Bearer token (not logged in, or `API_KEYS` empty so a new ephemeral key is generated at each restart).
+   The §81/§82 code already attaches the token; nothing in World needed changing for that.
 
 ## Changes
-- Backend: `world/simulation/ticker.py` (new), `api/world_api.py` (`GET /api/world/ticker`), `main.py` (start/stop, fallback),
-  `config/settings.py` + `.env.example` (2 settings), `world/simulation/{timeline,engine,api}.py` (`set_history_window`).
-- Frontend: `useLiveFrame.ts` (new), `pulse.ts` + `components/SystemPulse.tsx` (new), `components/OfficeScene.tsx` (glide, skip
-  identical frames), `sceneMapping.ts` (`frameSignature`, `characterTweenOffset`), `WorldPage.tsx`, `api.ts`, `types.ts`,
-  `game/config/world.config.ts` (live-view constants).
-- Docs: `docs/architecture.md` §82, `CHANGELOG.md`, this file, `MIGRATION.md`.
+- Backend: `world/chat/{models,store,responder,meeting,api}.py` (new), `api/world_chat_api.py` (new), `api/app.py`
+  (router + shutdown hook), `config/settings.py` (8 settings), `.gitignore` (chat.json).
+- Frontend: `pages/world/chatApi.ts`, `components/{StudioView,ChatPanel,MeetingPanel,KanbanPanel}.tsx` (new),
+  `WorldPage.tsx` (new default `Studio` tab).
+- Docs: `docs/architecture.md` §83, `world/docs/architecture.md` (boundary note), `CHANGELOG.md`, this file, `MIGRATION.md`.
 
 ## Verification (actually executed)
-`ruff check .` clean; `pytest tests/` 3463 passed / 0 failed; `pytest world/tests -m ""` (as CI) 580 passed;
-`npx tsc --noEmit` clean; `npx vitest run` 168/168; `npm run build` ok. Mutation checks: removing the hook's in-flight guard
-and letting the ticker propagate step errors each make the new tests fail.
-Not verified: the visual smoothness of the glide in a real browser (Phaser needs a canvas; the pure offset/signature logic,
-the hook and the build are tested, the on-screen result needs a manual look).
+See the status report delivered with the bundle (exact counts).
 
 ## Limitations / follow-up
-- P&L, win rate, avg R:R are journal figures across ALL execution lanes (live + paper-training); a live-only split needs a
-  change to the world export (`telemetry/world_export.py`).
-- Open exchange positions and floating P&L are not exported to the World (existing gap); not shown.
-- NPC step is still 0.2 logical units per tick (about 2-3 px/s at the 2 s default): visible but a slow stroll; making it
-  configurable is a small follow-up.
-- Each open dashboard tab refetches the selected room's frame once per tick (about 0.5 request/s).
-- Pausing/seeking in the Timeline tab freezes the Office scene on that state (existing design).
+- NPC text is templated from real fields; it is not conversation. A real LLM backend would be a separate, explicit decision.
+- No Cron panel: no verified read-only scheduler endpoint exists to back it. No multi-player/presence count either.
+- Chat/meeting endpoints are VIEWER-level like every other `/api/world/*` route (they cannot affect trading).
+- Auto meetings are paced by a single in-process asyncio task; a restart marks a live meeting `stopped`.
+- The visual match to the reference screenshots is approximate (Phaser office scene + panels); not checked in a real browser.

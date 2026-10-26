@@ -112,6 +112,10 @@ from api.world_ws import check_and_broadcast as _world_ws_check
 # Phase W12 — Live Operations Workspace & Command Console. Same pattern.
 from api.workspace_api import router as _workspace_router
 
+# V16 §83 — World chat & meetings (rule-based). Same additive pattern.
+from api.world_chat_api import router as _world_chat_router
+from api.world_chat_api import shutdown_driver as _world_chat_shutdown
+
 # V16 Track W14-1 Item 2 — Real Account Telemetry (Dashboard V16). Same
 # additive-router pattern as every /api/* module above.
 from api.account_api import router as _account_router
@@ -454,6 +458,7 @@ async def lifespan(app: FastAPI):
             pass
         logger.info("HFT-1 WS ingestion stopped")
 
+    await _world_chat_shutdown()  # V16 §83: no meeting driver outlives the loop
     logger.info("Dashboard API shutdown")
 
 
@@ -502,6 +507,10 @@ app.include_router(_world_ws_router)
 # Phase W12 — Live Operations Workspace & Command Console. Same
 # /api/* auth coverage as everything above.
 app.include_router(_workspace_router)
+
+# V16 §83 — World chat & meetings. /api/world/chat/* is covered by the
+# same prefix-generic _auth_middleware (VIEWER) — no auth changes needed.
+app.include_router(_world_chat_router)
 
 # V16 Track W14-1 Item 2 — Real Account Telemetry. /api/account/* is
 # covered by the same prefix-generic _auth_middleware — no auth changes

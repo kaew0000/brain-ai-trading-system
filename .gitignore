@@ -62,3 +62,7 @@ node_modules/
 
 # Brain Strategy Intelligence runtime output (databases, reports) - never committed
 brain_strategy_intelligence_data/
+
+# V16 §83: World chat store (runtime state, never committed)
+world/data/runtime/chat.json
+world/data/runtime/chat.json.tmp

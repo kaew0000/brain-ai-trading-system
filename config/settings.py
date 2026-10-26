@@ -188,6 +188,18 @@ class Settings(BaseSettings):
     # engine's own default of 500.
     WORLD_TIMELINE_HISTORY_WINDOW: int = Field(default=900, alias="WORLD_TIMELINE_HISTORY_WINDOW", ge=1)
 
+    # V16 §83 — World chat & meetings (world/chat/). Rule-based NPC replies
+    # built from real agent state; no LLM, no network. The ONLY write path
+    # World has: a small JSON chat store, never execution/ or risk/.
+    WORLD_CHAT_ENABLED: bool = Field(default=True, alias="WORLD_CHAT_ENABLED")
+    WORLD_CHAT_STORE_PATH: str = Field(default="world/data/runtime/chat.json", alias="WORLD_CHAT_STORE_PATH")
+    WORLD_CHAT_MAX_MESSAGES_PER_CHANNEL: int = Field(default=500, alias="WORLD_CHAT_MAX_MESSAGES_PER_CHANNEL", ge=10)
+    WORLD_CHAT_MAX_TEXT_CHARS: int = Field(default=2000, alias="WORLD_CHAT_MAX_TEXT_CHARS", ge=1)
+    WORLD_MEETING_TURN_INTERVAL_SECONDS: float = Field(default=3.0, alias="WORLD_MEETING_TURN_INTERVAL_SECONDS", ge=0)
+    WORLD_MEETING_MIN_TURNS: int = Field(default=5, alias="WORLD_MEETING_MIN_TURNS", ge=1)
+    WORLD_MEETING_MAX_TURNS: int = Field(default=50, alias="WORLD_MEETING_MAX_TURNS", ge=1)
+    WORLD_MEETING_DEFAULT_TURNS: int = Field(default=20, alias="WORLD_MEETING_DEFAULT_TURNS", ge=1)
+
     # ── Journal ───────────────────────────────────────────
     JOURNAL_DB_PATH: str = Field(default="brain_bot_journal.db")
     DATABASE_PATH: str = Field(default="brain_bot_v13.db")

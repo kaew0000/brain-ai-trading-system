@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## [Unreleased] — World chat & meetings (V16 §83)
+
+Adds the "Studio" tab to the Office World: roster, direct/office chat with @mentions, and turn-based meetings. NPC replies are
+rule-based, built from real agent state (no LLM). Branch: `feat/world-chat-meeting-s83`.
+
+### Added
+- `world/chat/` (models, store, responder, meeting engine, facade) and `api/world_chat_api.py` (`/api/world/chat/*`).
+- Settings `WORLD_CHAT_*` and `WORLD_MEETING_*` (8, all with defaults).
+- Dashboard: `Studio` tab (`StudioView`, `ChatPanel`, `MeetingPanel`, `KanbanPanel`/`ResultsPanel`, `chatApi.ts`).
+- Tests: 28 backend (`tests/test_world_chat.py`, incl. a no-trading-imports boundary test), 9 frontend (`chat.test.ts`).
+
+### Changed
+- World gains one write path: the chat store (`world/data/runtime/chat.json`, git-ignored). It never touches `execution/` or `risk/`.
+- `Studio` is now the default World tab; the previous tabs are unchanged.
+
 ## [Unreleased] — World live monitoring (V16 §82)
 
 Makes the Office World usable for watching the running system. Branch: `feature/world-live-monitoring`.
