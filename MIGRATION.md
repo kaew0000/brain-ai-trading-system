@@ -1,26 +1,23 @@
-# MIGRATION — World chat & meetings (V16 §83)
+# MIGRATION — Auto-rebuild stale dashboard (V16 §84)
 
 ## Required
-Rebuild the dashboard and restart the backend, then Ctrl+F5:
+None. Launchers (`run.bat`, `run_live.bat`, `run_paper.bat`, `run_testnet.bat`) pick this up on the next start. Requires Python on
+PATH (already required to run the bot) and, for rebuilds, Node.js LTS.
 
-    cd dashboard_src && npm ci && npm run build
+## What you will notice
+- After `git pull`, the next launcher start prints `[i] Dashboard build is build - rebuilding V16 dashboard...` (about 40 s; an
+  `npm ci` first when dependencies changed, a few minutes) and then starts the bot. Press Ctrl+F5 in the browser once.
+- When `dist` is up to date nothing is printed and startup is unchanged.
 
-Log in first (open `/?token=<API key>` or use the login form): without a session every `/api/*` call returns 401.
-
-## New settings (optional; defaults shown)
-    WORLD_CHAT_ENABLED=true
-    WORLD_CHAT_STORE_PATH=world/data/runtime/chat.json
-    WORLD_CHAT_MAX_MESSAGES_PER_CHANNEL=500
-    WORLD_CHAT_MAX_TEXT_CHARS=2000
-    WORLD_MEETING_TURN_INTERVAL_SECONDS=3.0
-    WORLD_MEETING_MIN_TURNS=5
-    WORLD_MEETING_MAX_TURNS=50
-    WORLD_MEETING_DEFAULT_TURNS=20
+## New environment variable (optional)
+    BRAIN_DASHBOARD_AUTOREBUILD=0     # skip the stale check (a MISSING dist is still built, as before)
 
 ## Behaviour changes
-- New World tab `Studio` (default). Other tabs are unchanged.
-- New endpoints under `/api/world/chat/*`; `GET /api/world/chat/health` reports store/meeting/driver state.
-- A meeting that was live when the process stopped is restored as `stopped`.
+- `scripts/ensure_dashboard.bat` rebuilds when sources are newer than `dashboard_src\dist\index.html`, not only when `dist` is missing.
+- A failed rebuild restores the previous `dist` instead of leaving none (which would serve the legacy fake-data demo).
+
+## Manual equivalent
+    cd dashboard_src && npm ci && npm run build
 
 ## Rollback
-`WORLD_CHAT_ENABLED=false` (endpoints answer 503) or `git revert` the commit. Delete `world/data/runtime/chat.json` to clear history.
+`git revert` the commit, or set `BRAIN_DASHBOARD_AUTOREBUILD=0`. Delete `%TEMP%\brain_dashboard_dist_backup` at any time.
