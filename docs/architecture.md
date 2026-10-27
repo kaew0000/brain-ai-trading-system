@@ -7956,3 +7956,15 @@ and a repo-wide search for LLM clients (only `brain_strategy_intelligence` resea
 `WORLD_CHAT_ENABLED=false` disables it (503). This amends the earlier "read-only World" statement: the trading engine is still
 never written to by World; only its own chat data is.
 
+## 84. Dashboard Build Freshness (2026-10-27)
+
+**Gap.** `dashboard_src/dist/` is git-ignored and served as-is by `api/app.py`; `scripts/ensure_dashboard.bat` (PR #116) built it only
+when `dist/index.html` was missing. After `git pull`, a build older than the checked-out sources kept being served (verified: `index.html`
+dated 24 Oct vs repo HEAD of 26 Oct; bundle `WorldPage-BZFlg65m.js` was replaced by `WorldPage-Hj4FlUkZ.js` after a rebuild, which fixed
+the World page with no source change).
+
+**Change.** `scripts/dashboard_build_state.py` (stdlib, read-only) classifies the build as `fresh` / `build` / `install_build` from mtimes;
+`ensure_dashboard.bat` acts on it, keeps a temp backup of the previous `dist` and restores it if a rebuild produces no `index.html`.
+`BRAIN_DASHBOARD_AUTOREBUILD=0` disables the stale check. No runtime, trading, or API code changed.
+
+**Boundary.** Launcher-only; never fatal; never touches `.env`, the journal, or execution/risk code.

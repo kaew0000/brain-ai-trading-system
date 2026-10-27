@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## [Unreleased] — Auto-rebuild stale dashboard (V16 §84)
+
+Launchers now rebuild `dashboard_src/dist` when the dashboard sources are newer than the build, not only when it is missing
+(PR #116). Fixes an old build being served after `git pull` (World page empty / §83 Studio tab missing). Branch:
+`fix/dashboard-stale-build-rebuild`.
+
+### Added
+- `scripts/dashboard_build_state.py`: read-only stdlib helper printing `fresh` / `build` / `install_build`.
+- `tests/test_dashboard_build_state.py` (23 tests).
+- Optional `BRAIN_DASHBOARD_AUTOREBUILD=0` to skip the stale check.
+
+### Changed
+- `scripts/ensure_dashboard.bat`: stale detection, `npm ci` only when dependencies changed, previous build restored if a rebuild
+  fails. Still non-fatal; falls back to the old behaviour if the helper cannot run.
+
 ## [Unreleased] — World chat & meetings (V16 §83)
 
 Adds the "Studio" tab to the Office World: roster, direct/office chat with @mentions, and turn-based meetings. NPC replies are
