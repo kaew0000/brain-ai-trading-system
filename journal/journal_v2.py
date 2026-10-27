@@ -263,7 +263,9 @@ class TradeJournalV2:
             "avg_rr": round(arr, 3),
         }
 
-    def get_consecutive_losses(self, execution_lane: str | None = None) -> int:
+    def get_consecutive_losses(
+        self, execution_lane: str | None = None, since: str | None = None,
+    ) -> int:
         """Counts trailing losses in the most recent 20 closed trades.
 
         Bug-fix follow-up (2026-08-31): this used to query across every
@@ -283,12 +285,19 @@ class TradeJournalV2:
         other/future caller that legitimately wants a cross-lane view --
         callers that gate real trading decisions (RiskEngine) must pass
         execution_lane="LIVE" explicitly.
+
+        since: optional ISO-8601 UTC timestamp (V16 §86 "streak epoch").
+        Only trades with timestamp >= since are counted; older rows stay in
+        the DB untouched. None (default) keeps the previous behaviour.
         """
         sql = "SELECT result FROM trades WHERE result IN ('WIN','LOSS')"
         params: tuple = ()
         if execution_lane is not None:
             sql += " AND execution_lane=?"
             params = (_validate_lane(execution_lane),)
+        if since is not None:
+            sql += " AND timestamp>=?"
+            params = params + (since,)
         sql += " ORDER BY timestamp DESC LIMIT 20"
         with self._conn() as c:
             rows = c.execute(sql, params).fetchall()
@@ -355,6 +364,35 @@ class TradeJournalV2:
         with self._conn() as c:
             self._ensure_risk_state_table(c)
             c.execute("DELETE FROM risk_engine_state WHERE key='consecutive_loss_override'")
+            c.commit()
+
+    # Generic key/value access to the same table (V16 §86). Used by RiskEngine
+    # for the "unfunded" marker and the streak epoch so both survive an
+    # abrupt shutdown. Same lazy CREATE TABLE IF NOT EXISTS pattern as above.
+
+    def get_risk_state(self, key: str) -> str | None:
+        with self._conn() as c:
+            self._ensure_risk_state_table(c)
+            row = c.execute(
+                "SELECT value FROM risk_engine_state WHERE key=?", (key,)
+            ).fetchone()
+        return row["value"] if row is not None else None
+
+    def set_risk_state(self, key: str, value: str) -> None:
+        with self._conn() as c:
+            self._ensure_risk_state_table(c)
+            c.execute(
+                """INSERT INTO risk_engine_state (key, value, set_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value, set_at=excluded.set_at""",
+                (key, value, datetime.now(timezone.utc).isoformat()),
+            )
+            c.commit()
+
+    def clear_risk_state(self, key: str) -> None:
+        with self._conn() as c:
+            self._ensure_risk_state_table(c)
+            c.execute("DELETE FROM risk_engine_state WHERE key=?", (key,))
             c.commit()
 
     def get_performance_summary(self, limit: int = 200) -> dict:

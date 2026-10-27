@@ -50,6 +50,23 @@ class Settings(BaseSettings):
     MAX_CONSECUTIVE_LOSSES: int = Field(default=3)
     MAX_MARGIN_USAGE: float = Field(default=0.20)
 
+    # ── Live balance gate & stale-streak epoch (V16 §86) ──────────────────
+    # can_trade() blocks with an explicit "insufficient balance" reason when
+    # the account balance is <= this value (0.0 = only a truly empty account).
+    # Evaluated BEFORE the daily-loss / consecutive-loss checks and never
+    # latched, so a deposit resumes trading immediately.
+    RISK_MIN_BALANCE_USDT: float = Field(default=0.0, alias="RISK_MIN_BALANCE_USDT")
+    # When the account goes unfunded -> funded, LIVE-lane losses recorded
+    # BEFORE that moment no longer count toward the consecutive-loss streak
+    # (a new "streak epoch" starts; rows stay in the DB). Set false to keep
+    # the old streak across a refund.
+    RISK_STREAK_RESET_ON_REFUND: bool = Field(default=True, alias="RISK_STREAK_RESET_ON_REFUND")
+    # The account must have stayed unfunded at least this long before a refund
+    # counts as a new epoch. Guards against a transient "Balance: 0.00" API
+    # glitch wiping a genuine live-loss streak. Measured from the FIRST
+    # unfunded observation, which is persisted, so it also spans restarts.
+    RISK_REFUND_MIN_UNFUNDED_SECONDS: int = Field(default=600, alias="RISK_REFUND_MIN_UNFUNDED_SECONDS")
+
     # ── Volatility Risk (P1-B1) ────────────────────────────
     # ATR-normalized (ATR / close price) threshold above which risk-per-trade
     # and leverage start scaling down. Matches RegimeEngine.ATR_VOLATILE_THRESHOLD

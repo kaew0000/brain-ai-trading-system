@@ -36,6 +36,10 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# V16 §86: journal risk_engine_state keys.
+_KEY_UNFUNDED_SINCE = "live_unfunded_since"   # ISO ts of first unfunded observation
+_KEY_STREAK_EPOCH   = "live_streak_epoch"     # ISO ts; older LIVE trades don't count
+
 
 class RiskEngine:
     """
@@ -96,7 +100,102 @@ class RiskEngine:
                 "RISK OVERRIDE RESTORED from previous session: "
                 f"{self._consecutive_loss_override_reason}"
             )
+        # V16 §86: balance gate + stale-streak epoch, both persisted in the
+        # journal so an abrupt shutdown can't leave the next session confused.
+        # _read_state() only accepts real strings, for the same MagicMock-
+        # journal reason spelled out above.
+        self._unfunded_since: str | None = self._read_state(_KEY_UNFUNDED_SINCE)
+        self._streak_epoch: str | None = self._read_state(_KEY_STREAK_EPOCH)
+        if self._streak_epoch is not None:
+            logger.info(f"RiskEngine: LIVE streak epoch active since {self._streak_epoch}")
         logger.info("RiskEngine ready")
+
+    # ── Balance gate / streak epoch (V16 §86) ───────────────────────────────
+
+    def _read_state(self, key: str) -> str | None:
+        getter = getattr(self.journal, "get_risk_state", None)
+        if getter is None:
+            return None
+        try:
+            value = getter(key)
+        except Exception as exc:
+            logger.debug(f"RiskEngine: get_risk_state({key}) skipped: {exc}")
+            return None
+        return value if isinstance(value, str) else None
+
+    def _write_state(self, key: str, value: str | None) -> None:
+        clear_fn = getattr(self.journal, "clear_risk_state", None)
+        set_fn = getattr(self.journal, "set_risk_state", None)
+        try:
+            if value is None:
+                if clear_fn is not None:
+                    clear_fn(key)
+            elif set_fn is not None:
+                set_fn(key, value)
+        except Exception as exc:
+            logger.warning(f"RiskEngine: persisting {key} failed (non-fatal): {exc}")
+
+    @staticmethod
+    def _balance_is_funded(balance) -> bool:
+        if not isinstance(balance, (int, float)):
+            return True   # unknown balance type: never block on it
+        return float(balance) > float(settings.RISK_MIN_BALANCE_USDT)
+
+    def _mark_unfunded(self) -> None:
+        if self._unfunded_since is None:
+            self._unfunded_since = datetime.now(timezone.utc).isoformat()
+            self._write_state(_KEY_UNFUNDED_SINCE, self._unfunded_since)
+            logger.warning(
+                "RiskEngine: account is UNFUNDED -- live trading blocked until a deposit "
+                f"(balance <= {settings.RISK_MIN_BALANCE_USDT} USDT)"
+            )
+
+    def _refund_qualifies(self) -> bool:
+        """True when funded now, was unfunded long enough, and the feature is on."""
+        if not settings.RISK_STREAK_RESET_ON_REFUND or self._unfunded_since is None:
+            return False
+        try:
+            since = datetime.fromisoformat(self._unfunded_since)
+        except ValueError:
+            return False
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - since).total_seconds()
+        return age >= settings.RISK_REFUND_MIN_UNFUNDED_SECONDS
+
+    def _begin_new_epoch(self) -> str:
+        """Old LIVE trades stay in the DB; they just stop counting toward the streak."""
+        epoch = datetime.now(timezone.utc).isoformat()
+        try:
+            archived = self.journal.get_consecutive_losses(
+                execution_lane="LIVE", since=self._streak_epoch)
+        except Exception:
+            archived = "?"
+        self._streak_epoch = epoch
+        self._unfunded_since = None
+        self._write_state(_KEY_STREAK_EPOCH, epoch)
+        self._write_state(_KEY_UNFUNDED_SINCE, None)
+        if self._disabled_by == "consecutive_losses":
+            self._disabled_today = False
+            self._disable_date = None
+            self._disabled_by = None
+        logger.warning(
+            f"RiskEngine: account re-funded -- new LIVE streak epoch {epoch} "
+            f"(archived stale streak={archived}; rows kept in journal)"
+        )
+        return epoch
+
+    def _effective_epoch(self, balance) -> str | None:
+        """Epoch to use right now WITHOUT mutating anything: a qualifying refund
+        is reported as already-effective so status reads agree with the gate."""
+        if self._balance_is_funded(balance) and self._refund_qualifies():
+            return datetime.now(timezone.utc).isoformat()
+        return self._streak_epoch
+
+    def _streak(self, since: str | None) -> int:
+        if since is None:
+            return self.journal.get_consecutive_losses(execution_lane="LIVE")
+        return self.journal.get_consecutive_losses(execution_lane="LIVE", since=since)
 
     # ── Manual hold (V16 BUG-LIVE-RISK-02) ──────────────────────────────────
 
@@ -229,11 +328,15 @@ class RiskEngine:
             return False, reason
         return True, ""
 
-    def check_consecutive_losses(self) -> tuple[bool, str]:
+    _EPOCH_DEFAULT = object()
+
+    def check_consecutive_losses(self, since=_EPOCH_DEFAULT) -> tuple[bool, str]:
         # execution_lane="LIVE": see journal_v2.get_consecutive_losses()'s
         # docstring -- the always-on background training lane's frequent,
         # expected losses must never gate real capital.
-        streak = self.journal.get_consecutive_losses(execution_lane="LIVE")
+        if since is self._EPOCH_DEFAULT:
+            since = self._streak_epoch
+        streak = self._streak(since)
         if streak >= settings.MAX_CONSECUTIVE_LOSSES:
             return False, f"Consecutive losses: {streak}/{settings.MAX_CONSECUTIVE_LOSSES}"
         return True, ""
@@ -265,7 +368,7 @@ class RiskEngine:
           daily loss > 50 % cap → MIN risk (same as above)
           normal                → MAX risk × volatility factor, never below MIN
         """
-        streak  = self.journal.get_consecutive_losses(execution_lane="LIVE")
+        streak  = self._streak(self._effective_epoch(balance))
         pnl     = self.journal.get_today_pnl(execution_lane="LIVE")
         max_loss = balance * settings.MAX_DAILY_LOSS
 
@@ -304,6 +407,25 @@ class RiskEngine:
         if self._manual_hold_reason is not None:
             return False, self._manual_hold_reason
 
+        # V16 §86: balance gate -- the real blocker when the account is empty,
+        # reported before (and instead of) any stale streak. Never latched into
+        # _disabled_today, so a deposit resumes trading on the next call.
+        epoch = self._streak_epoch
+        if not self._balance_is_funded(balance):
+            if mutate:
+                self._mark_unfunded()
+            return False, (
+                f"Insufficient balance: {float(balance):.2f} USDT "
+                f"(minimum {settings.RISK_MIN_BALANCE_USDT:.2f} USDT)"
+            )
+        if self._unfunded_since is not None:
+            if self._refund_qualifies():
+                epoch = self._begin_new_epoch() if mutate else self._effective_epoch(balance)
+            elif mutate:
+                # funded again too quickly to count as a refund: balance glitch
+                self._unfunded_since = None
+                self._write_state(_KEY_UNFUNDED_SINCE, None)
+
         if self._disabled_today:
             # V16 BUG-LIVE-RISK-03: an armed override must be able to punch
             # through this sticky same-session latch, not just a *fresh*
@@ -336,7 +458,7 @@ class RiskEngine:
                 self.disable_trading_today(reason, cause="daily_loss")
             return False, reason
 
-        ok, reason = self.check_consecutive_losses()
+        ok, reason = self.check_consecutive_losses(since=epoch)
         if not ok:
             if self._consecutive_loss_override_reason is not None:
                 if mutate:
@@ -399,7 +521,7 @@ class RiskEngine:
         # api/app.py's or main.py's own direct journal.get_daily_stats()
         # calls, which are unrelated to this risk report.
         today      = self.journal.get_daily_stats(execution_lane="LIVE")
-        streak     = self.journal.get_consecutive_losses(execution_lane="LIVE")
+        streak     = self._streak(self._effective_epoch(balance))
         # V16 BUG-LIVE-RISK-06: peek_can_trade(), not can_trade() --
         # report() is a status read (called every cycle by
         # RiskManagerAgent for dashboard narrative, and on-demand by

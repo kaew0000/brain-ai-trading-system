@@ -102,6 +102,10 @@ Precisely scoped in `docs/architecture.md` §29/§30/§31/§32/§33's own
 here, not re-derived:
 
 - Fee capture (no write path fetches Binance commission data today).
+- Training lane -> learning loop (found in §86 audit): `ml/confidence_calibrator.train_calibrator()` still has no production caller;
+  `run_nightly_retrain()` runs once a day at 02:00 only, so a bust/reset cycle of the always-on training lane does not trigger a retrain.
+  Must stay behind the human-approved promotion gate.
+- `main.py` printed daily report mixes all execution lanes (training trades appear as "Today trades"); scope to LIVE or label per lane.
 - Multi-Agent Framework enhancements (extend `agents/` + `graph/` +
   `commander/`).
 - Quant Research Pipeline / Research-Optimization Framework (extend
