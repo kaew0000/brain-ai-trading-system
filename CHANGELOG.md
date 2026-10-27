@@ -20,6 +20,12 @@ adds the missing office pieces: glass partitions, workstation pods with blue div
 - Existing 9 props and 16 pose strips are redrawn (outlined chibi workers, shaded furniture). Keys, sizes, anchors and pose
   order are unchanged, so current scene code keeps working.
 
+### Fixed
+- `OfficeScene.tsx`: camera is centred on the frame viewport. Backend commands are laid out around (640,360) but the Phaser
+  canvas is 720x420, so the room rendered clipped in the bottom-right corner (both projections).
+- Room asset ids without their own art (`furniture.plants/window/cabinet/reception-desk`, `decoration.rug-modern/bookshelf-slim`)
+  now reuse iso props through spec `aliases`. Wall clock, award plaque, poster, signage and lighting still have no iso art.
+
 ### Not yet wired (follow-up)
 - `OfficeScene.tsx` still draws the floor as a flat diamond and uses pose strips for movement; switching it to tiles +
   walk sheets and placing the new props in room layouts is a separate change.

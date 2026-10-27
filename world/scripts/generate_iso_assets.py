@@ -116,6 +116,8 @@ def build_outputs(spec: dict[str, Any] | None = None) -> dict[str, bytes]:
             "heightPx": prop["height"],
         }
         iso_block["assetIds"][prop["id"]] = prop["key"]
+        for alias in prop.get("aliases", []):  # other backend ids that should reuse this art
+            iso_block["assetIds"][alias] = prop["key"]
     for cid, look in sorted(spec["looks"].items()):
         rel = f"iso/npc/{cid}.png"
         out[os.path.join(FRONTEND_ASSETS, rel)] = _png_bytes(iso_art.draw_character_sheet(spec, look))
