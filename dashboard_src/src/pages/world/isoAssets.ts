@@ -32,6 +32,22 @@ export interface IsoManifest {
   npc: Record<string, string>
   /** backend asset id (e.g. "furniture.desk") -> key in `props` */
   assetIds: Record<string, string>
+  /** W-ISO-3 (optional: older manifests lack it) — 4-direction walk strips per character. */
+  walk?: IsoWalkConfig
+  /** W-ISO-3 (optional) — floor tile key -> image path (64x32 diamond). */
+  tiles?: Record<string, string>
+}
+
+export type IsoDirection = 'se' | 'sw' | 'nw' | 'ne'
+
+export interface IsoWalkConfig {
+  frameWidth: number
+  frameHeight: number
+  directions: IsoDirection[]
+  frames: number
+  fps: number
+  /** character id -> sheet path (rows = directions, cols = frames) */
+  sheets: Record<string, string>
 }
 
 export interface ResolvedIsoProp {
@@ -73,4 +89,31 @@ export function isoPropDepthOffset(manifest: IsoManifest, entry: IsoPropEntry): 
 /** Which character ids have an iso pose sheet. */
 export function hasIsoCharacter(manifest: IsoManifest | null | undefined, characterId: string): boolean {
   return !!manifest?.npc?.[characterId]
+}
+
+/** Screen-space movement (dx right, dy down) -> iso facing. Zero movement keeps `fallback`. */
+export function isoDirectionFromDelta(dx: number, dy: number, fallback: IsoDirection = 'se'): IsoDirection {
+  if (dx === 0 && dy === 0) return fallback
+  if (dy >= 0) return dx >= 0 ? 'se' : 'sw'
+  return dx >= 0 ? 'ne' : 'nw'
+}
+
+/** Walk-strip frame position (column, row) for a direction and elapsed time; null when the character has no walk sheet. */
+export function isoWalkFrame(
+  manifest: IsoManifest | null | undefined,
+  characterId: string,
+  direction: IsoDirection,
+  elapsedMs: number,
+): { path: string; col: number; row: number } | null {
+  const walk = manifest?.walk
+  const path = walk?.sheets?.[characterId]
+  if (!walk || !path) return null
+  const row = Math.max(0, walk.directions.indexOf(direction))
+  const col = Math.floor((Math.max(0, elapsedMs) / 1000) * walk.fps) % walk.frames
+  return { path, col, row }
+}
+
+/** Floor tile image path by key (e.g. 'floor_light'), or null when the manifest predates W-ISO-3. */
+export function isoTilePath(manifest: IsoManifest | null | undefined, key: string): string | null {
+  return manifest?.tiles?.[key] ?? null
 }

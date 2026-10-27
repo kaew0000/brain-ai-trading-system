@@ -3109,5 +3109,185 @@
       "unity",
       "react"
     ]
+  },
+  {
+    "id": "furniture.workstation",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "workstation",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.workstation-pod",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "workstation-pod",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.glass-wall-x",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "glass-wall-x",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.glass-wall-y",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "glass-wall-y",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.market-board",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "market-board",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.bookshelf",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "bookshelf",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.water-cooler",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "water-cooler",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.plant-large",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "plant-large",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
+  },
+  {
+    "id": "furniture.rug",
+    "category": "furniture",
+    "source": "custom",
+    "tags": [
+      "furniture",
+      "rug",
+      "isometric"
+    ],
+    "variants": [],
+    "dependencies": [],
+    "version": "1.0.0",
+    "compatibleWith": [
+      "pixijs",
+      "phaser",
+      "godot",
+      "unity",
+      "react"
+    ]
   }
 ]

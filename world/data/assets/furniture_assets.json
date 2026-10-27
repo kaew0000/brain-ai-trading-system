@@ -231,5 +231,104 @@
     },
     "interactable": false,
     "defaultInteractions": []
+  },
+  {
+    "id": "furniture.workstation",
+    "name": "Workstation (desk + monitors)",
+    "manifestId": "furniture.workstation",
+    "footprint": {
+      "width": 2.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.workstation-pod",
+    "name": "Workstation pod (4 seats)",
+    "manifestId": "furniture.workstation-pod",
+    "footprint": {
+      "width": 3.0,
+      "height": 2.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.glass-wall-x",
+    "name": "Glass wall (x axis)",
+    "manifestId": "furniture.glass-wall-x",
+    "footprint": {
+      "width": 3.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.glass-wall-y",
+    "name": "Glass wall (y axis)",
+    "manifestId": "furniture.glass-wall-y",
+    "footprint": {
+      "width": 1.0,
+      "height": 3.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.market-board",
+    "name": "Market board",
+    "manifestId": "furniture.market-board",
+    "footprint": {
+      "width": 3.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.bookshelf",
+    "name": "Bookshelf",
+    "manifestId": "furniture.bookshelf",
+    "footprint": {
+      "width": 2.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.water-cooler",
+    "name": "Water cooler",
+    "manifestId": "furniture.water-cooler",
+    "footprint": {
+      "width": 1.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.plant-large",
+    "name": "Plant (large)",
+    "manifestId": "furniture.plant-large",
+    "footprint": {
+      "width": 1.0,
+      "height": 1.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
+  },
+  {
+    "id": "furniture.rug",
+    "name": "Rug",
+    "manifestId": "furniture.rug",
+    "footprint": {
+      "width": 3.0,
+      "height": 2.0
+    },
+    "interactable": false,
+    "defaultInteractions": []
   }
 ]

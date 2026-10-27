@@ -4,10 +4,13 @@ import { describe, expect, it } from 'vitest'
 import worldManifest from '../../../../public/assets/world/manifest.json'
 import {
   hasIsoCharacter,
+  isoDirectionFromDelta,
   isoPoseFrame,
   isoPoseName,
   isoPropDepthOffset,
   isoPropOrigin,
+  isoTilePath,
+  isoWalkFrame,
   resolveIsoProp,
   type IsoManifest,
 } from '../isoAssets'
@@ -81,5 +84,36 @@ describe('isoAssets helpers', () => {
     expect(hasIsoCharacter(iso, 'primus')).toBe(true)
     expect(hasIsoCharacter(iso, 'nobody')).toBe(false)
     expect(hasIsoCharacter(null, 'primus')).toBe(false)
+  })
+})
+
+describe('isoAssets W-ISO-3 (walk sheets + floor tiles)', () => {
+  it('maps screen movement to the four iso facings', () => {
+    expect(isoDirectionFromDelta(3, 2)).toBe('se')
+    expect(isoDirectionFromDelta(-3, 2)).toBe('sw')
+    expect(isoDirectionFromDelta(-3, -2)).toBe('nw')
+    expect(isoDirectionFromDelta(3, -2)).toBe('ne')
+    expect(isoDirectionFromDelta(0, 0, 'nw')).toBe('nw')
+  })
+
+  it('cycles walk frames from elapsed time and picks the direction row', () => {
+    const id = Object.keys(iso.walk!.sheets)[0]
+    const a = isoWalkFrame(iso, id, 'nw', 0)!
+    expect(a.row).toBe(iso.walk!.directions.indexOf('nw'))
+    expect(a.col).toBe(0)
+    const b = isoWalkFrame(iso, id, 'nw', (1000 / iso.walk!.fps) * 1.1)!
+    expect(b.col).toBe(1)
+    const wrap = isoWalkFrame(iso, id, 'se', (1000 / iso.walk!.fps) * iso.walk!.frames)!
+    expect(wrap.col).toBe(0)
+  })
+
+  it('returns null for unknown characters or manifests without walk data', () => {
+    expect(isoWalkFrame(iso, 'nobody', 'se', 0)).toBeNull()
+    expect(isoWalkFrame(null, 'primus', 'se', 0)).toBeNull()
+    expect(isoTilePath({ ...iso, tiles: undefined }, 'floor_light')).toBeNull()
+  })
+
+  it('exposes the generated floor tiles', () => {
+    expect(isoTilePath(iso, 'floor_light')).toMatch(/floor_light\.png$/)
   })
 })
