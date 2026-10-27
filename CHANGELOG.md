@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## [Unreleased] — Training lane: wall-clock timeout + exploratory entries (V16 §88)
+
+The always-on paper training lane held one restored position (max_open=1) for days across restarts and, when flat, only entered at the live
+confidence threshold (75), so it rarely traded. Branch: `feat/training-lane-wallclock-timeout-explore` (stacked on §86/§87).
+
+### Added
+- `PaperExecutionEngine.close_expired()`, `PaperPosition.age_seconds` / `close_timeout()`; the runner closes positions older than
+  `BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS` of real time (`BACKGROUND_TRAINING_WALLCLOCK_TIMEOUT_ENABLED`, default true).
+- `TrainingLaneRunner._get_entry_signal()`: WAIT with confidence >= `BACKGROUND_TRAINING_EXPLORE_MIN_CONFIDENCE` (default 55) opens a paper
+  trade (`BACKGROUND_TRAINING_EXPLORE_ENABLED`, default true). BLOCKED/SKIP never trade. Training lane only; live untouched.
+- `tests/test_training_lane_wallclock_explore.py` (8 tests).
+
+### Note
+- Exploratory trades have confidence below the live threshold and land in the TRAINING lane's ML dataset. Set the flag to false to go back
+  to "same thresholds as live" (supersedes that earlier decision only for this lane, at the owner's request).
+
 ## [Unreleased] — Agent context carries real balance (V16 §87)
 
 Found in a paper-mode boot log: balance 4614.02 USDT, yet RiskManagerAgent narrated `Insufficient balance: 0.00 USDT`. `main.py` passed a `0.0`

@@ -7994,3 +7994,15 @@ the account would not have cleared it (the streak is recomputed from the newest 
 
 **Known follow-up.** `main.py`'s printed daily report uses all-lane `get_daily_stats()` (shows training trades as "Today trades"); cosmetic,
 raised in ROADMAP.
+
+## 88. Training Lane: Wall-clock Timeout & Exploratory Entries (2026-10-27)
+
+**Symptom.** Boot logs showed the same restored paper position (`SHORT @80817.80`) on every restart and no new training trades.
+**Cause.** (a) `PaperPosition` timeout counts ticks (`_bars_open`), which only advance while the bot runs, so with frequent restarts a position
+could stay open for days and the lane (max_open=1) could not enter again. (b) Entry used the live `CONFIDENCE_TRADE_THRESHOLD` (75); at ~60% the
+strategy returned WAIT, so no signal.
+**Change.** (a) `close_expired()` closes positions past the configured real-time age (reason `TIMEOUT`). (b) `_get_entry_signal()` turns a WAIT
+with confidence >= `BACKGROUND_TRAINING_EXPLORE_MIN_CONFIDENCE` into a paper entry using the ConfidenceEngine's own entry/SL/TP. Hard blocks
+(`BLOCKED`) and `SKIP` never trade. Both are flags (default on) and touch only `training_lane/`, `paper/`, settings.
+**Boundary.** Never reads/writes the primary lane, journal LIVE rows, risk engine or execution. Promotion of any model trained on this data
+still goes through the human-approved gate.
