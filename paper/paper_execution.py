@@ -234,6 +234,24 @@ class PaperExecutionEngine:
 
         return closed_this_tick
 
+    def close_expired(self, mark_price: float, max_age_seconds: float) -> list[ClosedTrade]:
+        """Close open positions older than max_age_seconds of real time (V16 §88)."""
+        closed: list[ClosedTrade] = []
+        with self._lock:
+            still_open: list[PaperPosition] = []
+            for pos in self._open:
+                if pos.age_seconds >= max_age_seconds:
+                    ct = pos.close_timeout(float(mark_price))
+                    self.account.release_margin(pos.notional)
+                    self.account.realise_pnl(ct.pnl)
+                    self._closed.append(ct)
+                    closed.append(ct)
+                else:
+                    still_open.append(pos)
+            self._open = still_open
+            self.account.update_unrealised(sum(p.unrealised_pnl for p in still_open))
+        return closed
+
     def close_all(self, mark_price: float) -> list[ClosedTrade]:
         """Force-close all open positions (e.g. end of session)."""
         closed: list[ClosedTrade] = []

@@ -700,6 +700,24 @@ class Settings(BaseSettings):
     BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS: float = Field(
         default=24.0, alias="BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS"
     )
+    # V16 §88 (a): the bar-count timeout above only advances while the bot is
+    # running, so a position restored across frequent restarts could stay open
+    # for days and block this lane (max_open=1). When true, positions older than
+    # BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS of REAL time are also closed.
+    BACKGROUND_TRAINING_WALLCLOCK_TIMEOUT_ENABLED: bool = Field(
+        default=True, alias="BACKGROUND_TRAINING_WALLCLOCK_TIMEOUT_ENABLED"
+    )
+    # V16 §88 (b): TRAINING LANE ONLY. When the shared strategy says WAIT (below
+    # CONFIDENCE_TRADE_THRESHOLD) but confidence >= this floor, the lane still
+    # opens a paper trade so it gathers more labelled data. BLOCKED / SKIP and
+    # anything below the floor never trade. Live/primary lanes are unaffected.
+    # Set false to restore "same thresholds as live".
+    BACKGROUND_TRAINING_EXPLORE_ENABLED: bool = Field(
+        default=True, alias="BACKGROUND_TRAINING_EXPLORE_ENABLED"
+    )
+    BACKGROUND_TRAINING_EXPLORE_MIN_CONFIDENCE: int = Field(
+        default=55, alias="BACKGROUND_TRAINING_EXPLORE_MIN_CONFIDENCE"
+    )
 
     # Row-count cap for order_timeline_history (operational history
     # only — the journal, not this table, is the durable trade record).

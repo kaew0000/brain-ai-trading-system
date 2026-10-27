@@ -462,6 +462,11 @@ class TrainingLaneRunner:
             return
 
         closed_this_cycle = list(self._engine.tick(float(mark)))
+        if settings.BACKGROUND_TRAINING_WALLCLOCK_TIMEOUT_ENABLED:
+            closed_this_cycle += self._engine.close_expired(
+                float(mark),
+                settings.BACKGROUND_TRAINING_POSITION_TIMEOUT_HOURS * 3600.0,
+            )
         for closed_trade in closed_this_cycle:
             self._capture_closed_trade(closed_trade)
         closed_note = (
@@ -485,7 +490,7 @@ class TrainingLaneRunner:
             # else in this method — see _select_symbol()'s docstring for
             # why mid-position symbol switches aren't safe.
             self.symbol = self._select_symbol()
-            decision = _to_paper_decision(self._signal_provider(self.symbol))
+            decision = _to_paper_decision(self._get_entry_signal(self.symbol))
             if decision is not None:
                 self._engine.execute(decision, symbol=self.symbol)
                 self._last_cycle_summary = (
@@ -505,6 +510,45 @@ class TrainingLaneRunner:
         # (default 20s) to not bother gating on "did anything actually
         # change this cycle".
         self._save_state()
+
+    # ── Entry signal (V16 §88 exploratory entries) ───────────────────────────
+
+    def _get_entry_signal(self, symbol: str):
+        """Same signal the strategy produces, plus (training lane ONLY, flag
+        BACKGROUND_TRAINING_EXPLORE_ENABLED) an exploratory entry when the
+        ConfidenceEngine says WAIT with confidence >= the configured floor.
+        BLOCKED/SKIP never trade. Falls back to the plain provider call when
+        the strategy has no get_signal_with_context()."""
+        getter = getattr(self._signal_provider, "get_signal_with_context", None)
+        if not settings.BACKGROUND_TRAINING_EXPLORE_ENABLED or getter is None:
+            return self._signal_provider(symbol)
+        swc = getter(symbol)
+        if swc is None:
+            return None
+        if swc.signal is not None:
+            return swc.signal
+        cr = swc.confidence_result
+        direction = getattr(cr, "direction", "")
+        if (
+            getattr(cr, "action", None) != "WAIT"
+            or getattr(cr, "blocked", False)
+            or direction not in ("LONG", "SHORT")
+            or float(getattr(cr, "confidence", 0)) < settings.BACKGROUND_TRAINING_EXPLORE_MIN_CONFIDENCE
+            or not (cr.entry_price and cr.stop_loss and cr.take_profit)
+        ):
+            return None
+        from execution.execution_orchestrator import ExecutionSignal
+
+        logger.info(
+            f"TrainingLaneRunner: exploratory entry {direction} {symbol} "
+            f"conf={cr.confidence} (< live threshold {settings.CONFIDENCE_TRADE_THRESHOLD})"
+        )
+        return ExecutionSignal(
+            direction=1 if direction == "LONG" else -1,
+            entry_price=float(cr.entry_price),
+            stop_loss=float(cr.stop_loss),
+            take_profit=float(cr.take_profit),
+        )
 
     # ── ML pipeline feed ─────────────────────────────────────────────────────
 

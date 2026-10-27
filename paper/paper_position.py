@@ -167,6 +167,19 @@ class PaperPosition:
             return self._close(self.mark_price,  "TIMEOUT")
         return None
 
+    @property
+    def age_seconds(self) -> float:
+        """Real wall-clock age (V16 §88); unlike _bars_open it keeps counting
+        across restarts because opened_at is persisted."""
+        opened = self.opened_at
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - opened).total_seconds()
+
+    def close_timeout(self, exit_price: float) -> ClosedTrade:
+        """Close at exit_price with reason TIMEOUT (wall-clock expiry)."""
+        return self._close(float(exit_price), "TIMEOUT")
+
     def close_manual(self, exit_price: float) -> ClosedTrade:
         """Force-close at given price."""
         return self._close(float(exit_price), "MANUAL")
