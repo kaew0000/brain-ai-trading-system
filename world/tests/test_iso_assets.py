@@ -75,3 +75,40 @@ def test_iso_assets_do_not_change_orthographic_room_placements():
     rooms = open(os.path.join(gen.DATA_DIR, "room_assets.json"), encoding="utf-8").read()
     for new_id in ("furniture.partition-low", "furniture.partition-full", "furniture.sofa"):
         assert new_id not in rooms
+
+
+# --- W-ISO-3: DeskRPG-style art pass (walk sheets, floor tiles, extra props) ---------------
+
+
+def test_walk_sheets_match_manifest_layout():
+    walk = _load(gen.FRONTEND_MANIFEST)["iso"]["walk"]
+    assert walk["directions"] == ["se", "sw", "nw", "ne"]
+    for cid, rel in walk["sheets"].items():
+        path = os.path.join(gen.FRONTEND_ASSETS, rel.removeprefix("/assets/world/"))
+        assert _png_size(path) == (walk["frameWidth"] * walk["frames"], walk["frameHeight"] * len(walk["directions"]))
+    assert set(walk["sheets"]) == set(_load(gen.FRONTEND_MANIFEST)["iso"]["npc"])
+
+
+def test_floor_tiles_are_one_iso_tile_each():
+    iso = _load(gen.FRONTEND_MANIFEST)["iso"]
+    assert {"floor_light", "floor_dark", "floor_wood", "floor_carpet"} <= set(iso["tiles"])
+    for rel in iso["tiles"].values():
+        path = os.path.join(gen.FRONTEND_ASSETS, rel.removeprefix("/assets/world/"))
+        assert _png_size(path) == (iso["tile"]["width"], iso["tile"]["height"])
+
+
+def test_new_office_props_are_registered_and_catalogued():
+    iso = _load(gen.FRONTEND_MANIFEST)["iso"]
+    furniture_ids = {f["id"] for f in _load(os.path.join(gen.DATA_DIR, "furniture_assets.json"))}
+    for key in ("workstation", "workstation_pod", "glass_wall_x", "glass_wall_y", "whiteboard",
+                "market_board", "bookshelf", "coffee_machine", "water_cooler", "printer", "plant_large", "rug"):
+        assert key in iso["props"], key
+        assert f"furniture.{key.replace('_', '-')}" in furniture_ids
+        assert f"furniture.{key.replace('_', '-')}" in iso["assetIds"]
+
+
+def test_existing_prop_keys_and_pose_order_are_unchanged():
+    iso = _load(gen.FRONTEND_MANIFEST)["iso"]
+    for key in ("desk", "chair", "monitor", "meeting_table", "server_rack", "plant", "partition_low", "partition_full", "sofa"):
+        assert key in iso["props"]
+    assert iso["character"]["poses"][:4] == ["stand", "walk_a", "walk_b", "working_seated"]
