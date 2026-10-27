@@ -1057,7 +1057,7 @@ def run_trading_cycle(sys: dict) -> None:
                             pos_info_live["_ceo_decision"] = (
                                 decision_live.to_dict() if hasattr(decision_live, "to_dict") else {}
                             )
-                            pos_info_live["balance"] = 0.0
+                            pos_info_live["balance"] = _agent_context_balance(dp)
                             pos_info_live["open_position"] = _normalize_open_position(pos, jrn, tm)
                             ceo_live = agents_live.get("ceo")
                             if ceo_live is not None:
@@ -1194,8 +1194,11 @@ def run_trading_cycle(sys: dict) -> None:
             # Build augmented context with position + CEO decision
             pos_info = market_ctx.copy()
             pos_info["_ceo_decision"] = decision.to_dict() if hasattr(decision, "to_dict") else {}
-            # balance not yet fetched — provide a sentinel; agents should not trade
-            pos_info["balance"] = 0.0
+            # V16 §87: real balance for agent narratives. The old 0.0 sentinel
+            # made RiskManagerAgent report "Insufficient balance: 0.00" (via
+            # RiskEngine.report -> balance gate) on a funded account. The
+            # authoritative gate below still re-fetches its own balance.
+            pos_info["balance"] = _agent_context_balance(dp)
             # Get open position for Trader agent
             try:
                 raw_pos = dp.get_position_info()
@@ -1529,6 +1532,16 @@ def run_trading_cycle(sys: dict) -> None:
 
 
 # ── Trade monitor ─────────────────────────────────────────────────────────────
+
+def _agent_context_balance(dp) -> float:
+    """Balance for the agent-layer context (status/narrative only, never gates
+    an order). Falls back to the legacy 0.0 sentinel if the fetch fails."""
+    try:
+        return float(dp.get_account_balance())
+    except Exception as exc:
+        logger.debug(f"agent-context balance fetch failed, using 0.0: {exc}")
+        return 0.0
+
 
 def monitor_open_trades(sys: dict) -> None:
     """
