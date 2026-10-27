@@ -7968,3 +7968,29 @@ the World page with no source change).
 `BRAIN_DASHBOARD_AUTOREBUILD=0` disables the stale check. No runtime, trading, or API code changed.
 
 **Boundary.** Launcher-only; never fatal; never touches `.env`, the journal, or execution/risk code.
+
+## 86. Live Balance Gate & Stale-Streak Epoch (2026-10-27)
+
+**Symptom (boot log 2026-10-27).** LIVE account balance `0.00 USDT`, yet every cycle logged `CIRCUIT BREAKER TRIPPED: Consecutive losses: 3/3`.
+The three losses were LIVE-lane rows left in `brain_bot_v13.db` by an earlier, abruptly terminated session. Training-lane (PAPER) trades were
+not the cause: `get_consecutive_losses(execution_lane="LIVE")` already isolates them (BUG-LIVE-RISK, 2026-08-31).
+
+**Root cause.** `RiskEngine._evaluate()` never looked at the balance it was given. An empty account was reported as a stale streak, and funding
+the account would not have cleared it (the streak is recomputed from the newest 20 closed LIVE rows every call).
+
+**Change (additive, `risk/risk_engine.py`, `journal/journal_v2.py`, `config/settings.py`).**
+- Balance gate: `balance <= RISK_MIN_BALANCE_USDT` (default `0.0`) returns `Insufficient balance: ...` before the daily-loss and streak checks.
+  Never latched into `_disabled_today`, so a deposit resumes trading on the next call. Strictly stricter than before.
+- Streak epoch: the first unfunded observation is persisted (`risk_engine_state.live_unfunded_since`). When the account is funded again and
+  had been unfunded for `RISK_REFUND_MIN_UNFUNDED_SECONDS` (default 600, so a one-cycle `Balance: 0.00` API glitch cannot wipe a real streak),
+  `live_streak_epoch` is set to now and LIVE trades older than it stop counting. Rows are never deleted or edited. A latch set by
+  `consecutive_losses` is cleared; `daily_loss` latches, `manual_hold` and an armed override are untouched.
+- Survives an abrupt shutdown: both keys live in the journal DB, not in memory.
+- `peek_can_trade()` / `report()` / `get_risk_pct()` use the same effective epoch but persist nothing.
+- `TradeJournalV2.get_consecutive_losses(..., since=None)` and `get/set/clear_risk_state(key)` added; defaults keep old behaviour.
+
+**Not changed.** A funded account with a genuine 3-loss LIVE streak is still blocked. `RISK_STREAK_RESET_ON_REFUND=false` restores the old
+"streak persists across a refund" behaviour. Training lane, execution and sizing code untouched.
+
+**Known follow-up.** `main.py`'s printed daily report uses all-lane `get_daily_stats()` (shows training trades as "Today trades"); cosmetic,
+raised in ROADMAP.

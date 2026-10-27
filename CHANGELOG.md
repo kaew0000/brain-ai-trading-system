@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## [Unreleased] — Live balance gate & stale-streak epoch (V16 §86)
+
+An empty LIVE account was reported as `Consecutive losses: 3/3` (stale LIVE rows from an earlier crashed session) and would have stayed
+blocked after funding. Branch: `fix/risk-live-balance-gate-stale-streak`.
+
+### Added
+- `RiskEngine`: `Insufficient balance` gate (`RISK_MIN_BALANCE_USDT`, default 0.0), evaluated first and never latched.
+- Persisted streak epoch started by an unfunded -> funded transition (`RISK_STREAK_RESET_ON_REFUND`, default true;
+  `RISK_REFUND_MIN_UNFUNDED_SECONDS`, default 600, guards against balance-API glitches). Old rows are kept.
+- `TradeJournalV2.get_consecutive_losses(since=)`, `get_risk_state` / `set_risk_state` / `clear_risk_state`.
+- `tests/test_risk_balance_gate_and_streak_epoch.py` (13 tests).
+
+### Unchanged
+- A funded account with a real LIVE streak of `MAX_CONSECUTIVE_LOSSES` is still blocked. Training lane untouched.
+
 ## [Unreleased] — DeskRPG-style isometric art pass (V16 §85)
 
 Redraws the Office World isometric art in a brighter "DeskRPG-style" look (UX reference only, no third-party art or code) and
