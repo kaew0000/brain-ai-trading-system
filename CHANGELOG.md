@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## [Unreleased] — Agent context carries real balance (V16 §87)
+
+Found in a paper-mode boot log: balance 4614.02 USDT, yet RiskManagerAgent narrated `Insufficient balance: 0.00 USDT`. `main.py` passed a `0.0`
+placeholder balance to the agent layer (cycle and open-position monitor paths); §86's balance gate made that visible. Branch:
+`fix/agent-context-real-balance` (stacked on §86).
+
+### Fixed
+- `main.py`: `_agent_context_balance(dp)` replaces both `0.0` placeholders. Status/narrative only; the real order gate still fetches its own balance.
+- `tests/test_agent_context_balance.py` (3 tests).
+
 ## [Unreleased] — Live balance gate & stale-streak epoch (V16 §86)
 
 An empty LIVE account was reported as `Consecutive losses: 3/3` (stale LIVE rows from an earlier crashed session) and would have stayed
