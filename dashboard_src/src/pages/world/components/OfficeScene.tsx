@@ -101,6 +101,10 @@ class OfficeCanvasScene extends Phaser.Scene {
     this.layer?.removeAll(true)
     if (!this.layer) return
 
+    // The backend lays commands out around the viewport centre (e.g. 640,360 for a 1280x720 viewport) while the
+    // Phaser canvas is smaller, so centre the camera on it; otherwise the room sits in the bottom-right corner.
+    this.cameras.main.centerOn(frame.viewport.width / 2, frame.viewport.height / 2)
+
     const iso = isIsometric(frame)
     const isoManifest = iso ? getManifest()?.iso ?? null : null
     const ratio = frame.viewport.isoTileRatio ?? 0.5

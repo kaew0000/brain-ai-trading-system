@@ -538,6 +538,7 @@
     },
     "assetIds": {
       "furniture.desk": "desk",
+      "furniture.reception-desk": "desk",
       "furniture.chair": "chair",
       "furniture.monitor": "monitor",
       "furniture.meeting-table": "meeting_table",
@@ -549,15 +550,20 @@
       "furniture.workstation": "workstation",
       "furniture.workstation-pod": "workstation_pod",
       "furniture.glass-wall-x": "glass_wall_x",
+      "furniture.window": "glass_wall_x",
       "furniture.glass-wall-y": "glass_wall_y",
       "furniture.whiteboard": "whiteboard",
       "furniture.market-board": "market_board",
       "furniture.bookshelf": "bookshelf",
+      "furniture.cabinet": "bookshelf",
+      "decoration.bookshelf-slim": "bookshelf",
       "furniture.coffee-machine": "coffee_machine",
       "furniture.water-cooler": "water_cooler",
       "furniture.printer": "printer",
       "furniture.plant-large": "plant_large",
-      "furniture.rug": "rug"
+      "furniture.plants": "plant_large",
+      "furniture.rug": "rug",
+      "decoration.rug-modern": "rug"
     },
     "walk": {
       "frameWidth": 64,

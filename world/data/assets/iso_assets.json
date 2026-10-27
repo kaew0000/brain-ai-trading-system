@@ -56,7 +56,10 @@
       ],
       "height": 22,
       "color": "#8b6b4a",
-      "accent": "#5b4630"
+      "accent": "#5b4630",
+      "aliases": [
+        "furniture.reception-desk"
+      ]
     },
     {
       "key": "chair",
@@ -194,7 +197,10 @@
       "height": 64,
       "color": "#334155",
       "accent": "#9fd8ee",
-      "newFurniture": "Glass wall (x axis)"
+      "newFurniture": "Glass wall (x axis)",
+      "aliases": [
+        "furniture.window"
+      ]
     },
     {
       "key": "glass_wall_y",
@@ -246,7 +252,11 @@
       "height": 54,
       "color": "#7c5a3a",
       "accent": "#5b4630",
-      "newFurniture": "Bookshelf"
+      "newFurniture": "Bookshelf",
+      "aliases": [
+        "furniture.cabinet",
+        "decoration.bookshelf-slim"
+      ]
     },
     {
       "key": "coffee_machine",
@@ -298,7 +308,10 @@
       "height": 70,
       "color": "#9a3412",
       "accent": "#15803d",
-      "newFurniture": "Plant (large)"
+      "newFurniture": "Plant (large)",
+      "aliases": [
+        "furniture.plants"
+      ]
     },
     {
       "key": "rug",
@@ -311,7 +324,10 @@
       "height": 2,
       "color": "#64748b",
       "accent": "#94a3b8",
-      "newFurniture": "Rug"
+      "newFurniture": "Rug",
+      "aliases": [
+        "decoration.rug-modern"
+      ]
     }
   ],
   "looks": {

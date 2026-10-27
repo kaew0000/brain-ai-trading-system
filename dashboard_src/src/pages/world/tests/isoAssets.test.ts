@@ -116,4 +116,10 @@ describe('isoAssets W-ISO-3 (walk sheets + floor tiles)', () => {
   it('exposes the generated floor tiles', () => {
     expect(isoTilePath(iso, 'floor_light')).toMatch(/floor_light\.png$/)
   })
+
+  it('resolves backend room asset ids that reuse existing iso art (aliases)', () => {
+    for (const id of ['furniture.plants', 'furniture.window', 'furniture.cabinet', 'decoration.rug-modern', 'furniture.reception-desk']) {
+      expect(resolveIsoProp(iso, id), id).not.toBeNull()
+    }
+  })
 })
