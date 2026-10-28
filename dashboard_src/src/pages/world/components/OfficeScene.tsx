@@ -18,9 +18,9 @@ import type { RenderFrame } from '../types'
 import { assetDisplayName, BEHAVIOR_COLORS, characterTweenOffset, frameSignature, isIsometric, isoDepth, isoDiamondPoints } from '../sceneMapping'
 import { WORLD_CONFIG } from '../../../game/config/world.config'
 import { CHARACTER_TO_ROLE, DISTRICT_TO_BUILDING, resolvePropAssetId } from '../assetMapping'
-import { getBuilding, getDecoration, getIsoNPC, getIsoProp, getManifest, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
+import { getBuilding, getDecoration, getIsoNPC, getIsoProp, getIsoTile, getIsoWalk, getManifest, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
 import type { IsoManifest } from '../isoAssets'
-import { hasIsoCharacter, isoPoseFrame, isoPoseName, isoPropDepthOffset, isoPropOrigin, resolveIsoProp } from '../isoAssets'
+import { hasIsoCharacter, isoDirectionFromDelta, isoFloorTileKey, isoFloorTileLayout, isoPoseFrame, isoPoseName, isoPropDepthOffset, isoPropOrigin, isoWalkFrame, resolveIsoProp } from '../isoAssets'
 
 const FURNITURE_SIZE = 32 // px — matches the footprint the old 28x28 rectangle occupied
 const CHARACTER_DISPLAY_HEIGHT = 40 // px — matches the visual weight of the old 14px-radius circle
@@ -65,13 +65,55 @@ class OfficeCanvasScene extends Phaser.Scene {
   }
 
   /** Slides display objects from (their position + dx, + dy) back to where they were created. */
-  private glide(objects: (Phaser.GameObjects.GameObject & { x: number; y: number })[], dx: number, dy: number): void {
-    for (const obj of objects) {
+  private glide(
+    objects: (Phaser.GameObjects.GameObject & { x: number; y: number })[],
+    dx: number,
+    dy: number,
+    onComplete?: () => void,
+  ): void {
+    objects.forEach((obj, index) => {
       const toX = obj.x
       const toY = obj.y
       obj.x = toX + dx
       obj.y = toY + dy
-      this.tweens.add({ targets: obj, x: toX, y: toY, duration: WORLD_CONFIG.characterTweenMs, ease: 'Linear' })
+      // All tweens share one duration, so the last one finishing means the whole glide is done.
+      const done = index === objects.length - 1 ? onComplete : undefined
+      this.tweens.add({ targets: obj, x: toX, y: toY, duration: WORLD_CONFIG.characterTweenMs, ease: 'Linear', onComplete: done })
+    })
+  }
+
+  /**
+   * Starts the 4-direction walk cycle for a sprite that is gliding by (-dx,-dy) -> (0,0). Returns a callback that
+   * puts the sprite back on its pose frame, or null when this character has no walk sheet (caller just glides).
+   */
+  private startWalk(
+    sprite: Phaser.GameObjects.Sprite,
+    characterId: string,
+    manifest: IsoManifest,
+    dx: number,
+    dy: number,
+    poseTexture: string,
+    poseFrame: number,
+  ): (() => void) | null {
+    const walkKey = getIsoWalk(this, characterId)
+    const direction = isoDirectionFromDelta(-dx, -dy)
+    const frame = isoWalkFrame(manifest, characterId, direction, 0)
+    if (!walkKey || !frame || !manifest.walk) return null
+    const animKey = `iso_walk__${characterId}__${direction}`
+    if (!this.anims.exists(animKey)) {
+      const start = frame.row * manifest.walk.frames
+      this.anims.create({
+        key: animKey,
+        frames: this.anims.generateFrameNumbers(walkKey, { start, end: start + manifest.walk.frames - 1 }),
+        frameRate: manifest.walk.fps,
+        repeat: -1,
+      })
+    }
+    sprite.play(animKey)
+    return () => {
+      if (!sprite.active) return // redraw already destroyed it
+      sprite.stop()
+      sprite.setTexture(poseTexture, poseFrame)
     }
   }
 
@@ -113,17 +155,28 @@ class OfficeCanvasScene extends Phaser.Scene {
 
     for (const cmd of frame.commands) {
       if (iso && cmd.layer === 'floor') {
+        const floorDepth = isoDepth(cmd.layer, cmd.screenY)
+        const tileKey = isoManifest ? getIsoTile(this, isoFloorTileKey(frame.roomId)) : null
+        if (tileKey) {
+          // W-ISO-3: tile the room diamond with the floor art instead of one flat fill.
+          const layout = isoFloorTileLayout(cmd.screenX, cmd.screenY, ISO_FLOOR_HALF_WIDTH, ratio)
+          for (const t of layout.tiles) {
+            const tile = this.add.image(t.x, t.y, tileKey).setDisplaySize(layout.tileWidth, layout.tileHeight)
+            tile.setDepth(floorDepth)
+            this.layer.add(tile)
+          }
+        }
         const g = this.add.graphics()
         const pts = isoDiamondPoints(cmd.screenX, cmd.screenY, ISO_FLOOR_HALF_WIDTH, ratio)
-        g.fillStyle(ISO_FLOOR_FILL, 1)
+        if (!tileKey) g.fillStyle(ISO_FLOOR_FILL, 1) // tiles missing (older manifest): keep the flat floor
         g.lineStyle(2, ISO_FLOOR_EDGE, 1)
         g.beginPath()
         g.moveTo(pts[0][0], pts[0][1])
         for (const [px, py] of pts.slice(1)) g.lineTo(px, py)
         g.closePath()
-        g.fillPath()
+        if (!tileKey) g.fillPath()
         g.strokePath()
-        g.setDepth(isoDepth(cmd.layer, cmd.screenY))
+        g.setDepth(floorDepth)
         this.layer.add(g)
       } else if (cmd.layer === 'floor') {
         const buildingKey = DISTRICT_TO_BUILDING[frame.roomId]
@@ -199,7 +252,13 @@ class OfficeCanvasScene extends Phaser.Scene {
           { x: cmd.screenX, y: cmd.screenY },
           WORLD_CONFIG.characterSnapDistancePx,
         )
-        if (offset) this.glide([ring, sprite, label], offset.dx, offset.dy)
+        if (offset) {
+          const stopWalk =
+            isoSheet && isoManifest && sprite instanceof Phaser.GameObjects.Sprite
+              ? this.startWalk(sprite, cmd.entityId, isoManifest, offset.dx, offset.dy, isoSheet, frameIndex)
+              : null
+          this.glide([ring, sprite, label], offset.dx, offset.dy, stopWalk ?? undefined)
+        }
       }
     }
     if (iso) this.layer.sort('depth')

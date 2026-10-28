@@ -5,6 +5,8 @@ import worldManifest from '../../../../public/assets/world/manifest.json'
 import {
   hasIsoCharacter,
   isoDirectionFromDelta,
+  isoFloorTileKey,
+  isoFloorTileLayout,
   isoPoseFrame,
   isoPoseName,
   isoPropDepthOffset,
@@ -123,3 +125,38 @@ describe('isoAssets W-ISO-3 (walk sheets + floor tiles)', () => {
     }
   })
 })
+
+describe('isoAssets W-ISO-3 floor tiles', () => {
+  it('fills the 640px floor diamond with a 10x10 grid of 64x32 tiles', () => {
+    const layout = isoFloorTileLayout(640, 360, 320, 0.5)
+    expect(layout.count).toBe(10)
+    expect(layout.tiles).toHaveLength(100)
+    expect(layout.tileWidth).toBe(64)
+    expect(layout.tileHeight).toBe(32)
+  })
+
+  it('keeps the tile grid inside the diamond (top vertex, bottom vertex, left/right vertices)', () => {
+    const { tiles, tileWidth, tileHeight } = isoFloorTileLayout(640, 360, 320, 0.5)
+    const top = Math.min(...tiles.map((t) => t.y - tileHeight / 2))
+    const bottom = Math.max(...tiles.map((t) => t.y + tileHeight / 2))
+    const left = Math.min(...tiles.map((t) => t.x - tileWidth / 2))
+    const right = Math.max(...tiles.map((t) => t.x + tileWidth / 2))
+    expect([top, bottom, left, right]).toEqual([360 - 160, 360 + 160, 640 - 320, 640 + 320])
+  })
+
+  it('stretches tiles to follow a different height ratio and sorts back to front', () => {
+    const layout = isoFloorTileLayout(0, 0, 320, 0.6)
+    expect(layout.tileHeight).toBeCloseTo(38.4)
+    const ys = layout.tiles.map((t) => t.y)
+    expect([...ys].sort((a, b) => a - b)).toEqual(ys)
+  })
+
+  it('picks a floor tile per room with a light default that exists in the manifest', () => {
+    expect(isoFloorTileKey('lobby')).toBe('floor_wood')
+    expect(isoFloorTileKey('risk-fortress')).toBe('floor_light')
+    for (const room of ['lobby', 'hallway', 'elevator', 'command-hall', 'ai-council', 'risk-fortress']) {
+      expect(isoTilePath(iso, isoFloorTileKey(room)), room).not.toBeNull()
+    }
+  })
+})
+

@@ -123,6 +123,21 @@ export function registerAssets(scene: Phaser.Scene): void {
         _registeredKeys.add(key);
       }
     }
+    // Phase W-ISO-3: floor tiles + 4-direction walk strips (optional blocks; absent -> no-op).
+    for (const [name, path] of Object.entries(_manifest.iso.tiles ?? {})) {
+      const key = `iso_tile__${name}`;
+      if (!_registeredKeys.has(key)) {
+        scene.load.image(key, path);
+        _registeredKeys.add(key);
+      }
+    }
+    for (const [name, path] of Object.entries(_manifest.iso.walk?.sheets ?? {})) {
+      const key = `iso_walk__${name}`;
+      if (!_registeredKeys.has(key)) {
+        scene.load.spritesheet(key, path, { frameWidth, frameHeight });
+        _registeredKeys.add(key);
+      }
+    }
   }
 
   // NPC sheets are spritesheet-style (4-frame horizontal, 1 row)
@@ -236,6 +251,18 @@ export function getIsoProp(scene: Phaser.Scene, name: string): string | null {
 /** Texture key of a character's isometric pose strip, or null when it is not loaded. */
 export function getIsoNPC(scene: Phaser.Scene, characterId: string): string | null {
   const key = `iso_npc__${characterId}`;
+  return _registeredKeys.has(key) && scene.textures.exists(key) ? key : null;
+}
+
+/** Texture key of an isometric floor tile (e.g. 'floor_light'), or null when it is not loaded. */
+export function getIsoTile(scene: Phaser.Scene, tileKey: string): string | null {
+  const key = `iso_tile__${tileKey}`;
+  return _registeredKeys.has(key) && scene.textures.exists(key) ? key : null;
+}
+
+/** Texture key of a character's 4-direction walk strip, or null when it is not loaded. */
+export function getIsoWalk(scene: Phaser.Scene, characterId: string): string | null {
+  const key = `iso_walk__${characterId}`;
   return _registeredKeys.has(key) && scene.textures.exists(key) ? key : null;
 }
 
