@@ -37,8 +37,14 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # V16 §86: journal risk_engine_state keys.
-_KEY_UNFUNDED_SINCE = "live_unfunded_since"   # ISO ts of first unfunded observation
-_KEY_STREAK_EPOCH   = "live_streak_epoch"     # ISO ts; older LIVE trades don't count
+_KEY_UNFUNDED_SINCE = "unfunded_since"   # ISO ts of first unfunded observation
+_KEY_STREAK_EPOCH   = "streak_epoch"     # ISO ts; older lane trades don't count
+
+
+def _state_key(base: str, lane: str) -> str:
+    """LIVE keeps the original names (live_unfunded_since / live_streak_epoch);
+    other lanes get their own so paper and live state never mix."""
+    return f"{lane.lower()}_{base}"
 
 
 class RiskEngine:
@@ -51,7 +57,15 @@ class RiskEngine:
         Used to read today's PnL and consecutive loss count.
     """
 
-    def __init__(self, journal) -> None:
+    def __init__(self, journal, lane: str = "LIVE") -> None:
+        # V16 §89: the journal lane whose results gate trading. "LIVE" (default)
+        # keeps every existing caller byte-for-byte unchanged; main.py passes
+        # config.settings.EXECUTION_LANE so paper mode (TRAINING lane) is gated
+        # by its own results instead of stale real-money LIVE history it can
+        # never clear.
+        if lane not in ("LIVE", "TRAINING", "PAPER"):
+            raise ValueError(f"RiskEngine lane must be LIVE|TRAINING|PAPER, got {lane!r}")
+        self._lane                 = lane
         self.journal               = journal
         self._disabled_today: bool = False
         self._disable_date: date | None = None
@@ -117,7 +131,7 @@ class RiskEngine:
         if getter is None:
             return None
         try:
-            value = getter(key)
+            value = getter(_state_key(key, self._lane))
         except Exception as exc:
             logger.debug(f"RiskEngine: get_risk_state({key}) skipped: {exc}")
             return None
@@ -127,11 +141,12 @@ class RiskEngine:
         clear_fn = getattr(self.journal, "clear_risk_state", None)
         set_fn = getattr(self.journal, "set_risk_state", None)
         try:
+            full_key = _state_key(key, self._lane)
             if value is None:
                 if clear_fn is not None:
-                    clear_fn(key)
+                    clear_fn(full_key)
             elif set_fn is not None:
-                set_fn(key, value)
+                set_fn(full_key, value)
         except Exception as exc:
             logger.warning(f"RiskEngine: persisting {key} failed (non-fatal): {exc}")
 
@@ -168,7 +183,7 @@ class RiskEngine:
         epoch = datetime.now(timezone.utc).isoformat()
         try:
             archived = self.journal.get_consecutive_losses(
-                execution_lane="LIVE", since=self._streak_epoch)
+                execution_lane=self._lane, since=self._streak_epoch)
         except Exception:
             archived = "?"
         self._streak_epoch = epoch
@@ -194,8 +209,8 @@ class RiskEngine:
 
     def _streak(self, since: str | None) -> int:
         if since is None:
-            return self.journal.get_consecutive_losses(execution_lane="LIVE")
-        return self.journal.get_consecutive_losses(execution_lane="LIVE", since=since)
+            return self.journal.get_consecutive_losses(execution_lane=self._lane)
+        return self.journal.get_consecutive_losses(execution_lane=self._lane, since=since)
 
     # ── Manual hold (V16 BUG-LIVE-RISK-02) ──────────────────────────────────
 
@@ -314,11 +329,11 @@ class RiskEngine:
     # ── Individual checks ─────────────────────────────────────────────────
 
     def check_daily_loss(self, balance: float) -> tuple[bool, str]:
-        # execution_lane="LIVE": same rationale as check_consecutive_losses
+        # execution_lane=self._lane: same rationale as check_consecutive_losses
         # below -- background TRAINING/PAPER-lane PnL swings (that lane's
         # $100 auto-training balance busting/resetting) must never gate
         # real capital's daily-loss limit.
-        pnl     = self.journal.get_today_pnl(execution_lane="LIVE")
+        pnl     = self.journal.get_today_pnl(execution_lane=self._lane)
         max_loss = balance * settings.MAX_DAILY_LOSS
         if pnl < -max_loss:
             reason = (
@@ -331,7 +346,7 @@ class RiskEngine:
     _EPOCH_DEFAULT = object()
 
     def check_consecutive_losses(self, since=_EPOCH_DEFAULT) -> tuple[bool, str]:
-        # execution_lane="LIVE": see journal_v2.get_consecutive_losses()'s
+        # execution_lane=self._lane: see journal_v2.get_consecutive_losses()'s
         # docstring -- the always-on background training lane's frequent,
         # expected losses must never gate real capital.
         if since is self._EPOCH_DEFAULT:
@@ -369,7 +384,7 @@ class RiskEngine:
           normal                → MAX risk × volatility factor, never below MIN
         """
         streak  = self._streak(self._effective_epoch(balance))
-        pnl     = self.journal.get_today_pnl(execution_lane="LIVE")
+        pnl     = self.journal.get_today_pnl(execution_lane=self._lane)
         max_loss = balance * settings.MAX_DAILY_LOSS
 
         if streak >= 2:
@@ -511,7 +526,7 @@ class RiskEngine:
 
     def report(self, balance: float, atr_pct: float | None = None) -> dict:
         self._reset_if_new_day()
-        # execution_lane="LIVE": this dict's own can_trade/dynamic_risk_pct
+        # execution_lane=self._lane: this dict's own can_trade/dynamic_risk_pct
         # fields are already computed from LIVE-only figures (see
         # check_daily_loss/check_consecutive_losses/get_risk_pct above) --
         # today_pnl/today_trades/today_win_rate must match the same scope,
@@ -520,7 +535,7 @@ class RiskEngine:
         # daily-loss gate didn't trip. For an all-lanes activity view, see
         # api/app.py's or main.py's own direct journal.get_daily_stats()
         # calls, which are unrelated to this risk report.
-        today      = self.journal.get_daily_stats(execution_lane="LIVE")
+        today      = self.journal.get_daily_stats(execution_lane=self._lane)
         streak     = self._streak(self._effective_epoch(balance))
         # V16 BUG-LIVE-RISK-06: peek_can_trade(), not can_trade() --
         # report() is a status read (called every cycle by

@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## [Unreleased] — RiskEngine gate lane follows execution mode (V16 §89)
+
+Paper boot (balance 4614.02 USDT) was blocked by `Consecutive losses: 3/3` from LIVE-lane rows written by earlier real-money sessions.
+Paper mode writes to the TRAINING lane, never LIVE, so that streak could never clear. Branch: `fix/risk-gate-lane-follows-mode` (stacked on §86-§88).
+
+### Changed
+- `RiskEngine(journal, lane="LIVE")`: gate lane is configurable; default LIVE keeps every existing caller unchanged. `main.py` passes
+  `EXECUTION_LANE` (live/testnet -> LIVE, paper -> TRAINING). Unfunded/epoch state keys are per lane (LIVE keeps `live_*` names).
+- Live and testnet behaviour is identical to before.
+- `tests/test_risk_engine_lane_follows_mode.py` (7 tests).
+
 ## [Unreleased] — Training lane: wall-clock timeout + exploratory entries (V16 §88)
 
 The always-on paper training lane held one restored position (max_open=1) for days across restarts and, when flat, only entered at the live
