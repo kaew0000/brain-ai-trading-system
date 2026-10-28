@@ -8006,3 +8006,12 @@ with confidence >= `BACKGROUND_TRAINING_EXPLORE_MIN_CONFIDENCE` into a paper ent
 (`BLOCKED`) and `SKIP` never trade. Both are flags (default on) and touch only `training_lane/`, `paper/`, settings.
 **Boundary.** Never reads/writes the primary lane, journal LIVE rows, risk engine or execution. Promotion of any model trained on this data
 still goes through the human-approved gate.
+
+## 89. RiskEngine Gate Lane Follows Execution Mode (2026-10-28)
+
+**Symptom.** Paper-mode boot with a 4614.02 USDT testnet balance still logged `CIRCUIT BREAKER TRIPPED: Consecutive losses: 3/3`.
+**Cause.** `RiskEngine` hardcoded `execution_lane="LIVE"` (BUG-LIVE-RISK, so the training lane can never gate real money). In paper mode
+`EXECUTION_LANE` is `TRAINING`, so the process never writes LIVE rows and three old real-money losses blocked it with no way to clear.
+**Change.** `RiskEngine(journal, lane=...)`, default `"LIVE"`. `main.py` passes `EXECUTION_LANE`. Paper mode is gated by its own TRAINING-lane
+results; live/testnet are gated exactly as before. Epoch/unfunded state is stored per lane.
+**Boundary.** The always-on training lane runner has its own account and is not gated by RiskEngine. No live-path change.

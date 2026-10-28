@@ -482,7 +482,9 @@ def build_system() -> dict:
     # RiskEngine only needs get_today_pnl / get_consecutive_losses / get_daily_stats,
     # all of which TradeJournalV2 implements as a drop-in superset of v1 —
     # wiring it here keeps risk gating and the dashboard reading the same store.
-    risk_engine = RiskEngine(journal_v2)
+    # V16 §89: gate on the lane this process actually writes to (live/testnet ->
+    # LIVE, paper -> TRAINING) so paper mode can't be blocked by stale real-money rows.
+    risk_engine = RiskEngine(journal_v2, lane=EXECUTION_LANE)
 
     logger.info("[7/9] Event Bus …")
     # reset_event_bus wires journal_v2 into the global singleton that
