@@ -12,6 +12,11 @@ Follow-up to §85: the tile and walk-sheet art generated there is now used by th
   pose frame when the glide ends. Characters without a walk sheet glide as before.
 - `AssetRegistry.ts` loads `iso.tiles` / `iso.walk.sheets` (both optional) and exposes `getIsoTile` / `getIsoWalk`.
 
+### Fixed
+- `AssetRegistry.registerAssets` decided what to load from a module-level set that outlives each Phaser game. OfficeScene creates
+  a new game on every World-page mount, so every mount after the first queued no loads and all props/characters drew as
+  placeholder squares (both projections). It now asks the scene's own texture manager. Regression test: `assetRegistry.test.ts`.
+
 ### Added
 - Pure helpers `isoFloorTileKey`, `isoFloorTileLayout` in `isoAssets.ts` + tests.
 
