@@ -80,6 +80,11 @@ export async function loadManifest(): Promise<WorldManifest> {
 /**
  * Register every PNG from the manifest as a Phaser texture load.
  * Call inside Phaser Scene.preload().
+ *
+ * Whether a file still needs loading is decided by the *scene's own* texture manager, not by the
+ * module-level `_registeredKeys` set: OfficeScene creates a brand-new Phaser.Game every time the
+ * World page mounts, and that set outlives each game. Skipping on the set alone meant every mount
+ * after the first loaded nothing, so props and characters all rendered as placeholder squares.
  */
 export function registerAssets(scene: Phaser.Scene): void {
   if (!_manifest) {
@@ -99,7 +104,7 @@ export function registerAssets(scene: Phaser.Scene): void {
   for (const [cat, entries] of categories) {
     for (const [name, path] of Object.entries(entries)) {
       const key = makeKey(cat, name);
-      if (!_registeredKeys.has(key)) {
+      if (!scene.textures.exists(key)) {
         scene.load.image(key, path);
         _registeredKeys.add(key);
       }
@@ -110,7 +115,7 @@ export function registerAssets(scene: Phaser.Scene): void {
   if (_manifest.iso) {
     for (const [name, entry] of Object.entries(_manifest.iso.props)) {
       const key = makeKey('isoprop', name);
-      if (!_registeredKeys.has(key)) {
+      if (!scene.textures.exists(key)) {
         scene.load.image(key, entry.path);
         _registeredKeys.add(key);
       }
@@ -118,7 +123,7 @@ export function registerAssets(scene: Phaser.Scene): void {
     const { frameWidth, frameHeight } = _manifest.iso.character;
     for (const [name, path] of Object.entries(_manifest.iso.npc)) {
       const key = `iso_npc__${name}`;
-      if (!_registeredKeys.has(key)) {
+      if (!scene.textures.exists(key)) {
         scene.load.spritesheet(key, path, { frameWidth, frameHeight });
         _registeredKeys.add(key);
       }
@@ -126,14 +131,14 @@ export function registerAssets(scene: Phaser.Scene): void {
     // Phase W-ISO-3: floor tiles + 4-direction walk strips (optional blocks; absent -> no-op).
     for (const [name, path] of Object.entries(_manifest.iso.tiles ?? {})) {
       const key = `iso_tile__${name}`;
-      if (!_registeredKeys.has(key)) {
+      if (!scene.textures.exists(key)) {
         scene.load.image(key, path);
         _registeredKeys.add(key);
       }
     }
     for (const [name, path] of Object.entries(_manifest.iso.walk?.sheets ?? {})) {
       const key = `iso_walk__${name}`;
-      if (!_registeredKeys.has(key)) {
+      if (!scene.textures.exists(key)) {
         scene.load.spritesheet(key, path, { frameWidth, frameHeight });
         _registeredKeys.add(key);
       }
@@ -147,7 +152,7 @@ export function registerAssets(scene: Phaser.Scene): void {
     const key = makeKey('npc', name);
     // Also load as spritesheet for frame access
     const ssKey = `npc_ss__${name}`;
-    if (!_registeredKeys.has(ssKey)) {
+    if (!scene.textures.exists(ssKey)) {
       scene.load.spritesheet(ssKey, path, { frameWidth: fw, frameHeight: fh });
       _registeredKeys.add(ssKey);
     }
