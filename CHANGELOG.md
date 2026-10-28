@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## [Unreleased] — Isometric floor tiles + walk cycles wired into OfficeScene (V16 §90)
+
+Follow-up to §85: the tile and walk-sheet art generated there is now used by the isometric Office World scene
+(`WORLD_RENDER_PROJECTION=isometric`). Orthographic mode is untouched. Branch: `feat/world-iso-tiles-walk-s90`.
+
+### Changed
+- `OfficeScene.tsx`: the room floor is a 10x10 grid of floor tiles (per-room tile: wood lobby/hallway, carpet command-hall and
+  ai-council, dark elevator, light elsewhere) instead of one flat diamond. If the manifest has no tiles the old flat fill is used.
+- Characters that glide to a new position now play the 4-direction walk cycle for the direction of travel and return to their
+  pose frame when the glide ends. Characters without a walk sheet glide as before.
+- `AssetRegistry.ts` loads `iso.tiles` / `iso.walk.sheets` (both optional) and exposes `getIsoTile` / `getIsoWalk`.
+
+### Added
+- Pure helpers `isoFloorTileKey`, `isoFloorTileLayout` in `isoAssets.ts` + tests.
+
+### Not done
+- The 12 new W-ISO-3 props are catalogued but still not placed in any room layout.
+
 ## [Unreleased] — RiskEngine gate lane follows execution mode (V16 §89)
 
 Paper boot (balance 4614.02 USDT) was blocked by `Consecutive losses: 3/3` from LIVE-lane rows written by earlier real-money sessions.

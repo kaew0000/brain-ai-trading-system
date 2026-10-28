@@ -117,3 +117,49 @@ export function isoWalkFrame(
 export function isoTilePath(manifest: IsoManifest | null | undefined, key: string): string | null {
   return manifest?.tiles?.[key] ?? null
 }
+
+/** Floor tile per room (keys of `IsoManifest.tiles`); anything not listed gets the light office tile. */
+const ISO_ROOM_FLOOR_TILES: Record<string, string> = {
+  lobby: 'floor_wood',
+  hallway: 'floor_wood',
+  elevator: 'floor_dark',
+  'command-hall': 'floor_carpet',
+  'ai-council': 'floor_carpet',
+}
+
+export function isoFloorTileKey(roomId: string): string {
+  return ISO_ROOM_FLOOR_TILES[roomId] ?? 'floor_light'
+}
+
+export interface IsoFloorTileLayout {
+  /** Tile centres, back (top) to front (bottom). */
+  tiles: Array<{ x: number; y: number }>
+  tileWidth: number
+  tileHeight: number
+  count: number
+}
+
+/**
+ * Splits the room's floor diamond (centre cx,cy; half width; height ratio) into a count x count grid of
+ * iso tiles. `nativeTileWidth` (the tile art's width) picks the count; the tile is then stretched so the
+ * grid exactly fills the diamond. For the default 640px floor and 64px art that is 10 x 10 tiles.
+ */
+export function isoFloorTileLayout(
+  cx: number,
+  cy: number,
+  halfWidth: number,
+  ratio: number,
+  nativeTileWidth = 64,
+): IsoFloorTileLayout {
+  const count = Math.max(1, Math.round((halfWidth * 2) / nativeTileWidth))
+  const tileWidth = (halfWidth * 2) / count
+  const tileHeight = tileWidth * ratio
+  const tiles: Array<{ x: number; y: number }> = []
+  for (let i = 0; i < count; i++) {
+    for (let j = 0; j < count; j++) {
+      tiles.push({ x: cx + ((i - j) * tileWidth) / 2, y: cy + ((i + j - (count - 1)) * tileHeight) / 2 })
+    }
+  }
+  tiles.sort((a, b) => a.y - b.y)
+  return { tiles, tileWidth, tileHeight, count }
+}
