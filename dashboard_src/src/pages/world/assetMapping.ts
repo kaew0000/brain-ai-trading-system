@@ -17,7 +17,7 @@
 // assetId=null (see world/frontend/renderer/room_renderer.py) — floor
 // was never meant to resolve through the asset manifest at all. What
 // IS available per frame is RenderFrame.roomId, so floor uses the
-// frontend's `buildings` category (14 keys) as a per-room background
+// frontend's `buildings` category (20 keys) as a per-room background
 // image, matched by what each district id/theme actually is — not the
 // frontend's separate `tiles` category, which is a generic top-down
 // tileset (grass/road/water/portal) with no thematic connection to an
@@ -47,9 +47,9 @@ export const DISTRICT_TO_BUILDING: Record<string, string> = {
   'ai-council': 'ml_lab', // AI department -> ML lab
   'simulation-lab': 'replay_theater', // "projection room, holographic displays" -> theater
   'world-gateway': 'teleport_entrance', // reception/entrance -> exact semantic match
-  'training-arena': 'mission_board_center', // weak: no training-specific building art exists
-  'journal-library': 'server_room', // weak: "records/archive" has no direct building match
-  'recovery-center': 'buildings_sheet', // weakest: no semantic match found at all
+  'training-arena': 'training_arena', // V16 §92: dedicated art (was mission_board_center)
+  'journal-library': 'journal_library', // V16 §92: dedicated art (was server_room)
+  'recovery-center': 'recovery_center', // V16 §92: dedicated art (was the whole buildings_sheet)
 }
 
 /** Character codename (world/characters/definitions/*.json's id, e.g.

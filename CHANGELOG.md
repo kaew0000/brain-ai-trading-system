@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## [Unreleased] — Dedicated Office World room backdrops (V16 §92)
+
+New art for the rooms that had none of their own. Orthographic (default) mode draws one facade image per room; `lobby`, `hallway` and
+`elevator` had no image at all (blank panel) and `recovery-center` showed the whole `buildings_sheet`, while `journal-library` and
+`training-arena` borrowed unrelated facades. Isometric mode is untouched. Branch: `feat/world-room-art-s92`.
+
+### Added
+- `world/scripts/generate_room_art.py` + `world/data/assets/room_art.json`: deterministic generator (same pattern as `generate_iso_assets.py`) for six
+  272x184 pixel-art facades in the existing steel/gold-sign/cyan-door style: `lobby`, `hallway`, `elevator`, `recovery_center`, `journal_library`,
+  `training_arena` (`dashboard_src/public/assets/world/buildings/`). `python -m world.scripts.generate_room_art [--check]`.
+- `world/tests/test_room_art.py` (8 tests): determinism, committed files match the spec, manifest wiring, existing keys untouched, art not blank.
+- 7 frontend tests (registry resolves each new backdrop to real art; mapping no longer uses the sheet/borrowed facades).
+
+### Changed
+- `manifest.json` `buildings` gains six keys (additive; the original 14 are untouched). `lobby`/`hallway`/`elevator` resolve through the existing
+  `DISTRICT_TO_BUILDING[roomId] ?? roomId` lookup in `OfficeScene`, so no scene code changed.
+- `assetMapping.ts`: `recovery-center`, `journal-library`, `training-arena` now map to their own art.
+
 ## [Unreleased] — Daily stats use the UTC day (V16 §91)
 
 Closes the ROADMAP "Needs decision — daily-loss gate day boundary (local date vs UTC timestamps)" item. Branch: `fix/risk-daily-stats-utc-day`.
