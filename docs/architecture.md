@@ -8015,3 +8015,17 @@ still goes through the human-approved gate.
 **Change.** `RiskEngine(journal, lane=...)`, default `"LIVE"`. `main.py` passes `EXECUTION_LANE`. Paper mode is gated by its own TRAINING-lane
 results; live/testnet are gated exactly as before. Epoch/unfunded state is stored per lane.
 **Boundary.** The always-on training lane runner has its own account and is not gated by RiskEngine. No live-path change.
+
+## 91. Daily Stats Use the UTC Day (2026-10-29)
+
+**Symptom.** `tests/test_journal_v2_risk_gate_lane_scoping.py::test_today_pnl_live_filter_ignores_training_lane_swings` passed under `TZ=UTC` and failed
+under `TZ=Asia/Bangkok` between 00:00 and 07:00 local time (ROADMAP "Needs decision", found while baselining §78).
+**Cause.** `TradeJournalV2.get_daily_stats()` (and the legacy `analytics.trade_journal.TradeJournal.get_daily_stats()`) defaulted `day` to the host's
+LOCAL date (`date.today()`), but trade timestamps are written as UTC ISO strings and `date(timestamp)` is evaluated in UTC. On a UTC+7 host, for the 7 hours
+after local midnight, "today" was one day ahead of the UTC day the trades belong to, so `RiskEngine.check_daily_loss()` (via `get_today_pnl`) did not count
+the current UTC day's losses. `RiskEngine._reset_if_new_day()` already used the UTC day, so the gate was inconsistent with itself.
+**Change.** The default day is now the UTC date (`journal/journal_v2.py::_utc_today_iso()`; inline equivalent in `analytics/trade_journal.py`). An explicit
+`day=` argument behaves exactly as before. `RiskEngine` itself is not modified.
+**Boundary.** Every caller of `get_daily_stats()`/`get_today_pnl()` without `day=` (RiskEngine, `main.py` daily report, `api/app.py`, `api/account_api.py`,
+`telemetry/world_export.py`, agents) now reports the UTC day; on a UTC host nothing changes. No schema, config or order-path change.
+**Tests.** `tests/test_daily_stats_utc_day_boundary.py` (4 tests, fake clock: 2026-10-28 20:00 UTC == 2026-10-29 03:00 Bangkok). 3 of 4 fail on the previous code.

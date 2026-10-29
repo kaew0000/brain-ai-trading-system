@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, date, timezone
+from datetime import datetime, timezone
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -67,6 +67,13 @@ def _validate_lane(execution_lane: str) -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _utc_today_iso() -> str:
+    """V16 §91: today's date in UTC as YYYY-MM-DD (the day get_daily_stats()
+    defaults to). Trade timestamps are stored as UTC, so the daily window
+    must be a UTC day regardless of the host's local timezone."""
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def _json(value) -> str:
@@ -235,7 +242,12 @@ class TradeJournalV2:
         see that method's comment for why.
         """
         if day is None:
-            day = date.today().isoformat()
+            # V16 §91: UTC day, not the host's local date. Trade timestamps
+            # are stored as UTC ISO strings and date(timestamp) is evaluated
+            # in UTC, so a local-date default silently dropped trades from
+            # the daily-loss gate for part of each day on a non-UTC host
+            # (00:00-07:00 in UTC+7). Matches RiskEngine._reset_if_new_day().
+            day = _utc_today_iso()
         sql = """SELECT result, pnl, rr FROM trades
                  WHERE date(timestamp)=? AND result NOT IN ('OPEN','CANCELLED')"""
         params: tuple = (day,)

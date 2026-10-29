@@ -176,13 +176,6 @@ here, not re-derived:
   cohort boundaries are derived from code and the §35/§37 dates, not
   measured on a production journal. Until decided: leave as is (§76
   documents the cohorts; nothing is rewritten or backfilled).
-- **Needs decision — live-readiness: daily-loss gate day boundary (local date vs UTC timestamps).**
-  `journal_v2.get_daily_stats()` defaults `day` to `date.today()` (the process's LOCAL date) but queries
-  `date(timestamp)` over timestamps that callers store in UTC. `RiskEngine.check_daily_loss()` reaches it via
-  `get_today_pnl(execution_lane="LIVE")`. Verified: `tests/test_journal_v2_risk_gate_lane_scoping.py::
-  test_today_pnl_live_filter_ignores_training_lane_swings` passes under `TZ=UTC` and fails under
-  `TZ=Asia/Bangkok` whenever the local date differs from the UTC date (00:00–07:00 Bangkok). Not verified:
-  the timezone of the live host, or `RiskEngine` end to end — by reading the code, a host in a non-UTC zone
-  would not count trades closed in that window towards "today". Needs a decision (use a UTC day boundary,
-  or a documented host-TZ requirement) and a test pinned to a non-UTC `TZ`; also makes the suite
-  time-of-day dependent for a developer in UTC+7. Found while baselining §78; not touched there.
+- **DONE (§91) — daily-loss gate day boundary.** `get_daily_stats()`'s default day is now the UTC date (was the host's local date), matching
+  the UTC timestamps in the journal and `RiskEngine._reset_if_new_day()`. Decision taken: UTC day boundary (no host-TZ requirement). Locked by
+  `tests/test_daily_stats_utc_day_boundary.py`. Dashboard "today" figures on a non-UTC host now follow the UTC day too.

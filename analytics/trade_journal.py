@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, date, timezone
+from datetime import datetime, timezone
 
 from config.settings import settings
 from utils.logger import get_logger
@@ -302,7 +302,9 @@ class TradeJournal:
 
     def get_daily_stats(self, day: str | None = None) -> dict:
         if day is None:
-            day = date.today().isoformat()
+            # V16 §91: UTC day (timestamps are stored in UTC) — see
+            # journal/journal_v2.py get_daily_stats() for the full rationale.
+            day = datetime.now(timezone.utc).date().isoformat()
         with self._conn() as c:
             rows = c.execute(
                 """SELECT result, pnl, rr FROM trades
