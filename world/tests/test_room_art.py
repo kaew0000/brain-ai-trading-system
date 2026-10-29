@@ -33,7 +33,7 @@ def _png_size(path):
 
 def test_generated_files_are_up_to_date():
     pytest.importorskip("PIL")
-    stale = [p for p, data in gen.build_outputs().items() if not os.path.isfile(p) or open(p, "rb").read() != data]
+    stale = [p for p, data in gen.build_outputs().items() if not gen.is_current(p, data)]
     assert stale == [], f"run `python -m world.scripts.generate_room_art`: {stale}"
 
 

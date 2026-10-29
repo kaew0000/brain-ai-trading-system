@@ -13,6 +13,9 @@ New art for the rooms that had none of their own. Orthographic (default) mode dr
 - `world/tests/test_room_art.py` (8 tests): determinism, committed files match the spec, manifest wiring, existing keys untouched, art not blank.
 - 7 frontend tests (registry resolves each new backdrop to real art; mapping no longer uses the sheet/borrowed facades).
 
+### Fixed (CI)
+- `test_generated_files_are_up_to_date` failed on CI (Pillow 13.0.0, unpinned) because `rounded_rectangle` rasterises differently from 12.1.1. The recovery pods now use a chamfered polygon (`_chamfer`), and freshness is compared on decoded pixels (`is_current`) instead of PNG bytes. Verified identical output under Pillow 12.1.1 and 13.0.0.
+
 ### Changed
 - `manifest.json` `buildings` gains six keys (additive; the original 14 are untouched). `lobby`/`hallway`/`elevator` resolve through the existing
   `DISTRICT_TO_BUILDING[roomId] ?? roomId` lookup in `OfficeScene`, so no scene code changed.

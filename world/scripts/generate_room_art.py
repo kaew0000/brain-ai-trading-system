@@ -160,6 +160,12 @@ def _screen(pen: _Pen, x0: int, y0: int, x1: int, y1: int, glow: RGB) -> None:
     pen.rect(x0, y0, x1, y1, p["screen"], shade(glow, 0.55))
 
 
+def _chamfer(pen: _Pen, x0: int, y0: int, x1: int, y1: int, c: int, fill: RGB, outline: RGB) -> None:
+    """Pixel-art rounded box: a chamfered polygon. Unlike ``rounded_rectangle`` its rasterisation does not vary between Pillow releases."""
+    pts = [(x0 + c, y0), (x1 - c, y0), (x1, y0 + c), (x1, y1 - c), (x1 - c, y1), (x0 + c, y1), (x0, y1 - c), (x0, y0 + c)]
+    pen.d.polygon(pts, fill=fill, outline=outline)
+
+
 def _plant(pen: _Pen, cx: int, base: int) -> None:
     p = pen.p
     pen.rect(cx - 5, base - 8, cx + 5, base, shade(p["gold_dark"], 0.9), p["outline"])
@@ -235,8 +241,8 @@ def _scene_recovery(pen: _Pen, box: tuple[int, int, int, int]) -> None:
     for px in (x0 + 8, x1 - 46):  # recovery pods
         pen.glow(px, y0 + 4, px + 38, y1 + 4, p["green"], alpha=40, grow=3)
         pen.rect(px, y0 + 4, px + 38, y1 + 4, p["steel_dark"], p["outline"])
-        d.rounded_rectangle([px + 5, y0 + 9, px + 33, y1 - 2], radius=8, fill=shade(p["green"], 0.45), outline=p["green"])
-        d.rounded_rectangle([px + 9, y0 + 13, px + 17, y0 + 40], radius=3, fill=mix(p["green"], (255, 255, 255), 0.4))
+        _chamfer(pen, px + 5, y0 + 9, px + 33, y1 - 2, 6, shade(p["green"], 0.45), p["green"])
+        _chamfer(pen, px + 9, y0 + 13, px + 17, y0 + 40, 2, mix(p["green"], (255, 255, 255), 0.4), mix(p["green"], (255, 255, 255), 0.4))
         pen.rect(px + 12, y1 - 8, px + 26, y1 - 4, p["cyan"], p["outline"])
     _screen(pen, cx - 34, y0 + 4, cx + 34, y0 + 52, p["green"])
     d.line([(cx - 30, y0 + 40), (cx - 18, y0 + 40), (cx - 14, y0 + 24), (cx - 8, y0 + 46), (cx - 2, y0 + 30), (cx + 4, y0 + 40), (cx + 30, y0 + 40)], fill=p["green"], width=1)
@@ -341,6 +347,20 @@ def build_outputs(spec: dict[str, Any] | None = None) -> dict[str, bytes]:
     return out
 
 
+def is_current(path: str, data: bytes) -> bool:
+    """True if ``path`` holds ``data``. PNGs compare by decoded pixels, so a different zlib/Pillow build cannot cause a false 'stale'."""
+    if not os.path.isfile(path):
+        return False
+    with open(path, "rb") as f:
+        on_disk = f.read()
+    if on_disk == data or not path.endswith(".png"):
+        return on_disk == data
+    import io
+
+    a, b = Image.open(io.BytesIO(on_disk)).convert("RGBA"), Image.open(io.BytesIO(data)).convert("RGBA")
+    return a.size == b.size and a.tobytes() == b.tobytes()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true", help="exit 1 if any generated file is stale; write nothing")
@@ -349,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Pillow is required to draw the room art (pip install pillow)", file=sys.stderr)
         return 2
     outputs = build_outputs()
-    stale = [p for p, data in outputs.items() if not os.path.isfile(p) or open(p, "rb").read() != data]
+    stale = [p for p, data in outputs.items() if not is_current(p, data)]
     if args.check:
         for p in stale:
             print(f"stale: {os.path.relpath(p, os.path.dirname(FRONTEND_ASSETS))}")
