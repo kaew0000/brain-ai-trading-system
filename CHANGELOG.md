@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## [Unreleased] — Daily stats use the UTC day (V16 §91)
+
+Closes the ROADMAP "Needs decision — daily-loss gate day boundary (local date vs UTC timestamps)" item. Branch: `fix/risk-daily-stats-utc-day`.
+
+### Fixed
+- `TradeJournalV2.get_daily_stats()` / `get_today_pnl()` and the legacy `TradeJournal.get_daily_stats()` defaulted to the host's local date while
+  timestamps are UTC, so on a non-UTC host (e.g. UTC+7, 00:00-07:00 local) the current UTC day's trades were missing from the daily-loss gate
+  (`RiskEngine.check_daily_loss()`). The default is now the UTC date, matching `RiskEngine._reset_if_new_day()`.
+
+### Changed
+- Dashboard/report "today" figures that call these methods without `day=` now follow the UTC day. UTC hosts see no change.
+
+### Added
+- `tests/test_daily_stats_utc_day_boundary.py` (4 tests; fake clock, independent of the machine's TZ and time of day).
+
 ## [Unreleased] — Isometric floor tiles + walk cycles wired into OfficeScene (V16 §90)
 
 Follow-up to §85: the tile and walk-sheet art generated there is now used by the isometric Office World scene
