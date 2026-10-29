@@ -40,6 +40,8 @@ const REAL_BUILDING_KEYS = [
   'futures_trading_lab', 'intelligence_lab', 'mission_board_center',
   'ml_lab', 'portfolio_vault', 'replay_theater', 'research_facility',
   'risk_center', 'server_room', 'teleport_entrance',
+  // V16 §92 (world/scripts/generate_room_art.py)
+  'lobby', 'hallway', 'elevator', 'recovery_center', 'journal_library', 'training_arena',
 ]
 const REAL_PROP_KEYS = [
   'ai_core', 'conference_setup', 'data_panel_a', 'data_panel_b', 'desk_double',
@@ -76,6 +78,13 @@ describe('DISTRICT_TO_BUILDING', () => {
     for (const id of Object.keys(DISTRICT_TO_BUILDING)) {
       expect(REAL_DISTRICT_IDS).toContain(id)
     }
+  })
+
+  it('V16 §92: recovery / journal / training use their own art, never the sheet or a borrowed facade', () => {
+    expect(DISTRICT_TO_BUILDING['recovery-center']).toBe('recovery_center')
+    expect(DISTRICT_TO_BUILDING['journal-library']).toBe('journal_library')
+    expect(DISTRICT_TO_BUILDING['training-arena']).toBe('training_arena')
+    expect(Object.values(DISTRICT_TO_BUILDING)).not.toContain('buildings_sheet')
   })
 })
 

@@ -85,16 +85,22 @@
     "ceo_room": "/assets/world/buildings/ceo_room.png",
     "command_center": "/assets/world/buildings/command_center.png",
     "data_center": "/assets/world/buildings/data_center.png",
+    "elevator": "/assets/world/buildings/elevator.png",
     "futures_trading_lab": "/assets/world/buildings/futures_trading_lab.png",
+    "hallway": "/assets/world/buildings/hallway.png",
     "intelligence_lab": "/assets/world/buildings/intelligence_lab.png",
+    "journal_library": "/assets/world/buildings/journal_library.png",
+    "lobby": "/assets/world/buildings/lobby.png",
     "mission_board_center": "/assets/world/buildings/mission_board_center.png",
     "ml_lab": "/assets/world/buildings/ml_lab.png",
     "portfolio_vault": "/assets/world/buildings/portfolio_vault.png",
+    "recovery_center": "/assets/world/buildings/recovery_center.png",
     "replay_theater": "/assets/world/buildings/replay_theater.png",
     "research_facility": "/assets/world/buildings/research_facility.png",
     "risk_center": "/assets/world/buildings/risk_center.png",
     "server_room": "/assets/world/buildings/server_room.png",
-    "teleport_entrance": "/assets/world/buildings/teleport_entrance.png"
+    "teleport_entrance": "/assets/world/buildings/teleport_entrance.png",
+    "training_arena": "/assets/world/buildings/training_arena.png"
   },
   "props": {
     "ai_core": "/assets/world/props/ai_core.png",

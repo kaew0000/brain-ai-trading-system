@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "size": [272, 184],
+  "palette": {
+    "outline": "#03060f",
+    "steel_dark": "#131e30",
+    "steel": "#202f42",
+    "steel_light": "#2a4058",
+    "cyan": "#22d3ee",
+    "cyan_dark": "#0e7490",
+    "screen": "#08142a",
+    "gold": "#ffde78",
+    "gold_dark": "#a16207",
+    "text_shadow": "#3c2800",
+    "green": "#34d399",
+    "red": "#f87171",
+    "amber": "#fbbf24",
+    "violet": "#a78bfa"
+  },
+  "rooms": [
+    { "key": "lobby", "label": "LOBBY", "scene": "lobby", "door": true },
+    { "key": "hallway", "label": "HALLWAY", "scene": "hallway", "door": false },
+    { "key": "elevator", "label": "ELEVATOR", "scene": "elevator", "door": false },
+    { "key": "recovery_center", "label": "RECOVERY CENTER", "scene": "recovery", "door": true },
+    { "key": "journal_library", "label": "JOURNAL LIBRARY", "scene": "library", "door": true },
+    { "key": "training_arena", "label": "TRAINING ARENA", "scene": "training", "door": true }
+  ]
+}

@@ -2,7 +2,7 @@
 // texture loads for each new game (decided by that game's own texture manager), not only the first one.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import worldManifest from '../../../../public/assets/world/manifest.json'
-import { getIsoProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
+import { getBuilding, getIsoProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
 
 function fakeScene() {
   const textures = new Set<string>()
@@ -56,4 +56,15 @@ describe('AssetRegistry across Phaser game remounts', () => {
     g.finishLoading()
     expect(getIsoProp(g.scene, 'desk')).not.toBeNull()
   })
+
+  // V16 §92: lobby/hallway/elevator are not districts, so OfficeScene looks them up by room id.
+  it.each(['lobby', 'hallway', 'elevator', 'recovery_center', 'journal_library', 'training_arena'])(
+    'resolves the %s backdrop to real art (not the placeholder) once loaded',
+    (name) => {
+      const g = fakeScene()
+      registerAssets(g.scene)
+      g.finishLoading()
+      expect(getBuilding(g.scene, name)).not.toMatch(/^fallback_/)
+    },
+  )
 })
