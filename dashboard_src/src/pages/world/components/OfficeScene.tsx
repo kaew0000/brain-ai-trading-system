@@ -18,8 +18,10 @@ import type { RenderFrame } from '../types'
 import { assetDisplayName, BEHAVIOR_COLORS, characterTweenOffset, frameSignature, isIsometric, isoDepth, isoDiamondPoints } from '../sceneMapping'
 import { WORLD_CONFIG } from '../../../game/config/world.config'
 import { CHARACTER_TO_ROLE, DISTRICT_TO_BUILDING, resolvePropAssetId } from '../assetMapping'
-import { getBuilding, getDecoration, getIsoNPC, getIsoProp, getIsoTile, getIsoWalk, getManifest, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
+import { getBuilding, getDecoration, getIsoNPC, getIsoProp, getIsoTile, getIsoWalk, getLpcNPC, getManifest, getNPC, getNPCFrame, getProp, loadManifest, registerAssets } from '../../../game/assets/AssetRegistry'
 import type { IsoManifest } from '../isoAssets'
+import type { LpcManifest } from '../lpcAssets'
+import { hasLpcCharacter, lpcAnimationName, lpcDirectionFromDelta, lpcFrameRange, lpcStaticFrame } from '../lpcAssets'
 import { hasIsoCharacter, isoDirectionFromDelta, isoFloorTileKey, isoFloorTileLayout, isoPoseFrame, isoPoseName, isoPropDepthOffset, isoPropOrigin, isoWalkFrame, resolveIsoProp } from '../isoAssets'
 
 const FURNITURE_SIZE = 32 // px — matches the footprint the old 28x28 rectangle occupied
@@ -117,6 +119,36 @@ class OfficeCanvasScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * V16 §93: walk cycle for an LPC character gliding by (-dx,-dy) -> (0,0). Returns a callback that puts the sprite
+   * back on its resting frame, or null when the manifest has no matching animation (caller just glides).
+   */
+  private startLpcWalk(
+    sprite: Phaser.GameObjects.Sprite,
+    role: string,
+    lpc: LpcManifest,
+    dx: number,
+    dy: number,
+    sheetKey: string,
+    restFrame: number,
+  ): (() => void) | null {
+    const name = lpcAnimationName(lpc, role, 'walking')
+    const anim = lpc.animations[name]
+    if (!anim || anim.frames < 2) return null
+    const direction = lpcDirectionFromDelta(-dx, -dy, lpc.defaultFacing)
+    const animKey = `lpc_${name}__${role}__${direction}`
+    if (!this.anims.exists(animKey)) {
+      const { start, end } = lpcFrameRange(lpc, name, direction)
+      this.anims.create({ key: animKey, frames: this.anims.generateFrameNumbers(sheetKey, { start, end }), frameRate: anim.fps, repeat: -1 })
+    }
+    sprite.play(animKey)
+    return () => {
+      if (!sprite.active) return // redraw already destroyed it
+      sprite.stop()
+      sprite.setTexture(sheetKey, restFrame)
+    }
+  }
+
   /** Draws one isometric prop (manifest-driven size/anchor/depth). Returns false when no iso art
    * is loaded for this asset id, so the caller falls back to the legacy prop path. */
   private drawIsoProp(cmd: RenderFrame['commands'][number], isoManifest: IsoManifest): boolean {
@@ -206,25 +238,35 @@ class OfficeCanvasScene extends Phaser.Scene {
         const behavior = (cmd.metadata?.animationState as string) ?? 'idle'
         const role = CHARACTER_TO_ROLE[cmd.entityId] ?? cmd.entityId
         const isoSheet = isoManifest && hasIsoCharacter(isoManifest, cmd.entityId) ? getIsoNPC(this, cmd.entityId) : null
-        const textureKey = isoSheet ?? getNPC(this, role)
-        const isSpritesheet = textureKey.startsWith('npc_ss__') || isoSheet !== null
+        // V16 §93: LPC art wins when the manifest enables it and the role has a sheet; otherwise the iso/legacy art below is unchanged.
+        const lpc = getManifest()?.lpc ?? null
+        const lpcSheet = lpc && hasLpcCharacter(lpc, role) ? getLpcNPC(this, role) : null
+        const textureKey = lpcSheet ?? isoSheet ?? getNPC(this, role)
+        const isSpritesheet = textureKey.startsWith('npc_ss__') || isoSheet !== null || lpcSheet !== null
         // Isometric sheets are pose strips (frame = pose); legacy sheets are 4 directions.
         // `working` is drawn seated in iso: the character sits at a chair/desk instead of standing.
-        const frameIndex = isoSheet && isoManifest
-          ? isoPoseFrame(isoManifest.character, isoPoseName(isoManifest.character, behavior, true))
-          : getNPCFrame('F')
+        const frameIndex = lpcSheet && lpc
+          ? lpcStaticFrame(lpc, role, behavior)
+          : isoSheet && isoManifest
+            ? isoPoseFrame(isoManifest.character, isoPoseName(isoManifest.character, behavior, true))
+            : getNPCFrame('F')
         const sprite = isSpritesheet
           ? this.add.sprite(cmd.screenX, cmd.screenY, textureKey, frameIndex)
           : this.add.image(cmd.screenX, cmd.screenY, textureKey)
-        if (isoSheet && isoManifest) sprite.setOrigin(isoManifest.character.anchor[0], isoManifest.character.anchor[1])
+        if (lpcSheet && lpc) {
+          sprite.setOrigin(lpc.anchor[0], lpc.anchor[1])
+          this.textures.get(lpcSheet).setFilter(Phaser.Textures.FilterMode.NEAREST) // keep pixel art crisp
+        } else if (isoSheet && isoManifest) sprite.setOrigin(isoManifest.character.anchor[0], isoManifest.character.anchor[1])
         // Native NPC frames are 140x160 (see world.config.ts); scale to
         // a consistent on-screen height regardless of source size,
         // whether that's a real sprite sheet frame or a fallback square.
-        const scale = (isoSheet ? ISO_CHARACTER_DISPLAY_HEIGHT : CHARACTER_DISPLAY_HEIGHT) / sprite.height
+        const scale = (lpcSheet && lpc ? lpc.displayHeight : isoSheet ? ISO_CHARACTER_DISPLAY_HEIGHT : CHARACTER_DISPLAY_HEIGHT) / sprite.height
         sprite.setScale(scale)
         // Anchored sprites hang from the feet; legacy sprites are centred, so offsets differ.
-        const footY = isoSheet ? cmd.screenY : cmd.screenY + sprite.displayHeight / 2
-        const topY = isoSheet ? cmd.screenY - sprite.displayHeight * (isoManifest?.character.anchor[1] ?? 1) : cmd.screenY - sprite.displayHeight / 2
+        const anchoredSheet = isoSheet ?? lpcSheet
+        const anchorY = lpcSheet && lpc ? lpc.anchor[1] : isoManifest?.character.anchor[1] ?? 1
+        const footY = anchoredSheet ? cmd.screenY : cmd.screenY + sprite.displayHeight / 2
+        const topY = anchoredSheet ? cmd.screenY - sprite.displayHeight * anchorY : cmd.screenY - sprite.displayHeight / 2
         // Behavior still drives an at-a-glance color cue — a thin ring
         // under the sprite, same semantic as the old solid-color circle.
         const ring = this.add.ellipse(
@@ -254,9 +296,11 @@ class OfficeCanvasScene extends Phaser.Scene {
         )
         if (offset) {
           const stopWalk =
-            isoSheet && isoManifest && sprite instanceof Phaser.GameObjects.Sprite
-              ? this.startWalk(sprite, cmd.entityId, isoManifest, offset.dx, offset.dy, isoSheet, frameIndex)
-              : null
+            lpcSheet && lpc && sprite instanceof Phaser.GameObjects.Sprite
+              ? this.startLpcWalk(sprite, role, lpc, offset.dx, offset.dy, lpcSheet, frameIndex)
+              : isoSheet && isoManifest && sprite instanceof Phaser.GameObjects.Sprite
+                ? this.startWalk(sprite, cmd.entityId, isoManifest, offset.dx, offset.dy, isoSheet, frameIndex)
+                : null
           this.glide([ring, sprite, label], offset.dx, offset.dy, stopWalk ?? undefined)
         }
       }

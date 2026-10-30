@@ -8042,3 +8042,17 @@ flagged in `assetMapping.ts` as having no thematic art. The art simply did not e
 are untouched (`generate_iso_assets` and `generate_room_art` each preserve the other's manifest keys).
 **Boundary.** Additive to the manifest; the original 14 building keys and paths are unchanged.
 **Tests.** `world/tests/test_room_art.py` (8), `assetRegistry.test.ts` (+6, fail on the previous manifest), `assetMapping.test.ts` (+1).
+
+## 93. Office World LPC Characters (2026-10-30)
+
+**Request.** Use 10 character sheets exported from the Universal LPC generator as the World's characters.
+**Findings.** The sheets are 832x3456 (64px cells, 13 x 54) and match the 10 legacy NPC roles one-to-one, but the scene only knew two other layouts (140x160
+4-direction strips and 64x96 iso pose strips). In these sheets the `sit` rows are a floor-sit sequence (not a chair pose), and four roles wear a garment layer
+that supports `walk` but not `idle`/`sit`/`emote`/`run`, so those frames draw a bare torso.
+**Change.** A data-driven `lpc` manifest block (spec: `world/data/assets/lpc_characters.json`, written by `world/scripts/import_lpc_characters.py`) describes the
+layout, animation rows, behaviour -> animation table and, per role, the animations to avoid. `pages/world/lpcAssets.ts` resolves frames (pure, no Phaser);
+`AssetRegistry` loads the sheets; `OfficeScene` draws them when `lpc.enabled` and the role has a loaded sheet, otherwise the previous path runs unchanged.
+**Boundary.** Additive: backend, schema, config, order path, the `iso` block and the legacy sheets are untouched; `generate_iso_assets`/`generate_room_art`
+preserve the new key. Licences: `dashboard_src/public/third-party-licenses/LPC_CHARACTERS.md` (mixed CC0/OGA-BY/CC-BY/CC-BY-SA/GPL; attribution required).
+**Follow-up.** `player` sheet; re-export of the four roles; PR 2+ top-down Tiled rooms.
+**Tests.** `world/tests/test_lpc_characters.py` (7), `lpcAssets.test.ts` (8).

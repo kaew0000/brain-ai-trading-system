@@ -1,0 +1,75 @@
+{
+  "version": "1.0.0",
+  "enabled": true,
+  "frameSize": 64,
+  "columns": 13,
+  "rows": 54,
+  "displayHeight": 64,
+  "anchor": [
+    0.5,
+    0.9
+  ],
+  "directions": [
+    "up",
+    "left",
+    "down",
+    "right"
+  ],
+  "defaultFacing": "down",
+  "animations": {
+    "stand": {
+      "source": "walk",
+      "row": 8,
+      "frames": 1,
+      "startFrame": 0,
+      "fps": 1,
+      "directional": true
+    },
+    "walk": {
+      "source": "walk",
+      "row": 8,
+      "frames": 8,
+      "startFrame": 1,
+      "fps": 10,
+      "directional": true
+    },
+    "sit": {
+      "source": "sit",
+      "row": 30,
+      "frames": 1,
+      "startFrame": 1,
+      "fps": 1,
+      "directional": true
+    },
+    "emote": {
+      "source": "emote",
+      "row": 34,
+      "frames": 1,
+      "startFrame": 2,
+      "fps": 1,
+      "directional": true
+    }
+  },
+  "behaviorAnimation": {
+    "idle": "stand",
+    "walking": "walk",
+    "working": "stand",
+    "meeting": "stand",
+    "resting": "sit",
+    "celebration": "emote",
+    "emergency": "stand"
+  },
+  "fallbackAnimation": "stand",
+  "sourceFolders": {
+    "CEO": "ceo",
+    "DATA_ANALY": "data_analyst",
+    "ML_SC IENT": "ml_scientist",
+    "OFFICE_WORKER": "office_worker",
+    "QUANT_RESEARCH": "quant_researcher",
+    "RISK_MANAGER": "risk_manager",
+    "SECURITY": "security_officer",
+    "TRADER": "trader",
+    "VISITOR": "visitor_1",
+    "VISITOR2": "visitor_2"
+  }
+}

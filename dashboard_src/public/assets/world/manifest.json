@@ -607,5 +607,98 @@
       "floor_wood": "/assets/world/iso/tiles/floor_wood.png",
       "floor_carpet": "/assets/world/iso/tiles/floor_carpet.png"
     }
+  },
+  "lpc": {
+    "version": "1.0.0",
+    "enabled": true,
+    "frameSize": 64,
+    "columns": 13,
+    "rows": 54,
+    "displayHeight": 64,
+    "anchor": [
+      0.5,
+      0.9
+    ],
+    "directions": [
+      "up",
+      "left",
+      "down",
+      "right"
+    ],
+    "defaultFacing": "down",
+    "animations": {
+      "stand": {
+        "source": "walk",
+        "row": 8,
+        "frames": 1,
+        "startFrame": 0,
+        "fps": 1,
+        "directional": true
+      },
+      "walk": {
+        "source": "walk",
+        "row": 8,
+        "frames": 8,
+        "startFrame": 1,
+        "fps": 10,
+        "directional": true
+      },
+      "sit": {
+        "source": "sit",
+        "row": 30,
+        "frames": 1,
+        "startFrame": 1,
+        "fps": 1,
+        "directional": true
+      },
+      "emote": {
+        "source": "emote",
+        "row": 34,
+        "frames": 1,
+        "startFrame": 2,
+        "fps": 1,
+        "directional": true
+      }
+    },
+    "behaviorAnimation": {
+      "idle": "stand",
+      "walking": "walk",
+      "working": "stand",
+      "meeting": "stand",
+      "resting": "sit",
+      "celebration": "emote",
+      "emergency": "stand"
+    },
+    "fallbackAnimation": "stand",
+    "sheets": {
+      "ceo": "/assets/world/lpc/ceo.png",
+      "data_analyst": "/assets/world/lpc/data_analyst.png",
+      "ml_scientist": "/assets/world/lpc/ml_scientist.png",
+      "office_worker": "/assets/world/lpc/office_worker.png",
+      "quant_researcher": "/assets/world/lpc/quant_researcher.png",
+      "risk_manager": "/assets/world/lpc/risk_manager.png",
+      "security_officer": "/assets/world/lpc/security_officer.png",
+      "trader": "/assets/world/lpc/trader.png",
+      "visitor_1": "/assets/world/lpc/visitor_1.png",
+      "visitor_2": "/assets/world/lpc/visitor_2.png"
+    },
+    "unsupportedAnimations": {
+      "data_analyst": [
+        "emote",
+        "sit"
+      ],
+      "ml_scientist": [
+        "emote",
+        "sit"
+      ],
+      "quant_researcher": [
+        "emote",
+        "sit"
+      ],
+      "risk_manager": [
+        "emote",
+        "sit"
+      ]
+    }
   }
 }
