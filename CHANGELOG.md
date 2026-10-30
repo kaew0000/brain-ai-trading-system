@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## [Unreleased] — Office World LPC characters (V16 §93)
+
+The 10 Universal-LPC character sheets now draw the World characters (PR 1 of the LPC characters + top-down Tiled rooms series; rooms are a later PR).
+Roles are the existing NPC roles, so backend and wire format are unchanged. Branch: `feature/world-lpc-characters-s93`.
+
+### Added
+- `world/data/assets/lpc_characters.json`, `world/scripts/import_lpc_characters.py`: spec + idempotent importer (sheets, merged credits, `manifest.json` `lpc` block).
+- `dashboard_src/public/assets/world/lpc/*.png` (10 sheets), `third-party-licenses/lpc_credits.csv`, `LPC_CHARACTERS.md`.
+- `pages/world/lpcAssets.ts` (pure helpers), `AssetRegistry.getLpcNPC()`, LPC branch in `OfficeScene` (static frame per behaviour, walk cycle, NEAREST filter).
+- Tests: `world/tests/test_lpc_characters.py` (7), `lpcAssets.test.ts` (8).
+
+### Changed
+- `manifest.json` gains an `lpc` block (additive; existing keys untouched). LPC art is used only when `lpc.enabled` and the role has a sheet.
+
+### Notes
+- LPC `sit` rows are a floor-sit sequence, so only `resting` uses it. Four roles wear a garment layer without idle/sit/emote support; they use the standing walk frame.
+- `player` has no sheet yet and keeps the previous art.
+
 ## [Unreleased] — Dedicated Office World room backdrops (V16 §92)
 
 New art for the rooms that had none of their own. Orthographic (default) mode draws one facade image per room; `lobby`, `hallway` and

@@ -8,6 +8,7 @@
 import Phaser from 'phaser';
 import { WORLD_CONFIG } from '../config/world.config';
 import type { IsoManifest } from '../../pages/world/isoAssets';
+import type { LpcManifest } from '../../pages/world/lpcAssets';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -26,6 +27,8 @@ export interface WorldManifest {
   decorations: Record<string, string>;
   /** Phase W-ISO-2: isometric art (optional so older manifests keep loading). */
   iso?: IsoManifest;
+  /** V16 §93: Universal-LPC character sheets (optional so older manifests keep loading). */
+  lpc?: LpcManifest;
 }
 
 // NPC role resolution: callers pass an already-resolved role name (see
@@ -145,6 +148,18 @@ export function registerAssets(scene: Phaser.Scene): void {
     }
   }
 
+  // V16 §93: LPC character sheets (additive; absent or disabled -> no-op).
+  if (_manifest.lpc?.enabled) {
+    const frameSize = _manifest.lpc.frameSize;
+    for (const [role, path] of Object.entries(_manifest.lpc.sheets)) {
+      const key = `lpc_npc__${role}`;
+      if (!scene.textures.exists(key)) {
+        scene.load.spritesheet(key, path, { frameWidth: frameSize, frameHeight: frameSize });
+        _registeredKeys.add(key);
+      }
+    }
+  }
+
   // NPC sheets are spritesheet-style (4-frame horizontal, 1 row)
   const fw = _manifest.npcFrameWidth;
   const fh = _manifest.npcFrameHeight;
@@ -256,6 +271,12 @@ export function getIsoProp(scene: Phaser.Scene, name: string): string | null {
 /** Texture key of a character's isometric pose strip, or null when it is not loaded. */
 export function getIsoNPC(scene: Phaser.Scene, characterId: string): string | null {
   const key = `iso_npc__${characterId}`;
+  return _registeredKeys.has(key) && scene.textures.exists(key) ? key : null;
+}
+
+/** Texture key of a role's LPC character sheet, or null when it is not loaded. */
+export function getLpcNPC(scene: Phaser.Scene, role: string): string | null {
+  const key = `lpc_npc__${role}`;
   return _registeredKeys.has(key) && scene.textures.exists(key) ? key : null;
 }
 
