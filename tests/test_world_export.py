@@ -66,8 +66,10 @@ class _FakeJournal:
 
     def __init__(self, stats: dict):
         self._stats = stats
+        self.lanes_asked: list = []
 
-    def get_daily_stats(self, day=None):
+    def get_daily_stats(self, day=None, execution_lane=None):
+        self.lanes_asked.append(execution_lane)
         return self._stats
 
 

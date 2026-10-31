@@ -153,3 +153,15 @@ export interface TickerHealth {
   lastTickAgeSeconds?: number | null
   lastError?: string | null
 }
+
+// ── Execution mode (V16 §94) ────────────────────────────────────────────
+// Wire shape of GET /api/world/mode (telemetry.world_export.execution_context()).
+export interface WorldMode {
+  /** paper | testnet | live | training | unknown — whatever EXECUTION_MODE the process booted with. */
+  mode: string
+  /** Journal lane the figures are scoped to (LIVE | TRAINING), null when unknown. */
+  lane: string | null
+  laneScoped: boolean
+  /** True only for the real-money live mode. */
+  realMoney: boolean
+}

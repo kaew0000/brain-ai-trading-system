@@ -8056,3 +8056,31 @@ layout, animation rows, behaviour -> animation table and, per role, the animatio
 preserve the new key. Licences: `dashboard_src/public/third-party-licenses/LPC_CHARACTERS.md` (mixed CC0/OGA-BY/CC-BY/CC-BY-SA/GPL; attribution required).
 **Follow-up.** `player` sheet; re-export of the four roles; PR 2+ top-down Tiled rooms.
 **Tests.** `world/tests/test_lpc_characters.py` (7), `lpcAssets.test.ts` (8).
+
+## 94. Walkable Tile Office World + Mode-aware World (2026-10-31)
+
+**Request.** Make the World usable with characters (walk, interact), build a new world from the supplied `game_asset.zip` office tiles, replace the isometric Office
+with it, and make the World work in every execution mode (paper / testnet / live / training).
+**Findings.** (1) §93 already imported the LPC sheets (byte-identical to the zip) but characters were display-only: no input, no collision, positions came from backend
+render commands. (2) The zip's `office_assets` hold a CC0 48 px office tileset (CoolSchool) that fits the World's "modern office HQ" canon; the other sets are
+fantasy/outdoor and were not used. (3) World REST/WS answered identically in all four modes (mode-blind), but `telemetry/world_export.portfolio_payload()` called
+`journal.get_daily_stats()` without `execution_lane`, so System Pulse PnL / win rate blended the always-on TRAINING lane's paper trades into the real lane (the known
+lane-contamination class). Reproduced: with one LIVE win (+50) and two TRAINING losses (-50) every mode showed `dailyPnl = 0.0`.
+**Change.** Backend: `execution_context()` (mode, lane, laneScoped, realMoney; read at call time) in `telemetry/world_export.py`; `GET /api/world/mode`;
+`portfolio_payload()` scopes its figures to the process's lane behind `WORLD_LANE_SCOPED_PORTFOLIO` (default on, `False` restores the combined view). Display only: nothing in
+`execution/` or `risk/` reads it. Frontend: `world/scripts/build_tile_world.py` (spec `world/data/assets/tile_world.json`, source sheet vendored under
+`world/data/assets/source/`) cuts an atlas and writes `office.map.json` (43x25 tiles, collision rows, props, 17 rooms, seats keyed by the backend's character ids) and
+refuses layouts with unreachable seats / furniture outside rooms / missing seats. `pages/world/tileWorld.ts` is the pure logic (collision, BFS path finding, NPC goal per
+behaviour, interaction range, typing guard); `TileWorldScene.tsx` draws it: the player walks with WASD / arrows or click-to-move, NPCs go to their seat / meeting tile / door
+or wander their room from `SimulationState`, `E` or a click selects an NPC (Studio opens a DM with it), room list selection walks the avatar there, the avatar is selectable.
+`ModeBadge` labels the mode (LIVE in red). `StudioView` and the Office tab use the tile world; `OfficeScene` stays as the fallback when `manifest.tileWorld` is absent,
+disabled or fails to start.
+**Boundary.** Read-only: no endpoint or control placed in the World can create, size or close an order. The only backend import added to `api/world_api.py` is the
+sanctioned exporter `telemetry.world_export` (a mode label). `manifest.json` gains an additive `tileWorld` block; wire formats of the existing endpoints are unchanged.
+**Verified in a real browser** (headless Chromium + built dashboard) under all four modes (live with auth, since the app refuses live without it): badge, Studio and Office
+canvases, walking, room change, NPC click, `E`, Talk button, no console errors. Two bugs only visible there were fixed (scene data not handed over on creation; `setAvatar`
+before boot).
+**Follow-up.** Per-room NPC clutter at 5x7 interiors; hallway/lobby props; `player` is the only role with no dedicated LPC sheet (the avatar uses the 10 role sheets);
+the four garment-limited roles stand instead of emoting.
+**Tests.** `tests/test_world_mode.py` (4 modes x context/API/lane scoping + flag off + failure path), `world/tests/test_tile_world.py` (13: rebuild freshness,
+determinism, atlas integrity, 7 refusals), `tileWorld.test.ts` (38), `modeBadge.test.tsx` (12).

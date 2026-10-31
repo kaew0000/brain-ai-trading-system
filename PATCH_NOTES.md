@@ -1,43 +1,27 @@
-# PATCH NOTES — Office World LPC characters (V16 §93)
+# PATCH NOTES — Walkable tile Office World + mode-aware World (V16 §94)
 
-Branch: `feature/world-lpc-characters-s93`
-Base: `main` @ `d30b8ed` (PR #133 merged)
-Commit: `feat(world): LPC character sheets for the Office World (V16 §93)` (exactly one)
-Series: PR 1 of the "LPC characters + top-down Tiled rooms" plan. Rooms/tilemaps are NOT in this PR.
+Branch: `feature/world-tile-office-s94`
+Base: `main` after PR #134 (§93 LPC characters) merged
+Commit: `feat(world): walkable tile Office World, playable avatar, mode-aware World (V16 §94)` (exactly one)
 
 ## What
-The 10 uploaded Universal-LPC sheets (64x64 cells, 13 columns x 54 rows) now draw the Office World characters. Roles are the existing NPC roles
-(`ceo`, `data_analyst`, `ml_scientist`, `office_worker`, `quant_researcher`, `risk_manager`, `security_officer`, `trader`, `visitor_1`, `visitor_2`), so the
-backend, `CHARACTER_TO_ROLE` and the RenderFrame wire format are unchanged. Roles without a sheet (`player`) keep the existing art.
+1. A new top-down office world built from the supplied CoolSchool tileset replaces the isometric Office scene (kept as fallback).
+2. The player walks it (WASD / arrows / click-to-move, collision with walls and furniture); the 16 NPCs go where the simulation says and can be talked to (`E`, click).
+3. The World works in paper / testnet / live / training: it labels the mode and its portfolio figures follow the process's execution lane.
 
-## Findings that shaped the design (verified on the files)
-1. The `sit` rows are a sit-on-the-floor sequence, not a chair pose, so `working`/`meeting` stay standing; `sit` is used for `resting` only.
-2. `data_analyst`, `ml_scientist`, `quant_researcher`, `risk_manager` each wear one garment layer (`torso_clothes_longsleeve_formal` x2,
-   `torso_clothes_tunic`, `torso_jacket_frock`) that supports `walk` but not `idle`/`sit`/`emote`/`run`; those frames draw the torso bare. The importer
-   derives this per role from each export's JSON (`unsupportedAnimations`) and the scene falls back to the standing frame (walk frame 0).
-3. LPC facing is 4-way orthogonal (up/left/down/right), not isometric; it is drawn as-is in both projections.
+## Root causes (reproduced before any change)
+- Characters were display-only (no input, no collision; positions only from backend render commands).
+- `portfolio_payload()` read `journal.get_daily_stats()` without `execution_lane`: with LIVE +50 and TRAINING -50 every mode showed `dailyPnl = 0.0`
+  (`tests/test_world_mode.py::test_portfolio_summary_is_scoped_to_the_processs_lane` fails on the previous exporter).
+- Found only by running the built dashboard in headless Chromium: the scene was never handed data that arrived before it was created (no NPCs drawn), and `setAvatar`
+  touched `scene.textures` before boot (crash on every mount after the first). Both fixed.
 
-## Changes (additive)
-- `world/data/assets/lpc_characters.json` + `world/scripts/import_lpc_characters.py`: spec (folder->role, layout, behaviour->animation) and an idempotent importer
-  (copies sheets under normalised names, merges credits, writes the `lpc` block of `manifest.json`; other keys untouched; sheet size validated).
-- `dashboard_src/public/assets/world/lpc/*.png` (10 sheets), `manifest.json` `lpc` block, `third-party-licenses/lpc_credits.csv` + `LPC_CHARACTERS.md`.
-- `dashboard_src/src/pages/world/lpcAssets.ts`: pure helpers (rows/frames/behaviour/fallback), no Phaser.
-- `AssetRegistry.ts`: optional `lpc` manifest type, spritesheet loading, `getLpcNPC()`.
-- `OfficeScene.tsx`: LPC branch in the characters layer (static frame per behaviour, walk cycle during glides, NEAREST filtering). Used only when
-  `lpc.enabled` and the role has a loaded sheet; otherwise the previous iso/legacy path runs unchanged.
-- Tests: `world/tests/test_lpc_characters.py` (7), `lpcAssets.test.ts` (8).
-- Docs: `docs/architecture.md` §93, `CHANGELOG.md`, this file, `MIGRATION.md`.
+## Files
+Backend: `telemetry/world_export.py`, `api/world_api.py`, `config/settings.py` (one flag), `tests/test_world_export.py` (fake journal accepts `execution_lane`).
+Build: `world/scripts/build_tile_world.py`, `world/data/assets/tile_world.json`, `world/data/assets/source/`.
+Assets: `dashboard_src/public/assets/world/tile/*`, `manifest.json` (+`tileWorld`), `third-party-licenses/COOLSCHOOL_TILESET.md`.
+Frontend: `pages/world/{tileWorld.ts,modeBadge.ts,types.ts,api.ts,WorldPage.tsx}`, `components/{TileWorldScene,ModeBadge,StudioView}.tsx`, `game/config/world.config.ts`, `game/assets/AssetRegistry.ts` (type only).
+Docs: `docs/architecture.md` §94, `CHANGELOG.md`, this file, `MIGRATION.md`.
 
-## Quality gates (run in the sandbox)
-- `ruff check .`: All checks passed. `python -c "import main"`: OK.
-- `pytest tests/`: 3546 passed, 4 skipped, 3 failed. The 3 failures are `tests/test_dashboard_serving.py` (need a built dashboard); they fail identically on a clean `main`.
-- `pytest world/tests -m ""`: 599 passed. `tsc --noEmit`: clean. `vitest run`: 204 passed (21 files).
-- `vulture --min-confidence 80`: only pre-existing findings in `tests/test_weighting_key_namespace.py`; none in the new files.
-- NOT run: the browser (no visual check of the live World page in a real Phaser canvas) and `vite build`.
-
-## Not changed
-Backend, schema, config, order path, iso art/manifest block, `CHARACTER_TO_ROLE`, legacy 140x160 sheets (still loaded as the fallback).
-
-## Known follow-ups
-- `player` sheet (export one more LPC character) and re-exports of the 4 roles with garments that support idle/sit/emote.
-- PR 2+: Tiled top-down room maps (office tileset decision needed), Tilemap loader, collision/walkable layers, player-controlled walking, furniture props.
+## Impact
+No change to order execution, sizing, risk or journal writes. The lane scoping changes only what the World displays. Existing endpoints keep their wire format.

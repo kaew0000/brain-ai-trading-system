@@ -9,6 +9,7 @@ import Phaser from 'phaser';
 import { WORLD_CONFIG } from '../config/world.config';
 import type { IsoManifest } from '../../pages/world/isoAssets';
 import type { LpcManifest } from '../../pages/world/lpcAssets';
+import type { TileWorldManifest } from '../../pages/world/tileWorld';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -29,6 +30,8 @@ export interface WorldManifest {
   iso?: IsoManifest;
   /** V16 §93: Universal-LPC character sheets (optional so older manifests keep loading). */
   lpc?: LpcManifest;
+  /** V16 §94: walkable tile world (optional; absent or disabled -> the legacy isometric Office scene). */
+  tileWorld?: TileWorldManifest;
 }
 
 // NPC role resolution: callers pass an already-resolved role name (see

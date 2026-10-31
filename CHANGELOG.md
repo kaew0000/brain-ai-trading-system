@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## [Unreleased] — Walkable tile Office World + mode-aware World (V16 §94)
+
+The World is now a walkable top-down office built from the supplied CoolSchool tileset, replaces the isometric Office scene, and works (and labels itself) in
+every execution mode. Branch: `feature/world-tile-office-s94`.
+
+### Added
+- `world/scripts/build_tile_world.py`, `world/data/assets/tile_world.json`, `world/data/assets/source/CoolSchool_tileset.png`: deterministic atlas + map builder
+  (validates seat reachability, furniture bounds, character seating).
+- `dashboard_src/public/assets/world/tile/{atlas.png,atlas.json,office.map.json}`, `third-party-licenses/COOLSCHOOL_TILESET.md` (CC0).
+- `pages/world/tileWorld.ts` (pure collision / path finding / NPC goals), `components/TileWorldScene.tsx` (player + NPCs), `modeBadge.ts`, `components/ModeBadge.tsx`.
+- `GET /api/world/mode`; `telemetry.world_export.execution_context()`.
+- Tests: `tests/test_world_mode.py`, `world/tests/test_tile_world.py`, `tileWorld.test.ts`, `modeBadge.test.tsx`.
+
+### Changed
+- World portfolio figures (System Pulse PnL / win rate) are scoped to the process's execution lane (`WORLD_LANE_SCOPED_PORTFOLIO`, default on). Previously every lane was
+  blended, so TRAINING-lane paper trades showed up as account results. Display only.
+- `StudioView` / Office tab draw the tile world; `OfficeScene` remains the fallback (`manifest.tileWorld` absent, `enabled: false`, or startup failure).
+- `manifest.json` gains an additive `tileWorld` block; `WORLD_CONFIG.tileWorld` holds the gameplay constants.
+
 ## [Unreleased] — Office World LPC characters (V16 §93)
 
 The 10 Universal-LPC character sheets now draw the World characters (PR 1 of the LPC characters + top-down Tiled rooms series; rooms are a later PR).

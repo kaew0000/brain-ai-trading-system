@@ -1,0 +1,1461 @@
+{
+ "version": "1.0.0",
+ "tileSize": 48,
+ "source": {
+  "file": "CoolSchool_tileset.png",
+  "license": "CC0 (isaiah658 / CoolSchool tileset, see third-party-licenses/COOLSCHOOL_TILESET.md)"
+ },
+ "grid": {
+  "cols": 43,
+  "rows": 25,
+  "roomWidth": 6,
+  "interiorWidth": 5,
+  "interiorHeight": 7,
+  "north": {
+   "top": 0,
+   "wallRows": 2
+  },
+  "hall": {
+   "top": 10,
+   "rows": 5
+  },
+  "south": {
+   "top": 15,
+   "wallRows": 2
+  },
+  "doorTiles": [
+   2,
+   3
+  ]
+ },
+ "tiles": {
+  "wall_a": [
+   0,
+   144,
+   48,
+   48
+  ],
+  "wall_b": [
+   0,
+   192,
+   48,
+   48
+  ],
+  "floor_yellow": [
+   96,
+   0,
+   48,
+   48
+  ]
+ },
+ "floorVariants": {
+  "floor_blue": 121,
+  "floor_green": 50,
+  "floor_rose": 205,
+  "floor_teal": 89,
+  "floor_violet": 156
+ },
+ "sprites": {
+  "window": [
+   143,
+   12,
+   97,
+   66
+  ],
+  "board_green": [
+   105,
+   110,
+   125,
+   62
+  ],
+  "screen_wide": [
+   100,
+   192,
+   92,
+   50
+  ],
+  "shelf_books_a": [
+   240,
+   33,
+   48,
+   88
+  ],
+  "shelf_books_b": [
+   288,
+   33,
+   50,
+   88
+  ],
+  "cabinet_tall": [
+   338,
+   45,
+   46,
+   150
+  ],
+  "shelf_low_a": [
+   238,
+   142,
+   50,
+   75
+  ],
+  "shelf_low_b": [
+   288,
+   142,
+   50,
+   75
+  ],
+  "desk_s": [
+   0,
+   258,
+   48,
+   55
+  ],
+  "desk_m": [
+   48,
+   258,
+   96,
+   55
+  ],
+  "desk_l": [
+   144,
+   258,
+   96,
+   55
+  ],
+  "cab_a": [
+   240,
+   255,
+   48,
+   58
+  ],
+  "cab_b": [
+   289,
+   255,
+   48,
+   58
+  ],
+  "wardrobe": [
+   337,
+   226,
+   47,
+   88
+  ],
+  "counter_a": [
+   0,
+   355,
+   96,
+   54
+  ],
+  "counter_b": [
+   96,
+   355,
+   144,
+   54
+  ],
+  "counter_c": [
+   240,
+   355,
+   144,
+   54
+  ],
+  "chair_wood_back": [
+   7,
+   430,
+   36,
+   54
+  ],
+  "chair_wood_alt": [
+   55,
+   440,
+   36,
+   44
+  ],
+  "chair_side_l": [
+   104,
+   430,
+   32,
+   52
+  ],
+  "chair_side_r": [
+   152,
+   430,
+   32,
+   52
+  ],
+  "chair_office_a": [
+   197,
+   430,
+   38,
+   52
+  ],
+  "chair_office_b": [
+   245,
+   443,
+   38,
+   40
+  ],
+  "stool_a": [
+   296,
+   430,
+   36,
+   52
+  ],
+  "stool_b": [
+   340,
+   430,
+   36,
+   52
+  ],
+  "pc_crt": [
+   4,
+   483,
+   44,
+   48
+  ],
+  "pc_laptop": [
+   51,
+   488,
+   42,
+   42
+  ],
+  "pc_tower": [
+   100,
+   485,
+   42,
+   46
+  ],
+  "tv_old": [
+   146,
+   480,
+   46,
+   52
+  ],
+  "printer": [
+   194,
+   494,
+   46,
+   36
+  ],
+  "phone": [
+   243,
+   499,
+   40,
+   32
+  ],
+  "books_stack": [
+   3,
+   530,
+   45,
+   45
+  ],
+  "book_open": [
+   149,
+   548,
+   38,
+   28
+  ],
+  "papers": [
+   288,
+   548,
+   45,
+   28
+  ]
+ },
+ "furniture": {
+  "window": {
+   "footprint": [
+    2,
+    1
+   ],
+   "wall": true
+  },
+  "board_green": {
+   "footprint": [
+    3,
+    1
+   ],
+   "wall": true
+  },
+  "screen_wide": {
+   "footprint": [
+    2,
+    1
+   ],
+   "wall": true
+  },
+  "shelf_books_a": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "shelf_books_b": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "cabinet_tall": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "shelf_low_a": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "shelf_low_b": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "desk_s": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "desk_m": {
+   "footprint": [
+    2,
+    1
+   ]
+  },
+  "desk_l": {
+   "footprint": [
+    2,
+    1
+   ]
+  },
+  "cab_a": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "cab_b": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "wardrobe": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "counter_a": {
+   "footprint": [
+    2,
+    1
+   ]
+  },
+  "counter_b": {
+   "footprint": [
+    3,
+    1
+   ]
+  },
+  "counter_c": {
+   "footprint": [
+    3,
+    1
+   ]
+  },
+  "chair_wood_back": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "chair_wood_alt": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "chair_side_l": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "chair_side_r": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "chair_office_a": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "chair_office_b": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "stool_a": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "stool_b": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "tv_old": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "printer": {
+   "footprint": [
+    1,
+    1
+   ]
+  },
+  "pc_crt": {
+   "footprint": [
+    1,
+    1
+   ],
+   "onTop": true
+  },
+  "pc_laptop": {
+   "footprint": [
+    1,
+    1
+   ],
+   "onTop": true
+  },
+  "pc_tower": {
+   "footprint": [
+    1,
+    1
+   ],
+   "onTop": true
+  },
+  "phone": {
+   "footprint": [
+    1,
+    1
+   ],
+   "onTop": true
+  },
+  "books_stack": {
+   "footprint": [
+    1,
+    1
+   ],
+   "onTop": true
+  },
+  "book_open": {
+   "footprint": [
+    1,
+    1
+   ],
+   "onTop": true
+  },
+  "papers": {
+   "footprint": [
+    1,
+    1
+   ],
+   "onTop": true
+  }
+ },
+ "onTopLiftPx": 14,
+ "seatChair": "chair_office_a",
+ "rooms": {
+  "ceo-tower": {
+   "band": "north",
+   "slot": 0,
+   "floor": "floor_rose",
+   "seatChair": "chair_wood_back",
+   "seats": [
+    {
+     "x": 2,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "window",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "screen_wide",
+     "x": 3,
+     "y": -1
+    },
+    {
+     "item": "shelf_books_a",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "item": "wardrobe",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "desk_l",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "pc_crt",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "phone",
+     "x": 2,
+     "y": 3
+    },
+    {
+     "item": "papers",
+     "x": 2,
+     "y": 3,
+     "dx": -4
+    },
+    {
+     "item": "chair_side_l",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "chair_side_r",
+     "x": 4,
+     "y": 5
+    }
+   ]
+  },
+  "ai-council": {
+   "band": "north",
+   "slot": 1,
+   "floor": "floor_violet",
+   "seats": [
+    {
+     "x": 1,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "board_green",
+     "x": 1,
+     "y": -1
+    },
+    {
+     "item": "tv_old",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "item": "shelf_low_b",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "desk_m",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "desk_m",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "pc_laptop",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "pc_crt",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "books_stack",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "stool_a",
+     "x": 4,
+     "y": 5
+    }
+   ]
+  },
+  "research-district": {
+   "band": "north",
+   "slot": 2,
+   "floor": "floor_green",
+   "seats": [
+    {
+     "x": 1,
+     "y": 1,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "board_green",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "window",
+     "x": 3,
+     "y": -1
+    },
+    {
+     "item": "shelf_low_a",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "desk_l",
+     "x": 0,
+     "y": 2
+    },
+    {
+     "item": "desk_l",
+     "x": 3,
+     "y": 2
+    },
+    {
+     "item": "books_stack",
+     "x": 0,
+     "y": 2
+    },
+    {
+     "item": "pc_laptop",
+     "x": 1,
+     "y": 2
+    },
+    {
+     "item": "book_open",
+     "x": 3,
+     "y": 2
+    },
+    {
+     "item": "pc_tower",
+     "x": 4,
+     "y": 2
+    },
+    {
+     "item": "cab_a",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "stool_b",
+     "x": 4,
+     "y": 5
+    }
+   ]
+  },
+  "market-intelligence-center": {
+   "band": "north",
+   "slot": 3,
+   "floor": "floor_blue",
+   "seats": [
+    {
+     "x": 1,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "screen_wide",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "screen_wide",
+     "x": 3,
+     "y": -1
+    },
+    {
+     "item": "cab_b",
+     "x": 2,
+     "y": 0
+    },
+    {
+     "item": "desk_m",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "desk_m",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "pc_crt",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "pc_laptop",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "tv_old",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "printer",
+     "x": 4,
+     "y": 0
+    }
+   ]
+  },
+  "simulation-lab": {
+   "band": "north",
+   "slot": 4,
+   "floor": "floor_teal",
+   "seats": [
+    {
+     "x": 2,
+     "y": 1,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "board_green",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "tv_old",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "item": "tv_old",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "counter_b",
+     "x": 1,
+     "y": 2
+    },
+    {
+     "item": "pc_tower",
+     "x": 1,
+     "y": 2
+    },
+    {
+     "item": "pc_crt",
+     "x": 3,
+     "y": 2
+    },
+    {
+     "item": "books_stack",
+     "x": 2,
+     "y": 2,
+     "dx": 6
+    },
+    {
+     "item": "cab_a",
+     "x": 4,
+     "y": 4
+    },
+    {
+     "item": "stool_a",
+     "x": 0,
+     "y": 4
+    }
+   ]
+  },
+  "command-hall": {
+   "band": "north",
+   "slot": 5,
+   "floor": "floor_blue",
+   "seats": [
+    {
+     "x": 1,
+     "y": 2,
+     "facing": "down"
+    },
+    {
+     "x": 4,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "window",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "screen_wide",
+     "x": 3,
+     "y": -1
+    },
+    {
+     "item": "printer",
+     "x": 2,
+     "y": 0
+    },
+    {
+     "item": "desk_m",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "desk_s",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "pc_crt",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "phone",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "pc_laptop",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "shelf_low_b",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "item": "cab_a",
+     "x": 4,
+     "y": 0
+    }
+   ]
+  },
+  "journal-library": {
+   "band": "north",
+   "slot": 6,
+   "floor": "floor_rose",
+   "seats": [
+    {
+     "x": 3,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "window",
+     "x": 2,
+     "y": -1
+    },
+    {
+     "item": "shelf_books_a",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "item": "shelf_books_b",
+     "x": 1,
+     "y": 0
+    },
+    {
+     "item": "shelf_books_a",
+     "x": 3,
+     "y": 0
+    },
+    {
+     "item": "shelf_books_b",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "desk_m",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "book_open",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "papers",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "shelf_low_a",
+     "x": 0,
+     "y": 4
+    },
+    {
+     "item": "shelf_low_b",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "stool_b",
+     "x": 1,
+     "y": 5
+    }
+   ]
+  },
+  "world-gateway": {
+   "band": "south",
+   "slot": 0,
+   "floor": "floor_yellow",
+   "seats": [
+    {
+     "x": 2,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "window",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "screen_wide",
+     "x": 3,
+     "y": -1
+    },
+    {
+     "item": "counter_b",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "phone",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "pc_laptop",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "chair_side_l",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "chair_side_r",
+     "x": 4,
+     "y": 5
+    },
+    {
+     "item": "shelf_low_a",
+     "x": 4,
+     "y": 0
+    }
+   ]
+  },
+  "execution-forge": {
+   "band": "south",
+   "slot": 1,
+   "floor": "floor_blue",
+   "seats": [
+    {
+     "x": 1,
+     "y": 1,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "screen_wide",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "tv_old",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "desk_l",
+     "x": 0,
+     "y": 2
+    },
+    {
+     "item": "desk_l",
+     "x": 3,
+     "y": 2
+    },
+    {
+     "item": "pc_crt",
+     "x": 0,
+     "y": 2
+    },
+    {
+     "item": "pc_laptop",
+     "x": 1,
+     "y": 2
+    },
+    {
+     "item": "pc_crt",
+     "x": 3,
+     "y": 2
+    },
+    {
+     "item": "pc_tower",
+     "x": 4,
+     "y": 2
+    },
+    {
+     "item": "cab_a",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "cab_b",
+     "x": 4,
+     "y": 5
+    }
+   ]
+  },
+  "risk-fortress": {
+   "band": "south",
+   "slot": 2,
+   "floor": "floor_rose",
+   "seats": [
+    {
+     "x": 1,
+     "y": 1,
+     "facing": "down"
+    },
+    {
+     "x": 4,
+     "y": 1,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "window",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "shelf_low_b",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "desk_m",
+     "x": 0,
+     "y": 2
+    },
+    {
+     "item": "desk_s",
+     "x": 4,
+     "y": 2
+    },
+    {
+     "item": "pc_crt",
+     "x": 0,
+     "y": 2
+    },
+    {
+     "item": "papers",
+     "x": 1,
+     "y": 2
+    },
+    {
+     "item": "pc_laptop",
+     "x": 4,
+     "y": 2
+    },
+    {
+     "item": "cab_a",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "cab_b",
+     "x": 1,
+     "y": 5
+    },
+    {
+     "item": "wardrobe",
+     "x": 4,
+     "y": 5
+    }
+   ]
+  },
+  "data-center": {
+   "band": "south",
+   "slot": 3,
+   "floor": "floor_teal",
+   "seats": [
+    {
+     "x": 1,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "cabinet_tall",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "item": "cabinet_tall",
+     "x": 1,
+     "y": 0
+    },
+    {
+     "item": "cabinet_tall",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "desk_m",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "pc_tower",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "pc_crt",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "cabinet_tall",
+     "x": 3,
+     "y": 4
+    },
+    {
+     "item": "cabinet_tall",
+     "x": 4,
+     "y": 4
+    },
+    {
+     "item": "printer",
+     "x": 0,
+     "y": 5
+    }
+   ]
+  },
+  "training-arena": {
+   "band": "south",
+   "slot": 4,
+   "floor": "floor_green",
+   "seats": [
+    {
+     "x": 3,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "board_green",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "tv_old",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "desk_m",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "pc_laptop",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "books_stack",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "stool_a",
+     "x": 0,
+     "y": 3
+    },
+    {
+     "item": "stool_b",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "desk_s",
+     "x": 0,
+     "y": 1
+    },
+    {
+     "item": "shelf_low_a",
+     "x": 4,
+     "y": 5
+    }
+   ]
+  },
+  "recovery-center": {
+   "band": "south",
+   "slot": 5,
+   "floor": "floor_violet",
+   "seats": [
+    {
+     "x": 1,
+     "y": 3,
+     "facing": "down"
+    }
+   ],
+   "seatChair": "chair_wood_alt",
+   "items": [
+    {
+     "item": "window",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "screen_wide",
+     "x": 3,
+     "y": -1
+    },
+    {
+     "item": "tv_old",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "stool_a",
+     "x": 3,
+     "y": 3
+    },
+    {
+     "item": "stool_b",
+     "x": 3,
+     "y": 5
+    },
+    {
+     "item": "desk_s",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "book_open",
+     "x": 4,
+     "y": 3
+    },
+    {
+     "item": "shelf_low_a",
+     "x": 0,
+     "y": 6
+    },
+    {
+     "item": "shelf_low_b",
+     "x": 1,
+     "y": 6
+    }
+   ]
+  },
+  "portfolio-garden": {
+   "band": "south",
+   "slot": 6,
+   "floor": "floor_green",
+   "seats": [
+    {
+     "x": 2,
+     "y": 2,
+     "facing": "down"
+    }
+   ],
+   "items": [
+    {
+     "item": "window",
+     "x": 0,
+     "y": -1
+    },
+    {
+     "item": "window",
+     "x": 3,
+     "y": -1
+    },
+    {
+     "item": "desk_m",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "books_stack",
+     "x": 1,
+     "y": 3
+    },
+    {
+     "item": "papers",
+     "x": 2,
+     "y": 3
+    },
+    {
+     "item": "shelf_low_a",
+     "x": 0,
+     "y": 0
+    },
+    {
+     "item": "shelf_low_b",
+     "x": 4,
+     "y": 0
+    },
+    {
+     "item": "stool_a",
+     "x": 0,
+     "y": 5
+    },
+    {
+     "item": "stool_b",
+     "x": 4,
+     "y": 5
+    }
+   ]
+  }
+ },
+ "special": {
+  "elevator": {
+   "rect": [
+    1,
+    10,
+    5,
+    5
+   ],
+   "floor": "floor_teal",
+   "items": [
+    {
+     "item": "cab_a",
+     "x": 1,
+     "y": 10
+    },
+    {
+     "item": "cab_b",
+     "x": 2,
+     "y": 10
+    }
+   ],
+   "meet": [
+    3,
+    12
+   ]
+  },
+  "hallway": {
+   "rect": [
+    6,
+    10,
+    30,
+    5
+   ],
+   "floor": "floor_yellow",
+   "items": [
+    {
+     "item": "shelf_low_a",
+     "x": 8,
+     "y": 10
+    },
+    {
+     "item": "shelf_low_b",
+     "x": 26,
+     "y": 10
+    },
+    {
+     "item": "stool_a",
+     "x": 15,
+     "y": 10
+    },
+    {
+     "item": "stool_b",
+     "x": 20,
+     "y": 10
+    }
+   ],
+   "meet": [
+    20,
+    12
+   ]
+  },
+  "lobby": {
+   "rect": [
+    36,
+    10,
+    6,
+    5
+   ],
+   "floor": "floor_blue",
+   "items": [
+    {
+     "item": "counter_a",
+     "x": 37,
+     "y": 10
+    },
+    {
+     "item": "chair_side_l",
+     "x": 40,
+     "y": 13
+    },
+    {
+     "item": "chair_side_r",
+     "x": 41,
+     "y": 13
+    }
+   ],
+   "meet": [
+    38,
+    12
+   ]
+  }
+ },
+ "spawn": {
+  "tile": [
+   39,
+   12
+  ],
+  "facing": "left"
+ },
+ "wallItemLiftPx": 20,
+ "wanderPoints": 12,
+ "floorSaturation": 0.5
+}

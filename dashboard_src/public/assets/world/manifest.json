@@ -700,5 +700,15 @@
         "sit"
       ]
     }
+  },
+  "tileWorld": {
+    "enabled": true,
+    "version": "1.0.0",
+    "atlas": {
+      "image": "/assets/world/tile/atlas.png",
+      "data": "/assets/world/tile/atlas.json"
+    },
+    "map": "/assets/world/tile/office.map.json",
+    "defaultAvatar": "office_worker"
   }
 }
