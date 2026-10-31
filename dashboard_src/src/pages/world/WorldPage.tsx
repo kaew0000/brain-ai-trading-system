@@ -6,9 +6,12 @@
 // renderer's own already-public APIs.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { worldApi, wsWorld } from './api'
-import type { RoomActivity, SimulationState } from './types'
+import type { CharacterActivity, RoomActivity, SimulationState } from './types'
 import { deriveWsStatus, WS_STATUS_CLASSNAME, WS_STATUS_LABEL } from './wsStatus'
 import OfficeScene from './components/OfficeScene'
+import TileWorldScene from './components/TileWorldScene'
+import ModeBadge from './components/ModeBadge'
+import { loadManifest } from '../../game/assets/AssetRegistry'
 import SystemPulse from './components/SystemPulse'
 import { useLiveFrame } from './useLiveFrame'
 import RoomList from './components/RoomList'
@@ -32,13 +35,27 @@ const TABS: { id: TabId; label: string }[] = [
 
 export default function WorldPage() {
   const [rooms, setRooms] = useState<RoomActivity[]>([])
+  // V16 §94: live NPC data for the tile world, and whether it is in use ('off' -> legacy isometric OfficeScene).
+  const [characters, setCharacters] = useState<CharacterActivity[]>([])
+  const [tick, setTick] = useState(0)
+  const [tileState, setTileState] = useState<'checking' | 'on' | 'off'>('checking')
+  const [walkTo, setWalkTo] = useState<{ roomId: string; nonce: number } | null>(null)
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null)
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabId>('studio')
   const [wsStatus, setWsStatus] = useState<'LIVE' | 'RECONNECTING' | 'DISCONNECTED'>('DISCONNECTED')
   const hasEverConnectedRef = useRef(false)
   // V16 §82: the selected room's frame, refreshed on every world tick (WS) with a slow poll fallback.
-  const frame = useLiveFrame(selectedRoomId, wsStatus)
+  // The tile world draws from simulation state, so the per-room frame is only polled for the legacy scene.
+  const frame = useLiveFrame(tileState === 'on' ? null : selectedRoomId, wsStatus)
+
+  useEffect(() => {
+    let alive = true
+    loadManifest()
+      .then((m) => { if (alive) setTileState(m.tileWorld?.enabled && m.lpc?.enabled ? 'on' : 'off') })
+      .catch(() => { if (alive) setTileState('off') })
+    return () => { alive = false }
+  }, [])
 
   // Initial hydration via REST — matches the same "REST for initial
   // hydration, WebSocket for realtime" split the rest of this dashboard
@@ -55,6 +72,10 @@ export default function WorldPage() {
         // Previously this was an unhandled promise rejection.
         console.warn('world: initial room hydration failed', err)
       })
+    worldApi
+      .getSimulationState()
+      .then((sim) => { setCharacters(sim.characters); setTick(sim.tick.tickNumber) })
+      .catch((err) => console.warn('world: initial simulation hydration failed', err)) // the WS init message also carries it
   }, [])
 
   // Realtime: /ws/world pushes the current SimulationState whenever its
@@ -67,6 +88,8 @@ export default function WorldPage() {
       const msg = raw as { type: string; data?: SimulationState }
       if ((msg.type === 'init' || msg.type === 'simulation') && msg.data) {
         setRooms(msg.data.rooms)
+        setCharacters(msg.data.characters ?? [])
+        setTick(msg.data.tick?.tickNumber ?? 0)
       }
     })
     return unsubscribe
@@ -90,13 +113,23 @@ export default function WorldPage() {
 
   const characterIdsInFrame = useMemo(
     () =>
-      (frame?.commands ?? [])
-        .filter((c) => c.layer === 'characters')
-        .map((c) => c.entityId),
-    [frame],
+      tileState === 'on'
+        ? characters.map((c) => c.agentId)
+        : (frame?.commands ?? []).filter((c) => c.layer === 'characters').map((c) => c.entityId),
+    [frame, tileState, characters],
   )
 
+  const tileWorldProps = tileState === 'on' ? { characters, rooms, tick, onUnavailable: () => setTileState('off') } : null
+
   const handleSelectRoom = (roomId: string) => {
+    setSelectedRoomId(roomId)
+    setSelectedCharacterId(null)
+    worldApi.select('room', roomId).catch(() => undefined)
+    setWalkTo({ roomId, nonce: Date.now() }) // tile world: the player walks there
+  }
+
+  // The player walked into a room: follow it in the inspector without sending the avatar anywhere.
+  const handlePlayerRoom = (roomId: string) => {
     setSelectedRoomId(roomId)
     setSelectedCharacterId(null)
     worldApi.select('room', roomId).catch(() => undefined)
@@ -111,13 +144,16 @@ export default function WorldPage() {
     <div className="p-6 space-y-4" data-testid="world-page">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-white">Office World</h1>
-        <span
-          data-testid="world-ws-status"
-          data-ws-state={wsStatus}
-          className={`text-xs rounded-full px-2 py-1 ${WS_STATUS_CLASSNAME[wsStatus]}`}
-        >
-          {WS_STATUS_LABEL[wsStatus]}
-        </span>
+        <div className="flex items-center gap-2">
+          <ModeBadge />
+          <span
+            data-testid="world-ws-status"
+            data-ws-state={wsStatus}
+            className={`text-xs rounded-full px-2 py-1 ${WS_STATUS_CLASSNAME[wsStatus]}`}
+          >
+            {WS_STATUS_LABEL[wsStatus]}
+          </span>
+        </div>
       </header>
 
       <nav className="flex gap-2 border-b border-slate-800 pb-2" data-testid="world-tabs">
@@ -136,7 +172,7 @@ export default function WorldPage() {
         ))}
       </nav>
 
-      {tab === 'studio' && <StudioView frame={frame} wsStatus={wsStatus} />}
+      {tab === 'studio' && tileState !== 'checking' && <StudioView frame={frame} wsStatus={wsStatus} tileWorld={tileWorldProps} />}
 
       {tab === 'scene' && <SystemPulse />}
 
@@ -147,7 +183,18 @@ export default function WorldPage() {
             <RoomList rooms={rooms} selectedRoomId={selectedRoomId} onSelect={handleSelectRoom} />
           </div>
           <div className="space-y-2">
-            <OfficeScene frame={frame} />
+            {tileState === 'on' && (
+              <TileWorldScene
+                characters={characters}
+                rooms={rooms}
+                tick={tick}
+                walkTo={walkTo}
+                onSelectCharacter={handleSelectCharacter}
+                onRoomChange={handlePlayerRoom}
+                onUnavailable={() => setTileState('off')}
+              />
+            )}
+            {tileState === 'off' && <OfficeScene frame={frame} />}
             {characterIdsInFrame.length > 0 && (
               <div className="flex flex-wrap gap-2" data-testid="character-chip-list">
                 {characterIdsInFrame.map((agentId) => (

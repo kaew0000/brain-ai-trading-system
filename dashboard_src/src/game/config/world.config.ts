@@ -49,6 +49,31 @@ export const WORLD_CONFIG = {
   pulseStaleSeconds: 180,
   /** Recent events listed in the System Pulse. */
   pulseRecentEvents: 5,
+
+  // Tile world (V16 §94) — the walkable office that replaces the isometric Office scene
+  tileWorld: {
+    /** Player walking speed. */
+    playerSpeedPxPerSec: 150,
+    /** NPC walking speed; below the player's so the player can always catch up with someone. */
+    npcSpeedPxPerSec: 80,
+    /** An NPC this close (px, feet to feet) can be talked to with E / a click. */
+    interactRangePx: 72,
+    /** Feet collision box: half width and height (px), anchored at the feet point. */
+    hitboxHalfWidthPx: 10,
+    hitboxHeightPx: 8,
+    /** Feet point sits this many px below the top of the tile the character stands on. */
+    footOffsetPx: 40,
+    /** Camera follow smoothing (0..1 per frame). */
+    cameraLerp: 0.12,
+    cameraZoom: 1.25,
+    canvasHeightPx: 540,
+    /** A 'walking' NPC picks a new waypoint in its room every N simulation ticks. */
+    wanderEveryTicks: 4,
+    /** localStorage key of the player's chosen avatar. */
+    avatarStorageKey: 'brainbot.world.avatar',
+    /** Upper bound on tiles a path search may expand (map is ~1k tiles; guards against a bad map). */
+    maxPathNodes: 4096,
+  },
 } as const;
 
 export type WorldConfig = typeof WORLD_CONFIG;

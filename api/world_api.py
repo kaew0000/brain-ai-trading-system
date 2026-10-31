@@ -33,6 +33,11 @@ from world.runtime import api as runtime_api
 from world.simulation import api as simulation_api
 from world.simulation import ticker as ticker_module
 
+# V16 §94: the one non-world import. telemetry.world_export is the Track A exporter (the
+# sanctioned one-way channel, see docs/architecture/SEPARATION_POLICY.md); the mode/lane it
+# reports is a plain label, read-only, and nothing here can change it.
+from telemetry.world_export import execution_context
+
 router = APIRouter(prefix="/api/world", tags=["world"])
 
 
@@ -48,6 +53,13 @@ def _ok(data) -> JSONResponse:
 @router.get("/state")
 async def get_world_state():
     return _ok(runtime_api.get_world_state().to_dict())
+
+
+@router.get("/mode")
+async def get_world_mode():
+    """V16 §94: execution mode (paper|testnet|live|training...), journal lane and whether
+    figures are lane-scoped. Lets the World label itself in every mode."""
+    return _ok(execution_context())
 
 
 @router.get("/simulation")

@@ -205,6 +205,12 @@ class Settings(BaseSettings):
     # engine's own default of 500.
     WORLD_TIMELINE_HISTORY_WINDOW: int = Field(default=900, alias="WORLD_TIMELINE_HISTORY_WINDOW", ge=1)
 
+    # V16 §94 — the World's PnL / win-rate figures follow the process's own execution lane
+    # (live|testnet -> LIVE, paper|training -> TRAINING) instead of blending every lane, so the
+    # always-on training lane's paper trades can no longer show up as real-account results.
+    # Display only: nothing in execution/ or risk/ reads it. False restores the old combined view.
+    WORLD_LANE_SCOPED_PORTFOLIO: bool = Field(default=True, alias="WORLD_LANE_SCOPED_PORTFOLIO")
+
     # V16 §83 — World chat & meetings (world/chat/). Rule-based NPC replies
     # built from real agent state; no LLM, no network. The ONLY write path
     # World has: a small JSON chat store, never execution/ or risk/.

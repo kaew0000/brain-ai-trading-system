@@ -3,11 +3,12 @@
 // all data comes from existing World endpoints plus /api/world/chat/*.
 import { useEffect, useState } from 'react'
 import OfficeScene from './OfficeScene'
+import TileWorldScene from './TileWorldScene'
 import ChatPanel from './ChatPanel'
 import MeetingPanel from './MeetingPanel'
 import { KanbanPanel, ResultsPanel } from './KanbanPanel'
 import { CHANNEL_OFFICE, chatApi, dmChannel, type Roster } from '../chatApi'
-import type { RenderFrame } from '../types'
+import type { CharacterActivity, RenderFrame, RoomActivity } from '../types'
 import { WS_STATUS_CLASSNAME, WS_STATUS_LABEL } from '../wsStatus'
 
 type SideTab = 'chat' | 'meeting' | 'kanban' | 'results'
@@ -21,12 +22,21 @@ const SIDE_TABS: { id: SideTab; label: string }[] = [
 
 const ROSTER_POLL_MS = 5000
 
+/** V16 §94: live data for the walkable tile world. Absent -> the legacy isometric OfficeScene is drawn. */
+export interface StudioTileWorld {
+  characters: CharacterActivity[]
+  rooms: RoomActivity[]
+  tick: number
+  onUnavailable?: (reason: string) => void
+}
+
 interface StudioViewProps {
   frame: RenderFrame | null
   wsStatus: 'LIVE' | 'RECONNECTING' | 'DISCONNECTED'
+  tileWorld?: StudioTileWorld | null
 }
 
-export default function StudioView({ frame, wsStatus }: StudioViewProps) {
+export default function StudioView({ frame, wsStatus, tileWorld }: StudioViewProps) {
   const [roster, setRoster] = useState<Roster | null>(null)
   const [rosterError, setRosterError] = useState<string | null>(null)
   const [side, setSide] = useState<SideTab>('chat')
@@ -87,7 +97,20 @@ export default function StudioView({ frame, wsStatus }: StudioViewProps) {
           </ul>
         </aside>
 
-        <div><OfficeScene frame={frame} /></div>
+        <div>
+          {tileWorld ? (
+            <TileWorldScene
+              characters={tileWorld.characters}
+              rooms={tileWorld.rooms}
+              tick={tileWorld.tick}
+              onUnavailable={tileWorld.onUnavailable}
+              // talking to an NPC in the world opens a direct chat with it
+              onSelectCharacter={(id) => { setChannel(dmChannel(id)); setSide('chat') }}
+            />
+          ) : (
+            <OfficeScene frame={frame} />
+          )}
+        </div>
 
         <aside data-testid="studio-side">
           {side === 'chat' && <ChatPanel key={channel} channel={channel} title={channelTitle} agents={agents} />}

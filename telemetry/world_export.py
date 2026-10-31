@@ -236,6 +236,30 @@ def mission_rows() -> list[dict[str, Any]]:
     return _safe(_load, [], "missions")
 
 
+def execution_context() -> dict[str, Any]:
+    """The process's execution mode and journal lane, for the World's mode badge and for
+    scoping portfolio figures (V16 §94). Read at call time from config.settings (same lazy
+    pattern as execution/order_timeline.py), never cached, so a mode change on restart is
+    always reflected. Unknown modes are TRAINING-lane, matching config.settings' fail-safe."""
+    try:
+        import config.settings as cfg
+
+        mode = str(cfg.EXECUTION_MODE).lower()
+        lane = str(cfg.EXECUTION_LANE).upper()
+        scoped = bool(getattr(cfg.settings, "WORLD_LANE_SCOPED_PORTFOLIO", True))
+    except Exception as exc:  # noqa: BLE001 - the World must still render without a mode
+        logger.warning("world_export: execution context unavailable (%s)", exc)
+        return {"mode": "unknown", "lane": None, "laneScoped": False, "realMoney": False}
+    return {
+        "mode": mode,
+        "lane": lane,
+        "laneScoped": scoped,
+        # Only the LIVE lane touches the real exchange account; testnet shares the LIVE
+        # code path but its money is fake, so it is not "real money".
+        "realMoney": mode == "live",
+    }
+
+
 def portfolio_payload(journal=None) -> dict[str, Any]:
     """Positions list is deliberately left empty — no verified
     read-only accessor for the trading engine's currently-open
@@ -257,7 +281,11 @@ def portfolio_payload(journal=None) -> dict[str, Any]:
                 summary["drawdown"] = d["drawdown"]
 
         if journal is not None:
-            stats = journal.get_daily_stats()
+            ctx = execution_context()
+            if ctx["laneScoped"] and ctx["lane"]:
+                stats = journal.get_daily_stats(execution_lane=ctx["lane"])
+            else:
+                stats = journal.get_daily_stats()
             if stats.get("total_trades", 0) > 0:
                 summary["winRate"] = stats.get("win_rate")
                 summary["dailyPnl"] = stats.get("total_pnl")
