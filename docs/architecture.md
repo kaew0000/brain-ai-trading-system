@@ -8084,3 +8084,10 @@ before boot).
 the four garment-limited roles stand instead of emoting.
 **Tests.** `tests/test_world_mode.py` (4 modes x context/API/lane scoping + flag off + failure path), `world/tests/test_tile_world.py` (13: rebuild freshness,
 determinism, atlas integrity, 7 refusals), `tileWorld.test.ts` (38), `modeBadge.test.tsx` (12).
+
+## 95. Responsive Office World / Studio (2026-10-31)
+Fixed 3-column grids made the World unusable on phones (world canvas ~170 px wide and off-screen at 390 px). `WorldPage` and `StudioView` are now one column below `lg`
+(world first via `order-*`), three columns from `lg` up exactly as before; tabs scroll; canvas capped at 70vh. CSS only; no behaviour or API change.
+**Found, not fixed.** With `API_AUTH_ENABLED=false` the client's `ManagedWS` never connects (no token) although `enforce_ws_role()` would accept the socket, so the World
+stays DISCONNECTED. Shared auth plumbing; needs its own decision.
+**Verified** in headless Chromium against the running app (auth on): WS LIVE, walk, room change, tab cycling, no error banner, at 1400 px and 390 px.

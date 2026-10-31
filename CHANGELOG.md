@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## [Unreleased] — World usable on phones / narrow screens (V16 §95)
+
+The Office World and Studio were unusable below ~1000 px: fixed 3-column grids squeezed the canvas to ~170 px and pushed it off-screen. Layout is now responsive.
+Branch: `fix/world-responsive-layout-s95`.
+
+### Fixed
+- `pages/world/WorldPage.tsx`, `components/StudioView.tsx`: the 3-column grids are single-column below `lg` (1024 px) with the world first, rooms / roster and
+  inspector / chat after it; unchanged at and above `lg`. Tabs scroll horizontally instead of overflowing; header wraps; page padding `p-3` on phones.
+- `components/TileWorldScene.tsx`: canvas `maxHeight: 70vh` so a landscape phone is not filled by the canvas alone.
+
+### Known, not changed (documented in architecture.md §95)
+- With `API_AUTH_ENABLED=false` the dashboard never opens any `/ws/*` channel (`ManagedWS` refuses to connect without a token while the server would accept it), so the
+  World shows DISCONNECTED and only REST hydration updates it. Shared auth code, outside the World; deliberately not touched here.
+
 ## [Unreleased] — Walkable tile Office World + mode-aware World (V16 §94)
 
 The World is now a walkable top-down office built from the supplied CoolSchool tileset, replaces the isometric Office scene, and works (and labels itself) in

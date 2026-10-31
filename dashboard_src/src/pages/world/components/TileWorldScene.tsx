@@ -489,7 +489,7 @@ export default function TileWorldScene({ characters, rooms, tick, walkTo, onSele
       <div
         ref={containerRef}
         data-testid="tile-world-canvas"
-        style={{ height: TW.canvasHeightPx }}
+        style={{ height: TW.canvasHeightPx, maxHeight: '70vh' }}
         className="w-full rounded-lg overflow-hidden border border-slate-700 bg-slate-900"
       />
       {status === 'error' && <p className="text-xs text-rose-400" role="alert" data-testid="tile-world-error">{errorText}</p>}

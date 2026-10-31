@@ -75,8 +75,8 @@ export default function StudioView({ frame, wsStatus, tileWorld }: StudioViewPro
 
       {rosterError && <p className="text-xs text-rose-400" role="alert" data-testid="studio-error">{rosterError}</p>}
 
-      <div className="grid grid-cols-[200px,1fr,340px] gap-4">
-        <aside className="space-y-2" data-testid="studio-roster">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[200px,1fr,340px]">
+        <aside className="order-2 min-w-0 space-y-2 lg:order-1" data-testid="studio-roster">
           <h2 className="text-xs uppercase text-slate-500">Conversations</h2>
           <button type="button" onClick={() => { setChannel(CHANNEL_OFFICE); setSide('chat') }}
             className={`w-full rounded px-3 py-2 text-left text-sm ${channel === CHANNEL_OFFICE ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
@@ -97,7 +97,7 @@ export default function StudioView({ frame, wsStatus, tileWorld }: StudioViewPro
           </ul>
         </aside>
 
-        <div>
+        <div className="order-1 min-w-0 lg:order-2">
           {tileWorld ? (
             <TileWorldScene
               characters={tileWorld.characters}
@@ -112,7 +112,7 @@ export default function StudioView({ frame, wsStatus, tileWorld }: StudioViewPro
           )}
         </div>
 
-        <aside data-testid="studio-side">
+        <aside className="order-3 min-w-0" data-testid="studio-side">
           {side === 'chat' && <ChatPanel key={channel} channel={channel} title={channelTitle} agents={agents} />}
           {side === 'meeting' && <MeetingPanel agents={agents} />}
           {side === 'kanban' && <KanbanPanel />}
