@@ -141,8 +141,8 @@ export default function WorldPage() {
   }
 
   return (
-    <div className="p-6 space-y-4" data-testid="world-page">
-      <header className="flex items-center justify-between">
+    <div className="p-3 sm:p-6 space-y-4" data-testid="world-page">
+      <header className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold text-white">Office World</h1>
         <div className="flex items-center gap-2">
           <ModeBadge />
@@ -156,14 +156,14 @@ export default function WorldPage() {
         </div>
       </header>
 
-      <nav className="flex gap-2 border-b border-slate-800 pb-2" data-testid="world-tabs">
+      <nav className="flex gap-2 overflow-x-auto border-b border-slate-800 pb-2" data-testid="world-tabs">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             data-testid={`world-tab-${t.id}`}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-1.5 rounded-t text-sm ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-t text-sm ${
               tab === t.id ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -177,12 +177,12 @@ export default function WorldPage() {
       {tab === 'scene' && <SystemPulse />}
 
       {tab === 'scene' && (
-        <div className="grid grid-cols-[240px,1fr,280px] gap-4">
-          <div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px,1fr,280px]">
+          <div className="order-2 min-w-0 lg:order-1">
             <h2 className="text-xs uppercase text-slate-500 mb-2">Rooms</h2>
             <RoomList rooms={rooms} selectedRoomId={selectedRoomId} onSelect={handleSelectRoom} />
           </div>
-          <div className="space-y-2">
+          <div className="order-1 min-w-0 space-y-2 lg:order-2">
             {tileState === 'on' && (
               <TileWorldScene
                 characters={characters}
@@ -214,7 +214,7 @@ export default function WorldPage() {
               </div>
             )}
           </div>
-          <div>
+          <div className="order-3 min-w-0">
             <h2 className="text-xs uppercase text-slate-500 mb-2">Inspector</h2>
             <Inspector
               kind={selectedCharacterId ? 'character' : 'room'}
