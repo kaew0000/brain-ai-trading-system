@@ -69,7 +69,13 @@ def _is_duplicate_order_error(exc: ClientError) -> bool:
     """True if this ClientError means 'an order with this client id already exists'."""
     code = getattr(exc, "error_code", None)
     msg  = (getattr(exc, "error_message", "") or "").lower()
-    return code == -2010 and "duplicate" in msg or code == -4015
+    # V16 §96 (BUG-S96-04): USDS-M Futures reports a reused client id as
+    # -4116 "ClientOrderId is duplicated" (code recalled from Binance's
+    # futures error table, not independently re-verified here — see
+    # PATCH_NOTES.md). Previously only -2010/-4015 were recognised, so an
+    # ambiguous-timeout retry whose first attempt had actually filled came
+    # back as a plain "rejected" instead of being recovered via query_order.
+    return (code in (-2010, -4116) and "duplicate" in msg) or code == -4015
 
 
 class TradeManager:
@@ -835,7 +841,19 @@ class TradeManager:
                     "SL placement FAILED after all fallbacks — "
                     "closing naked position immediately to protect account"
                 )
-                self.close_position(direction, qty, client_order_id=new_client_order_id("EMERGCLOSE"))
+                # V16 §96 (BUG-S96-03): the result used to be ignored, so a
+                # FAILED emergency close still raised "naked position closed
+                # for safety" while the position stayed open with no SL.
+                close_order = self.close_position(
+                    direction, qty, client_order_id=new_client_order_id("EMERGCLOSE")
+                )
+                if not close_order:
+                    logger.critical(
+                        f"EMERGENCY CLOSE FAILED for {self.symbol} {direction} "
+                        f"qty={qty}: position may be OPEN WITHOUT A STOP-LOSS — "
+                        f"close it manually on the exchange NOW"
+                    )
+                    result["naked_position_open"] = True
                 # V16 Phase 4B Step 3D (Part E): notify the lifecycle,
                 # if one was provided, that this open attempt failed.
                 # Modeled as an open-side FAILURE (open_pending ->
@@ -859,6 +877,12 @@ class TradeManager:
                         )
                     except Exception as lifecycle_exc:
                         logger.error(f"TradeManager: EMERGCLOSE lifecycle notify failed: {lifecycle_exc}")
+                if not close_order:
+                    raise RuntimeError(
+                        "SL order rejected by exchange (all tiers exhausted) "
+                        "AND emergency close FAILED; NAKED POSITION STILL OPEN "
+                        "— manual close required"
+                    )
                 raise RuntimeError(
                     "SL order rejected by exchange (all tiers exhausted); "
                     "naked position closed for safety"

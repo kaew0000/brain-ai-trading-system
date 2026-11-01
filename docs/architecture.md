@@ -8091,3 +8091,16 @@ Fixed 3-column grids made the World unusable on phones (world canvas ~170 px wid
 **Found, not fixed.** With `API_AUTH_ENABLED=false` the client's `ManagedWS` never connects (no token) although `enforce_ws_role()` would accept the socket, so the World
 stays DISCONNECTED. Shared auth plumbing; needs its own decision.
 **Verified** in headless Chromium against the running app (auth on): WS LIVE, walk, room change, tab cycling, no error banner, at 1400 px and 390 px.
+
+## 96. Failed Orders Are Not Journaled OPEN (2026-11-01)
+
+**Problem.** `TradeRecord.from_decision()` initialises `result="OPEN"`. `run_trading_cycle` journaled every decision after `execute_trade()`, including failed ones (quantity 0).
+`monitor_open_trades()` treats "journal OPEN + no exchange position" as a natural close and settles WIN/LOSS from the mark price; `JournalV2.get_consecutive_losses()` then counts the
+phantom LOSS and `RiskEngine` blocks trading (`consecutive_losses`).
+
+**Change.** (1) `main._apply_execution_outcome_to_record()` → `CANCELLED` on failure (statuses `OPEN`/`CANCELLED` are already excluded from daily stats). (2) `monitor_open_trades()` skips
+and heals rows with `quantity<=0` as `CANCELLED` (exit=entry ⇒ rr 0, pnl 0). (3) `TradeManager.execute_trade()` checks the emergency-close result and flags `naked_position_open`.
+(4) `_is_duplicate_order_error()` also accepts `-4116`.
+
+**Dependency graph.** Unchanged (no new imports). **Tests.** `tests/test_v16_s96_failed_trade_phantom_loss.py`.
+**Open items.** See `docs/V16_BUG_AUDIT_S96.md` §3 (R-01..R-11).

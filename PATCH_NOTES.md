@@ -1,25 +1,26 @@
-# PATCH NOTES — World usable on phones / narrow screens (V16 §95)
+# PATCH NOTES — Failed orders no longer journaled OPEN → phantom LOSS (V16 §96)
 
-Branch: `fix/world-responsive-layout-s95`
-Base: `main` at `71bb682` (PR #135, §94 merged)
-Commit: `fix(world): responsive Office World and Studio layout (V16 §95)` (exactly one)
+Branch: `fix/failed-trade-phantom-loss-s96`
+Base: `main` at `45fc675` (PR #136, §95 merged) · intended PR: #137
+Commit: `fix(execution): failed orders no longer journaled OPEN / phantom LOSS (V16 §96)` (exactly one)
 
-## Root cause (reproduced before any change)
-Ran the real app (paper mode, auth on, built dashboard) in headless Chromium at 390x844. `WorldPage` (Office tab) used `grid-cols-[240px,1fr,280px]` and `StudioView`
-`grid-cols-[200px,1fr,340px]` at every width. At 390 px the middle column got ~172 px and started at x=335, i.e. the world canvas was a sliver beyond the right edge;
-the tab bar and Studio overflowed horizontally. Desktop (1400 px) was fine: WebSocket LIVE, avatar walks, room change, tab cycling without errors.
+## Root cause (reproduced by test before the change)
+`TradeRecord.from_decision()` always starts a row as `OPEN`; `main.run_trading_cycle` saved it even when `execute_trade()` failed (qty 0). `monitor_open_trades()` then
+saw "OPEN row, no position on exchange" and settled it as WIN/LOSS from the mark price (→ LOSS). `JournalV2.get_consecutive_losses()` counts it, so three failed orders
+(margin, minQty, SL-failed emergency close) tripped the consecutive-loss gate with no real loss. `test_three_failed_orders_do_not_trip_loss_streak` fails on the old code.
 
 ## Files
-`dashboard_src/src/pages/world/WorldPage.tsx`, `components/StudioView.tsx`, `components/TileWorldScene.tsx` (class names / one style only), `CHANGELOG.md`,
-`docs/architecture.md` (§95), this file, `MIGRATION.md`.
+`main.py`, `execution/trade_manager.py`, `tests/test_v16_s96_failed_trade_phantom_loss.py`, `docs/V16_BUG_AUDIT_S96.md` (full bug list + hand-off), `CHANGELOG.md`,
+`docs/architecture.md` (§96), `MIGRATION.md`, this file.
 
 ## Impact
-CSS only. No logic, endpoint, wire format, execution, risk or journal change. At >= 1024 px the rendered layout is identical.
-After the fix at 390 px the canvas is ~299 px wide inside the viewport; Studio fits without horizontal scroll (checked in Chromium).
+Failed executions are stored `CANCELLED` (already excluded from daily stats); monitor heals existing `OPEN` rows with `quantity<=0` to `CANCELLED`; a failed emergency close is
+reported honestly (`NAKED POSITION STILL OPEN`, `result["naked_position_open"]=True`); `-4116` recognised as duplicate clientOrderId. No schema/config/API change. Successful
+trades and the SL-failure-with-successful-close message are unchanged.
+
+## Verification
+Baseline 3560 passed / 3 failed → after 3569 passed / 3 failed (same 3 `tests/test_dashboard_serving.py` failures: need a built `dashboard/`). ruff clean on changed files.
 
 ## Not changed / limitations
-- `API_AUTH_ENABLED=false`: `lib/api.ts` `ManagedWS.connect()` returns early without a token, while `enforce_ws_role()` accepts unauthenticated sockets when auth is off,
-  so no `/ws/*` channel connects and the World shows DISCONNECTED. Reproduced; shared auth code, so left for a separate decision. Auth-on setups are unaffected.
-- No on-screen joystick: phones use tap-to-move.
-- Between 1024 and ~1280 px the 3-column layout is tight (unchanged from before).
-- The layout is verified in a real browser, not by a unit test (jsdom does not evaluate Tailwind breakpoints).
+Open items R-01..R-11 are listed with fixes in `docs/V16_BUG_AUDIT_S96.md` (notably: outcome is still a mark-price heuristic; journal still stores the signal price, not the fill).
+`-4116` is from memory of Binance's futures error table and unverified. No live exchange was used. 3 pre-existing failures in `tests/test_dashboard_serving.py` need a built `dashboard/`.

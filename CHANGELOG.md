@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## [Unreleased] — Failed orders no longer journaled OPEN / phantom LOSS (V16 §96)
+
+A failed execution was saved as `OPEN`, later settled as a phantom `LOSS` by `monitor_open_trades()`, and counted by the consecutive-loss gate, so failed orders could
+block trading with zero real losses. Branch: `fix/failed-trade-phantom-loss-s96`. Full bug list and hand-off: `docs/V16_BUG_AUDIT_S96.md`.
+
+### Fixed
+- `main.py`: `_apply_execution_outcome_to_record()` marks a failed execution `CANCELLED`; `monitor_open_trades()` heals `OPEN` rows with `quantity<=0` to `CANCELLED`.
+- `execution/trade_manager.py`: emergency-close result is checked (CRITICAL log + `naked_position_open` + explicit error when the naked position could not be closed);
+  `-4116` accepted as a duplicate-clientOrderId error (code unverified against live docs).
+
+### Added
+- `tests/test_v16_s96_failed_trade_phantom_loss.py` (9 tests), `docs/V16_BUG_AUDIT_S96.md`.
+
+### Known, not changed
+11 open items (R-01..R-11) in `docs/V16_BUG_AUDIT_S96.md` — notably mark-price outcome heuristic and signal-price (not fill-price) journaling.
+
 ## [Unreleased] — World usable on phones / narrow screens (V16 §95)
 
 The Office World and Studio were unusable below ~1000 px: fixed 3-column grids squeezed the canvas to ~170 px and pushed it off-screen. Layout is now responsive.
