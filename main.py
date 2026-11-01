@@ -874,6 +874,14 @@ def build_system() -> dict:
     }
 
 
+def _apply_execution_outcome_to_record(rec, exec_result: dict) -> None:
+    """V16 §96 (BUG-S96-01): a record whose execution failed never became a
+    position, so it must not stay "OPEN" (see the comment at the call site).
+    Mutates ``rec`` in place; a successful execution leaves it untouched."""
+    if not exec_result.get("success"):
+        rec.result = "CANCELLED"
+
+
 # ── Trading cycle ─────────────────────────────────────────────────────────────
 
 def run_trading_cycle(sys: dict) -> None:
@@ -1475,6 +1483,15 @@ def run_trading_cycle(sys: dict) -> None:
             volume    = vol_signals,
             execution = exec_result if exec_result["success"] else None,
         )
+        # V16 §96 (BUG-S96-01): from_decision() always starts a record as
+        # "OPEN". When execution FAILED there is no position and
+        # quantity is 0, so leaving it OPEN made monitor_open_trades()
+        # later "close" it as a phantom LOSS (no position on the exchange),
+        # which get_consecutive_losses() counted — three failed orders
+        # (margin, minQty, SL-failed emergency close) tripped the
+        # consecutive-loss risk gate with zero real losses. CANCELLED is
+        # the status the journal already excludes from daily stats.
+        _apply_execution_outcome_to_record(rec, exec_result)
         # Phase 4B Step 1: carries this cycle's signal_id onto the trade row
         # so get_agent_performance() can join back to which agents voted for
         # the direction that was actually traded.
@@ -1615,8 +1632,21 @@ def monitor_open_trades(sys: dict) -> None:
             sl        = float(trade["stop_loss"])
             tp        = float(trade["take_profit"])
             direction = trade["direction"]
-            qty       = float(trade.get("quantity", 0.0))
+            qty       = float(trade.get("quantity") or 0.0)
             symbol    = trade.get("symbol") or settings.SYMBOL
+
+            # V16 §96 (BUG-S96-02): a row with no quantity never became a
+            # position (failed/rejected execution journaled as OPEN by
+            # builds before §96). Settling it as WIN/LOSS fabricates a loss
+            # that feeds the consecutive-loss gate. Heal it as CANCELLED
+            # (exit_price=entry so the stored rr is 0, not garbage).
+            if qty <= 0:
+                jrn.update_trade_result(tid, "CANCELLED", entry, 0.0)
+                logger.warning(
+                    f"Trade #{tid} {symbol}: OPEN row with quantity<=0 "
+                    f"(never filled) → CANCELLED, not counted as a loss"
+                )
+                continue
 
             if settings.SCHEDULER_ENABLED:
                 if symbol not in mark_price_cache:
