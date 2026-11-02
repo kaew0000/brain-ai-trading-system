@@ -150,6 +150,13 @@ class TestLeverageReQueryOnSetLeverageFailure:
     checked. On failure, re-query the exchange's real current leverage and
     size the trade against THAT — not the intended-but-unconfirmed value."""
 
+    @pytest.fixture(autouse=True)
+    def _guard_off(self):
+        # V16 §98: the entry guard also calls get_position_risk(); these
+        # tests count THAT call for the leverage re-query, so isolate them.
+        with patch("config.settings.settings.ENTRY_EXISTING_POSITION_GUARD_ENABLED", False):
+            yield
+
     def _stub_happy_order_flow(self, client):
         client.new_order.return_value = {"orderId": 1, "status": "FILLED"}
 

@@ -13,7 +13,7 @@ Method: real clone, code read, pytest. No live/testnet exchange was available �
 | **R-01** outcome = mark-price heuristic | High | **Fixed (§97)** | new `journal/exit_truth.py`; `monitor_open_trades` prefers real fills, falls back to the old heuristic |
 | **R-02** journal stores signal price/qty, not the fill | High | **Fixed (§97)** | `TradeManager._confirm_entry_fill`; `TradeRecord.from_decision`; `ExecutionOrchestrator` open path |
 | S97-01 §96 side effect: all rows healed ⇒ mission cleared without a close | Low | **Fixed (§97)** | loop-carried `result/pnl/exit_px` initialised; mission block guarded (introduced by my own §96 `continue`; found while wiring R-01) |
-| R-03 `cancel_all_orders()` before entry can strip SL/TP of an existing position | Medium | **Open** | refuse entry (or skip cancel) when `get_position_info(symbol)` shows a position |
+| R-03 `cancel_all_orders()` before entry can strip SL/TP of an existing position | Medium | **Fixed (§98)** | refuse entry (or skip cancel) when `get_position_info(symbol)` shows a position |
 | R-04 Commander pause/lifecycle gates fail-open (`except: logger.debug`) | Medium | **Open — needs owner decision** | design comment says fail-open is intentional |
 | R-05 legacy single-symbol loop and `ExecutionScheduler` share no position state | Medium | **Open** | refuse to run both on overlapping symbols or share `PortfolioState` |
 | R-06 API binds `0.0.0.0` by default; `_boot_login_url` puts the API key in `?token=` | Medium (security) | **Open** | default `127.0.0.1`; drop token-in-URL |

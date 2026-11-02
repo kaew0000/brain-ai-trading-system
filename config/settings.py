@@ -768,6 +768,13 @@ class Settings(BaseSettings):
     # or any write path other than journal.save_execution_attribution(),
     # which every trade already goes through for diagnostic attribution).
     FEE_BACKFILL_ENABLED: bool = Field(default=False, alias="FEE_BACKFILL_ENABLED")
+
+    # V16 §98 (R-03): refuse a new entry when the exchange already shows an
+    # open position on the symbol (cancel_all_orders() would strip its
+    # closePosition SL/TP). Safety guard, so ON by default; set false to
+    # restore the exact pre-§98 behaviour.
+    ENTRY_EXISTING_POSITION_GUARD_ENABLED: bool = Field(
+        default=True, alias="ENTRY_EXISTING_POSITION_GUARD_ENABLED")
     FEE_BACKFILL_INTERVAL_MINUTES: int = Field(default=15, alias="FEE_BACKFILL_INTERVAL_MINUTES")
     # How far back to look for trades still missing fee data. Bounded so a
     # cold start (or a long gap while FEE_BACKFILL_ENABLED was off) doesn't

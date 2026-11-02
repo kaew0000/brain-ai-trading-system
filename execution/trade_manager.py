@@ -270,6 +270,37 @@ class TradeManager:
         return None
 
     @retry_api_call(retries=3, delay=2.0)
+    def _existing_position_amt(self) -> float | None:
+        """V16 §98 (R-03): signed exchange position size for this symbol.
+
+        Returns 0.0 when flat, a non-zero float when a position exists and
+        None when it could not be verified (non-retryable lookup failure or
+        unusable payload). Retryable errors propagate so @retry_api_call's
+        retries are real (same contract as _query_actual_leverage).
+        """
+        try:
+            raw = self.client.get_position_risk(symbol=self.symbol, recvWindow=5000)
+        except ClientError as exc:
+            if _is_retryable_client_error(exc):
+                logger.warning(f"_existing_position_amt error (retryable, propagating): {exc}")
+                raise
+            logger.error(f"_existing_position_amt error (non-retryable): {exc}")
+            return None
+        except Exception as exc:  # noqa: BLE001 — best-effort guard, never a new failure mode
+            logger.warning(f"_existing_position_amt unavailable ({exc!r}) — unverified")
+            return None
+        total = 0.0
+        seen = False
+        for p in raw or []:
+            if p.get("symbol") == self.symbol:
+                try:
+                    total += float(p.get("positionAmt"))
+                    seen = True
+                except (TypeError, ValueError):
+                    return None
+        return total if seen else None
+
+    @retry_api_call(retries=3, delay=2.0)
     def set_margin_type(self, margin_type: str = "ISOLATED") -> bool:
         try:
             self.client.change_margin_type(symbol=self.symbol, marginType=margin_type)
@@ -841,6 +872,24 @@ class TradeManager:
         }
 
         try:
+            # V16 §98 (R-03): cancel_all_orders() below also cancels the
+            # closePosition SL/TP of any position ALREADY open on this
+            # symbol, leaving it naked, and set_leverage/set_margin_type
+            # can alter a live position. Refuse before touching anything.
+            if settings.ENTRY_EXISTING_POSITION_GUARD_ENABLED:
+                existing = self._existing_position_amt()
+                if existing is None:
+                    logger.warning(
+                        f"{self.symbol}: existing-position check could not be "
+                        f"verified — proceeding as before (guard is best-effort)"
+                    )
+                elif abs(existing) > 0:
+                    raise RuntimeError(
+                        f"Entry refused: {self.symbol} already has an open "
+                        f"position (positionAmt={existing}); existing SL/TP "
+                        f"left untouched"
+                    )
+
             intended_leverage = leverage or settings.LEVERAGE
             leverage_ok = self.set_leverage(intended_leverage)
             self.set_margin_type(settings.MARGIN_TYPE)
@@ -930,8 +979,12 @@ class TradeManager:
                 # V16 §96 (BUG-S96-03): the result used to be ignored, so a
                 # FAILED emergency close still raised "naked position closed
                 # for safety" while the position stayed open with no SL.
+                # V16 §98: close what was actually filled. A reduceOnly
+                # order larger than the position is rejected, which would
+                # leave a partially-filled position naked.
+                close_qty = result["filled_qty"] or qty
                 close_order = self.close_position(
-                    direction, qty, client_order_id=new_client_order_id("EMERGCLOSE")
+                    direction, close_qty, client_order_id=new_client_order_id("EMERGCLOSE")
                 )
                 if not close_order:
                     logger.critical(

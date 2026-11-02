@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## [Unreleased] — Never strip the SL/TP of an already-open position on a new entry (V16 §98)
+
+R-03 from `docs/V16_BUG_AUDIT_S97.md`. Branch: `fix/entry-existing-position-guard-s98`.
+
+### Fixed
+- `TradeManager.execute_trade()` called `cancel_all_orders()` (and `set_leverage`/`set_margin_type`) before entering, which cancels the `closePosition` SL/TP of a position already open on the symbol and can alter its leverage/margin. A new entry is now refused up front when the exchange shows a non-zero `positionAmt` for the symbol.
+- Emergency close after a failed SL placement used the signal qty; after a partial fill a larger `reduceOnly` order is rejected and the position stayed naked. It now closes the confirmed filled qty (signal qty when the fill was not confirmed).
+
+### Added
+- `settings.ENTRY_EXISTING_POSITION_GUARD_ENABLED` (default `true`; `false` restores the exact pre-§98 behaviour). If the position lookup itself cannot be verified the entry proceeds as before (best-effort guard, logged).
+- `tests/test_v16_s98_entry_position_guard.py` (8 tests; 4 fail on `main`).
+
 ## [Unreleased] — Real entry fill and real closed-trade outcome in the journal (V16 §97)
 
 R-02/R-01 from `docs/V16_BUG_AUDIT_S97.md`. Branch: `fix/real-fill-and-realized-pnl-s97`.
