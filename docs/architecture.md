@@ -8114,3 +8114,9 @@ and heals rows with `quantity<=0` as `CANCELLED` (exit=entry ⇒ rr 0, pnl 0). (
 **Dependency graph.** `main.py → journal/exit_truth.py → journal/fee_backfill._sum_commission`. No new third-party dependency.
 **Tests.** `tests/test_v16_s97_real_fill_and_exit.py`, `tests/test_execution_orchestrator.py::TestRealFillIsJournaled`.
 **Open items / limits.** `docs/V16_BUG_AUDIT_S97.md` (R-03..R-12; Binance behaviour assumptions to verify on testnet).
+
+---
+
+## 98. Entry Guard for Already-Open Positions (2026-11-02)
+
+**Problem (R-03).** `execute_trade()` cancelled all open orders for the symbol before every entry, which removes the `closePosition` SL/TP of an existing position. **Fix.** `TradeManager._existing_position_amt()` (`get_position_risk(symbol)`) runs first; non-zero ⇒ entry refused before `set_leverage`/`set_margin_type`/`cancel_all_orders`. Lookup failure ⇒ legacy behaviour (best-effort). Emergency close after SL failure now uses `result["filled_qty"]` when confirmed. Flag `ENTRY_EXISTING_POSITION_GUARD_ENABLED` (default on). Tests: `tests/test_v16_s98_entry_position_guard.py`.
