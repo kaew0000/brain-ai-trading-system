@@ -1,26 +1,22 @@
-# PATCH NOTES — Failed orders no longer journaled OPEN → phantom LOSS (V16 §96)
+# PATCH NOTES — Real fill & real exit outcome in the journal (V16 §97)
 
-Branch: `fix/failed-trade-phantom-loss-s96`
-Base: `main` at `45fc675` (PR #136, §95 merged) · intended PR: #137
-Commit: `fix(execution): failed orders no longer journaled OPEN / phantom LOSS (V16 §96)` (exactly one)
+Branch: `fix/real-fill-and-realized-pnl-s97`
+Base: `main` at `0a99e76` (PR #137, §96 merged) · intended PR: #138
+Commit: `fix(journal): record the real entry fill and the real closed-trade outcome (V16 §97)` (exactly one)
 
-## Root cause (reproduced by test before the change)
-`TradeRecord.from_decision()` always starts a row as `OPEN`; `main.run_trading_cycle` saved it even when `execute_trade()` failed (qty 0). `monitor_open_trades()` then
-saw "OPEN row, no position on exchange" and settled it as WIN/LOSS from the mark price (→ LOSS). `JournalV2.get_consecutive_losses()` counts it, so three failed orders
-(margin, minQty, SL-failed emergency close) tripped the consecutive-loss gate with no real loss. `test_three_failed_orders_do_not_trip_loss_streak` fails on the old code.
+## Problem
+* R-02: the journal and `TRADE_EXECUTED` used the signal's price/qty. USDS-M market orders are acked before they are priced, so slippage and partial fills were invisible and R-multiples skewed.
+* R-01: `monitor_open_trades()` decided WIN/LOSS from the mark price when it noticed the position was gone (TP hit + pullback ⇒ LOSS), priced the trade at that mark and ignored fees. That outcome feeds RiskEngine's consecutive-loss gate and the learning pipeline.
+* Side effect of §96: when every OPEN row was healed by `qty<=0 → continue`, the mission-close block hit unbound variables and still cleared `current_mission_id`.
 
 ## Files
-`main.py`, `execution/trade_manager.py`, `tests/test_v16_s96_failed_trade_phantom_loss.py`, `docs/V16_BUG_AUDIT_S96.md` (full bug list + hand-off), `CHANGELOG.md`,
-`docs/architecture.md` (§96), `MIGRATION.md`, this file.
+`execution/trade_manager.py`, `analytics/trade_journal.py`, `execution/execution_orchestrator.py`, `main.py`, **new** `journal/exit_truth.py`, **new** `tests/test_v16_s97_real_fill_and_exit.py`, `tests/test_execution_orchestrator.py` (+3), `docs/V16_BUG_AUDIT_S97.md`, `CHANGELOG.md`, `docs/architecture.md` (§97), `MIGRATION.md`, this file.
 
-## Impact
-Failed executions are stored `CANCELLED` (already excluded from daily stats); monitor heals existing `OPEN` rows with `quantity<=0` to `CANCELLED`; a failed emergency close is
-reported honestly (`NAKED POSITION STILL OPEN`, `result["naked_position_open"]=True`); `-4116` recognised as duplicate clientOrderId. No schema/config/API change. Successful
-trades and the SL-failure-with-successful-close message are unchanged.
+## Behaviour
+Entry: real `avgPrice/executedQty` read back (response, else ≤3 `query_order` polls); journaled instead of signal price/qty; `fill_price/filled_qty/fill_confirmed/slippage_pct` added to the execute result; terminal-unfilled entry aborts before SL; read-back failure ⇒ unchanged behaviour. Exit: outcome/exit price/PnL from the trade's real fills (`journal/exit_truth.py`, PnL net of commissions), mark-price heuristic only as fallback.
 
 ## Verification
-Baseline 3560 passed / 3 failed → after 3569 passed / 3 failed (same 3 `tests/test_dashboard_serving.py` failures: need a built `dashboard/`). ruff clean on changed files.
+Baseline (main @ 0a99e76 + §96) 3569 passed / 3 failed → after **3596 passed / 3 failed** (same 3 in `tests/test_dashboard_serving.py`: need a built `dashboard/`). 8 of the 24 new tests fail on the pre-§97 code (incl. "TP hit then pullback is still a WIN"). `ruff` clean on changed files.
 
-## Not changed / limitations
-Open items R-01..R-11 are listed with fixes in `docs/V16_BUG_AUDIT_S96.md` (notably: outcome is still a mark-price heuristic; journal still stores the signal price, not the fill).
-`-4116` is from memory of Binance's futures error table and unverified. No live exchange was used. 3 pre-existing failures in `tests/test_dashboard_serving.py` need a built `dashboard/`.
+## Not verified / not changed
+No live or testnet exchange was available: ACK-style market response, `userTrades` field names and its 7-day window are from Binance docs/memory — verify on testnet before trusting outcomes. Open items R-03..R-12 are in `docs/V16_BUG_AUDIT_S97.md`.

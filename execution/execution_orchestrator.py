@@ -570,6 +570,11 @@ class ExecutionOrchestrator:
             rec.stop_loss   = signal.stop_loss
             rec.take_profit = signal.take_profit
             rec.quantity    = result.get("quantity") or 0.0
+            # V16 §97 (R-02): journal the REAL fill when TradeManager read
+            # it back (fill_confirmed), not the signal price / planned qty.
+            if result.get("fill_confirmed"):
+                rec.entry_price = float(result["fill_price"])
+                rec.quantity    = float(result["filled_qty"])
             rec.order_id    = order_id
             trade_id = self.journal.save_trade(rec, execution_lane=self.execution_lane, signal_id=sig_id)
 
@@ -582,7 +587,12 @@ class ExecutionOrchestrator:
             # synchronously by the time this method runs — see
             # trade_lifecycle.py's own module docstring for why that's a
             # documented limitation, not new to this phase.
-            slippage = _compute_slippage(signal.direction, signal.entry_price, entry_order)
+            # V16 §97: an ACK-style entry response has no avgPrice, so
+            # slippage was always None; use the confirmed fill when present.
+            slip_src = entry_order
+            if result.get("fill_confirmed") and isinstance(entry_order, dict):
+                slip_src = {**entry_order, "avgPrice": result["fill_price"]}
+            slippage = _compute_slippage(signal.direction, signal.entry_price, slip_src)
             handle = self.lifecycle.open_pending(alloc.symbol)
             self.lifecycle.open_executing(handle)
             self.lifecycle.open_confirmed(

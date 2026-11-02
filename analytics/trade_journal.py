@@ -146,6 +146,11 @@ class TradeRecord:
 
         if execution and execution.get("success"):
             rec.quantity  = execution.get("quantity", 0.0)
+            # V16 §97 (R-02): journal what the exchange actually filled, not
+            # the signal's price/qty, whenever the fill was read back.
+            if execution.get("fill_confirmed"):
+                rec.entry_price = float(execution["fill_price"])
+                rec.quantity    = float(execution["filled_qty"])
             entry_ord     = execution.get("entry_order")
             if entry_ord:
                 rec.order_id = str(entry_ord.get("orderId", ""))
