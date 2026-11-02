@@ -892,3 +892,41 @@ class TestCloseSideAttribution:
         updates = [c for c in jrn.attribution_calls if c[0] == "update_trade_result"]
         assert updates == []
 
+
+
+# ── V16 §97: journal the REAL fill, not the signal ───────────────────────
+
+class TestRealFillIsJournaled:
+
+    class _FilledEngine(FakeEngine):
+        def execute_trade(self, **kwargs):
+            result = super().execute_trade(**kwargs)
+            # ACK-style entry order (no avgPrice) + TradeManager's read-back.
+            result["entry_order"] = {"orderId": 777, "status": "NEW"}
+            result.update(fill_confirmed=True, fill_price=50_010.0, filled_qty=1.2)
+            return result
+
+    def test_confirmed_fill_overrides_signal_price_and_planned_qty(self):
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=self._FilledEngine(), journal=journal)
+        orch.execute(make_decision(selected=[make_allocation()]), PortfolioState(), 1_000.0)
+
+        rec = journal.trades[0]["rec"]
+        assert rec.entry_price == 50_010.0     # signal was 50_000.0
+        assert rec.quantity == 1.2             # planned was 1.23
+
+    def test_slippage_uses_confirmed_fill_when_order_has_no_avg_price(self):
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=self._FilledEngine(), journal=journal)
+        orch.execute(make_decision(selected=[make_allocation()]), PortfolioState(), 1_000.0)
+
+        calls = [c for c in journal.attribution_calls if c[0] == "save_execution_attribution"]
+        assert calls[0][2]["slippage"] == pytest.approx(10.0)   # LONG paid 10 more
+
+    def test_unconfirmed_fill_keeps_previous_behaviour(self):
+        journal = FakeJournal()
+        orch = make_orchestrator(engine=FakeEngine(), journal=journal)
+        orch.execute(make_decision(selected=[make_allocation()]), PortfolioState(), 1_000.0)
+
+        rec = journal.trades[0]["rec"]
+        assert rec.entry_price == 50_000.0 and rec.quantity == 1.23

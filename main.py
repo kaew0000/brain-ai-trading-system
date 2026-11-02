@@ -1523,11 +1523,13 @@ def run_trading_cycle(sys: dict) -> None:
             logger.info(f"Trade #{tid} executed successfully")
             brain_pub.info(
                 "TRADE_EXECUTED",
-                f"Trade #{tid} {decision.action} executed at {decision.entry_price:.2f}",
+                f"Trade #{tid} {decision.action} executed at {rec.entry_price:.2f}",
                 payload={
                     "trade_id":    tid,
                     "action":      decision.action,
-                    "entry_price": decision.entry_price,
+                    "entry_price": rec.entry_price,        # real fill when confirmed (§97)
+                    "signal_price": decision.entry_price,
+                    "slippage_pct": exec_result.get("slippage_pct"),
                     "stop_loss":   decision.stop_loss,
                     "take_profit": decision.take_profit,
                     "confidence":  decision.confidence,
@@ -1626,6 +1628,16 @@ def monitor_open_trades(sys: dict) -> None:
             mark = dp.get_mark_price()
             trades_to_process = open_trades
 
+        # V16 §97: loop-carried values read after the loop (mission close).
+        # Without these, a pass where EVERY row was skipped/healed by the
+        # §96 `qty<=0 → continue` left result/pnl/exit_px unbound; the
+        # mission block below then raised UnboundLocalError (swallowed at
+        # debug level) and its `finally` still cleared current_mission_id,
+        # dropping a live mission without recording any close.
+        result: str | None = None
+        pnl: float = 0.0
+        exit_px: float | None = None
+
         for trade in trades_to_process:
             tid       = trade["id"]
             entry     = float(trade["entry_price"])
@@ -1653,18 +1665,42 @@ def monitor_open_trades(sys: dict) -> None:
                     mark_price_cache[symbol] = dp.get_mark_price(symbol=symbol)
                 mark = mark_price_cache[symbol]
 
-            # Signed PnL — positive for profit, negative for loss
-            if direction == "LONG":
-                raw_pnl = (mark - entry) * qty
-                result  = "WIN" if mark >= tp * 0.995 else "LOSS"
-            else:
-                raw_pnl = (entry - mark) * qty
-                result  = "WIN" if mark <= tp * 1.005 else "LOSS"
+            # V16 §97 (R-01): prefer the trade's REAL fills from Binance
+            # (exit price, realized PnL, commissions). The mark-price
+            # threshold below is only the fallback when the fills cannot be
+            # attributed (see journal/exit_truth.py for exactly when).
+            truth = None
+            try:
+                from journal.exit_truth import resolve_realized_exit
+                truth = resolve_realized_exit(
+                    dp.client, symbol, direction, trade.get("order_id"), qty,
+                )
+            except Exception as exc:
+                logger.warning(f"Trade #{tid} {symbol}: exit_truth lookup failed: {exc}")
 
-            # PnL is already in USDT: (price_delta) × qty
-            # qty itself was sized using risk_pct and NOT pre-multiplied by leverage,
-            # so we must NOT apply leverage again here — that would double-count it.
-            pnl = raw_pnl
+            if truth is not None:
+                result  = truth["result"]
+                pnl     = truth["pnl"]      # net of commissions when known
+                exit_px = truth["exit_price"]
+                close_reason = "exchange_fills"
+                logger.info(
+                    f"Trade #{tid} {symbol}: outcome from exchange fills "
+                    f"(exit={exit_px}, gross={truth['gross_pnl']}, fees={truth['fees']})"
+                )
+            else:
+                # Fallback (unchanged behaviour): signed PnL from the mark
+                # price — positive for profit, negative for loss.
+                if direction == "LONG":
+                    raw_pnl = (mark - entry) * qty
+                    result  = "WIN" if mark >= tp * 0.995 else "LOSS"
+                else:
+                    raw_pnl = (entry - mark) * qty
+                    result  = "WIN" if mark <= tp * 1.005 else "LOSS"
+                # PnL is in USDT: (price_delta) × qty; qty is NOT
+                # pre-multiplied by leverage, so don't apply it again.
+                pnl = raw_pnl
+                exit_px = mark
+                close_reason = f"{result.lower()}_threshold_heuristic"
 
             # V16 Phase 4B Step 3D: routed through TradeLifecycle (Part
             # C: "the only write path") instead of calling
@@ -1703,10 +1739,10 @@ def monitor_open_trades(sys: dict) -> None:
                     logger.error(f"Trade #{tid} {symbol}: PortfolioState release failed: {exc}")
 
             if lifecycle is not None:
-                handle = lifecycle.request_exit(symbol, source, f"{result.lower()}_threshold_heuristic", trade_id=tid)
+                handle = lifecycle.request_exit(symbol, source, close_reason, trade_id=tid)
                 if handle is not None:
                     lifecycle.exit_executing(handle)
-                    lifecycle.exit_confirmed(handle, result=result, exit_price=mark, pnl=pnl)
+                    lifecycle.exit_confirmed(handle, result=result, exit_price=exit_px, pnl=pnl)
                 else:
                     # Duplicate-close guard fired (Part I) — this trade_id
                     # was already closed through the lifecycle by another
@@ -1715,15 +1751,15 @@ def monitor_open_trades(sys: dict) -> None:
                     # write below keeps this loop's own long-standing
                     # "always close what the exchange says is closed"
                     # guarantee intact rather than silently dropping it.
-                    jrn.update_trade_result(tid, result, mark, pnl)
+                    jrn.update_trade_result(tid, result, exit_px, pnl)
             else:
-                jrn.update_trade_result(tid, result, mark, pnl)
+                jrn.update_trade_result(tid, result, exit_px, pnl)
             logger.info(f"Trade #{tid} closed → {result} pnl={pnl:.2f} U")
 
             brain_pub.info(
                 "TRADE_CLOSED",
                 f"Trade #{tid} closed: {result} pnl={pnl:.2f} U",
-                payload={"trade_id": tid, "result": result, "pnl": pnl, "exit_price": mark},
+                payload={"trade_id": tid, "result": result, "pnl": pnl, "exit_price": exit_px},
             )
 
         # ── v14 Phase 2.5 — Mission Pipeline: MONITORING → CLOSED ──────────────
@@ -1732,13 +1768,13 @@ def monitor_open_trades(sys: dict) -> None:
         # error here must never affect journal correctness (already written above).
         mission_tracker = sys.get("mission_tracker")
         mission_id = sys.get("current_mission_id")
-        if mission_tracker is not None and mission_id is not None:
+        if mission_tracker is not None and mission_id is not None and result is not None:
             mission_obj = mission_tracker.get(mission_id)
             try:
                 mission_tracker.advance(
                     mission_id, "CLOSED",
                     note=f"{result} pnl={pnl:.2f} U",
-                    meta_update={"pnl": pnl, "exit_price": mark, "result": result},
+                    meta_update={"pnl": pnl, "exit_price": exit_px, "result": result},
                 )
             except Exception as exc:
                 logger.debug(f"Mission tracker final CLOSED advance skipped: {exc}")

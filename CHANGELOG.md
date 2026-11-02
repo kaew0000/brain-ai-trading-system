@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## [Unreleased] — Real entry fill and real closed-trade outcome in the journal (V16 §97)
+
+R-02/R-01 from `docs/V16_BUG_AUDIT_S97.md`. Branch: `fix/real-fill-and-realized-pnl-s97`.
+
+### Fixed
+- Journal/`TRADE_EXECUTED` recorded the signal price/qty instead of the exchange fill; slippage on the orchestrator path was always `None` for ACK-style responses.
+- `monitor_open_trades()` decided WIN/LOSS from the mark price and ignored fees; it now uses the trade's real fills (`journal/exit_truth.py`), mark-price heuristic only as fallback.
+- §96 side effect: healing every OPEN row cleared `current_mission_id` without recording a close.
+
+### Added
+- `TradeManager._confirm_entry_fill()`; `fill_price/filled_qty/fill_confirmed/slippage_pct` on the execute result; terminal-unfilled entries abort before SL.
+- `journal/exit_truth.py`; `tests/test_v16_s97_real_fill_and_exit.py` (24) + 3 orchestrator tests; `docs/V16_BUG_AUDIT_S97.md`.
+
+### Changed
+- Closed-trade `pnl` is net of commissions when resolved from fills.
+
 ## [Unreleased] — Failed orders no longer journaled OPEN / phantom LOSS (V16 §96)
 
 A failed execution was saved as `OPEN`, later settled as a phantom `LOSS` by `monitor_open_trades()`, and counted by the consecutive-loss gate, so failed orders could

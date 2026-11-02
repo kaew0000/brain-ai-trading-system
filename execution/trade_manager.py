@@ -78,6 +78,10 @@ def _is_duplicate_order_error(exc: ClientError) -> bool:
     return (code in (-2010, -4116) and "duplicate" in msg) or code == -4015
 
 
+# V16 §97: order statuses that mean "will never fill" (used with executedQty == 0).
+_UNFILLED_TERMINAL = frozenset({"CANCELED", "EXPIRED", "REJECTED", "EXPIRED_IN_MATCH"})
+
+
 class TradeManager:
 
     def __init__(self, data_provider, symbol: str | None = None, lifecycle=None) -> None:
@@ -728,6 +732,54 @@ class TradeManager:
 
     # ── Full trade execution sequence ─────────────────────────────────────
 
+    def _confirm_entry_fill(self, order, client_order_id: str,
+                            attempts: int = 3, delay: float = 0.4) -> dict | None:
+        """V16 §97: best-effort read-back of an entry order's real fill.
+
+        Returns {"status", "executed_qty", "avg_price"} or None when nothing
+        trustworthy could be read (never raises, never blocks the trade: the
+        caller then keeps the signal price and fill_confirmed=False). The
+        order response is used as-is when it is already a priced FILLED
+        order; otherwise query_order() is polled a few times while the order
+        is still in flight (NEW / PARTIALLY_FILLED)."""
+        def _parse(o):
+            if not isinstance(o, dict):
+                return None
+            try:
+                return {
+                    "status":       str(o.get("status") or ""),
+                    "executed_qty": float(o.get("executedQty") or 0.0),
+                    "avg_price":    float(o.get("avgPrice") or 0.0),
+                }
+            except (TypeError, ValueError):
+                return None
+
+        parsed = _parse(order)
+        if parsed and parsed["status"] == "FILLED" and parsed["executed_qty"] > 0 \
+                and parsed["avg_price"] > 0:
+            return parsed
+
+        last = parsed
+        for attempt in range(attempts):
+            try:
+                queried = self.client.query_order(
+                    symbol=self.symbol, origClientOrderId=client_order_id
+                )
+            except Exception as exc:
+                logger.warning(f"entry fill read-back failed (attempt {attempt + 1}): {exc}")
+                return last
+            q = _parse(queried)
+            if q is None:
+                return last          # not a usable order payload — stop, don't spin
+            last = q
+            if q["status"] in _UNFILLED_TERMINAL or (
+                q["status"] == "FILLED" and q["executed_qty"] > 0 and q["avg_price"] > 0
+            ):
+                return q
+            if attempt < attempts - 1:
+                time.sleep(delay)
+        return last
+
     def execute_trade(
         self,
         direction: str,
@@ -779,6 +831,13 @@ class TradeManager:
             "sl_order":    None,
             "tp_order":    None,
             "error":       None,
+            # V16 §97 (R-02): what the exchange ACTUALLY filled. Stays at
+            # these defaults (fill_confirmed=False) when the fill could not
+            # be read back — consumers must then fall back to entry_price.
+            "fill_price":     None,
+            "filled_qty":     None,
+            "fill_confirmed": False,
+            "slippage_pct":   None,   # >0 = filled worse than the signal price
         }
 
         try:
@@ -831,6 +890,33 @@ class TradeManager:
             if not entry_ord:
                 raise RuntimeError("Entry order rejected by exchange")
             result["entry_order"] = entry_ord
+
+            # V16 §97 (R-02): read back the real fill. USDS-M MARKET orders
+            # are acknowledged before they are priced, so `entry_ord` often
+            # carries no avgPrice/executedQty; the journal used to store the
+            # signal price, hiding slippage and skewing R-multiples.
+            fill = self._confirm_entry_fill(entry_ord, entry_cid)
+            if fill is not None:
+                if fill["executed_qty"] <= 0 and fill["status"] in _UNFILLED_TERMINAL:
+                    # Terminal and empty: nothing was opened, so there is
+                    # nothing to protect — placing SL would only fail.
+                    raise RuntimeError(
+                        f"Entry order not filled (status={fill['status']}); no position opened"
+                    )
+                if fill["executed_qty"] > 0 and fill["avg_price"] > 0:
+                    result["fill_price"]     = fill["avg_price"]
+                    result["filled_qty"]     = fill["executed_qty"]
+                    result["fill_confirmed"] = True
+                    sign = 1.0 if direction == "LONG" else -1.0
+                    result["slippage_pct"] = round(
+                        sign * (fill["avg_price"] - entry_price) / entry_price * 100.0, 6
+                    ) if entry_price else None
+                    if fill["executed_qty"] < qty * 0.999:
+                        logger.warning(
+                            f"Entry PARTIALLY filled: {fill['executed_qty']} of {qty} "
+                            f"{self.symbol} — SL/TP use closePosition so they cover "
+                            f"the filled part; journal records the filled qty"
+                        )
 
             # ── SL (CRITICAL — abort + close if fails) ────────────────────────
             sl_cid   = new_client_order_id("SL")

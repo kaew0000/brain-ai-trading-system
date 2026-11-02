@@ -8104,3 +8104,13 @@ and heals rows with `quantity<=0` as `CANCELLED` (exit=entry ⇒ rr 0, pnl 0). (
 
 **Dependency graph.** Unchanged (no new imports). **Tests.** `tests/test_v16_s96_failed_trade_phantom_loss.py`.
 **Open items.** See `docs/V16_BUG_AUDIT_S96.md` §3 (R-01..R-11).
+
+## 97. Real Entry Fill and Real Closed-Trade Outcome (2026-11-02)
+
+**Problem.** The journal stored the signal's price/qty (USDS-M market orders are acked before they are priced), and `monitor_open_trades()` settled WIN/LOSS from the mark price at check time with PnL ignoring commissions. Both feed RiskEngine and learning.
+
+**Change.** (1) `TradeManager._confirm_entry_fill()` reads back `status/executedQty/avgPrice` (order response if already priced, else ≤3 `query_order` polls while NEW/PARTIALLY_FILLED); `execute_trade()` adds `fill_price/filled_qty/fill_confirmed/slippage_pct`; terminal-unfilled entries abort before SL; read-back failure is non-blocking. (2) `TradeRecord.from_decision` and the orchestrator open path journal the confirmed fill. (3) `journal/exit_truth.resolve_realized_exit()` derives exit price / realized PnL / commissions from the trade's own fills, anchored on the journaled entry `order_id`; `monitor_open_trades()` prefers it and falls back to the previous heuristic when fills cannot be attributed. (4) Loop-carried variables in the monitor are initialised so a pass that only heals phantom rows no longer clears the live mission.
+
+**Dependency graph.** `main.py → journal/exit_truth.py → journal/fee_backfill._sum_commission`. No new third-party dependency.
+**Tests.** `tests/test_v16_s97_real_fill_and_exit.py`, `tests/test_execution_orchestrator.py::TestRealFillIsJournaled`.
+**Open items / limits.** `docs/V16_BUG_AUDIT_S97.md` (R-03..R-12; Binance behaviour assumptions to verify on testnet).
